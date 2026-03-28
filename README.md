@@ -29,6 +29,7 @@ Planning depth scales with complexity. **Verification never does.**
 │   ├── block-unread-edits.sh           # Blocks edits on unread files
 │   ├── clear-session-reads.sh          # Resets read tracking per session
 │   ├── require-bead-description.sh     # Enforces --description on bd create
+│   ├── wwiwo.sh                        # "What Was I Working On?" — type wwiwo? to see work status
 │   ├── workflow-reminder.sh            # Reminds to use workflow on code changes
 │   └── check-open-beads.sh            # Warns about open tasks on session end
 └── benchmarks/
@@ -69,10 +70,11 @@ After installation, restart Claude Code (or `/clear`). Then:
 
 1. **Start any task** - the workflow-orchestrator skill activates automatically
 2. **Auto-resume** - on session start, you'll be shown any in-progress or ready beads work
-3. **Follow the phases** - Claude classifies the tier and chains the right skills
-4. **Brainstorming blocks** - for Standard/Complex tiers, Claude asks questions via AskUserQuestion and waits for your answers before proceeding
-5. **After 3+ completed epics** - run `/workflow-retrospective` to analyze effectiveness
-6. **Run benchmarks** - use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
+3. **Type `wwiwo?`** - "What Was I Working On?" shows in-progress, ready, and recently closed work at any time
+4. **Follow the phases** - Claude classifies the tier and chains the right skills
+5. **Brainstorming blocks** - for Standard/Complex tiers, Claude asks questions via AskUserQuestion and waits for your answers before proceeding
+6. **After 3+ completed epics** - run `/workflow-retrospective` to analyze effectiveness
+7. **Run benchmarks** - use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
 
 ## Hooks
 
@@ -83,6 +85,7 @@ After installation, restart Claude Code (or `/clear`). Then:
 | `block-unread-edits.sh` | PreToolUse (Edit/Write) | Blocks edits on files that haven't been read first |
 | `require-bead-description.sh` | PreToolUse (Bash) | Enforces `--description` flag on `bd create` commands |
 | `track-reads.sh` | PostToolUse (Read/Grep/Glob) | Tracks which files have been read (used by block-unread-edits) |
+| `wwiwo.sh` | UserPromptSubmit (matcher: `wwiwo`) | "What Was I Working On?" — shows in-progress, ready, and recently closed work |
 | `workflow-reminder.sh` | UserPromptSubmit | Reminds Claude to use the workflow-orchestrator for code changes |
 | `check-open-beads.sh` | Stop | Warns about open beads tasks when the session ends |
 

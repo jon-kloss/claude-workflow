@@ -45,7 +45,7 @@ rmdir "$CLAUDE_DIR/skills/workflow-retrospective" 2>/dev/null || true
 echo "[2/3] Removing hooks..."
 for hook in beads-auto-resume.sh block-unread-edits.sh check-open-beads.sh \
             clear-session-reads.sh require-bead-description.sh track-reads.sh \
-            workflow-reminder.sh; do
+            wwiwo.sh workflow-reminder.sh; do
     restore_or_remove "$CLAUDE_DIR/hooks/$hook"
 done
 
