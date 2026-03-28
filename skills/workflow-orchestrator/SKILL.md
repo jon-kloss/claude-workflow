@@ -161,14 +161,21 @@ bd dep add [task-id] [epic-id] --type parent-child
 
 bd create "Tests: [Epic name]" --type feature --priority 2 \
   --design "## Goal
-MANDATORY - Epic cannot close without this task complete.
+VERIFICATION GATE - This task prevents epic auto-close.
+NEVER close this task during Phase 3 (Implementation).
+Only close in Phase 4 (Verify) after ALL verification passes.
+
+Beads auto-closes epics when all children are closed. This task
+stays open to block that until verification is complete.
 
 ## Success Criteria
 - [ ] Test files created/modified for all implementation tasks
 - [ ] All tests pass
 - [ ] Edge cases covered (empty input, error states, boundary conditions)
 - [ ] No tautological tests (each test catches a specific bug)
-- [ ] Test coverage adequate for changed code"
+- [ ] Test coverage adequate for changed code
+- [ ] Full verification suite passed (Phase 4)
+- [ ] Code review agent found no CRITICAL/IMPORTANT issues"
 bd dep add [tests-id] [epic-id] --type parent-child
 ```
 
@@ -250,6 +257,8 @@ After investigation, briefly note findings before proceeding:
 ---
 
 ## Phase 3: IMPLEMENT (TDD always. Review rigor scales.)
+
+**CRITICAL: Do NOT close the Tests task during this phase.** The Tests task is a verification gate that prevents beads from auto-closing the epic. It stays open until Phase 4 verification passes. Closing it prematurely will auto-close the epic and skip verification.
 
 ### Quick Tier Implementation
 Follow the TDD cycle directly:
@@ -566,7 +575,7 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 3. **Always investigate before writing** -> Read target files minimum. Dispatch agents for Standard+.
 4. **Always TDD** -> Tests before implementation. RED before GREEN. Every tier.
 5. **Never scale down verification** -> Full suite + code review agent. Quick tier gets same verification as Complex.
-6. **Epic cannot close with open Tests task** -> Tests are the gate. Always.
+6. **Tests task is a verification gate** -> NEVER close it during Phase 3. Beads auto-closes epics when all children close. The Tests task stays open to prevent this until Phase 4 verification passes.
 7. **Default UP on tier uncertainty** -> When unsure: Quick->Standard, Standard->Complex.
 8. **User override affects planning, not verification** -> "Just a quick fix" reduces brainstorming depth but verification stays full.
 
