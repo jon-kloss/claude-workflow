@@ -14,8 +14,9 @@ fi
 in_progress=$(bd list --status in_progress 2>/dev/null || true)
 ready=$(bd ready 2>/dev/null || true)
 
-# Strip "No issues found." responses
+# Strip empty responses (bd outputs various "nothing here" messages)
 [[ "$in_progress" == *"No issues found"* ]] && in_progress=""
+[[ "$ready" == *"No open issues"* ]] && ready=""
 [[ "$ready" == *"Ready: 0"* ]] && ready=""
 
 # If nothing found, skip
@@ -49,7 +50,7 @@ ${ready}
 fi
 
 msg+="
-**Ask the user:** \"Found existing work. Want to continue one of these, or start something new?\""
+**IMPORTANT:** Before starting new work, ask the user: \"Found existing work. Want to continue one of these, or start something new?\""
 
 # Use python to safely JSON-encode the message
 python3 -c "
