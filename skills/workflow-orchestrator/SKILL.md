@@ -344,13 +344,55 @@ Address review findings before proceeding to the next task.
 
 This phase is IDENTICAL regardless of tier. No exceptions.
 
+### MANDATORY: Log ALL verification failures as bd comments
+
+**Every verification failure in Phase 4 MUST be logged as a bd comment on the epic before returning to fix it.** This is non-negotiable — these comments are the data quality foundation that the workflow-retrospective skill depends on to measure phase effectiveness, rework rates, and error type distribution.
+
+**Format:**
+```bash
+bd comment [epic-id] "VERIFICATION FAILURE [step]: [category] - [description]
+
+Source: [which verification step caught it]
+Category: [test-failure | test-quality | code-review | criteria-gap]
+Severity: [CRITICAL | IMPORTANT | MINOR]
+Action: [returning to Phase 3 | fixing inline | deferring]"
+```
+
+**Examples:**
+```bash
+bd comment bd-42 "VERIFICATION FAILURE Step 1: test-failure - 3 unit tests failing in auth/token.test.ts
+
+Source: test-runner agent
+Category: test-failure
+Severity: CRITICAL
+Action: returning to Phase 3"
+
+bd comment bd-42 "VERIFICATION FAILURE Step 2: test-quality - tautological test in auth/login.test.ts (asserts mock returns what mock was told to return)
+
+Source: test-effectiveness-analyst agent
+Category: test-quality
+Severity: CRITICAL
+Action: returning to Phase 3"
+
+bd comment bd-42 "VERIFICATION FAILURE Step 3: code-review - endpoint missing input validation for radius parameter, allows negative values
+
+Source: code-reviewer agent
+Category: code-review
+Severity: IMPORTANT
+Action: fixing inline"
+```
+
+**Why this matters:** Without structured failure comments, the workflow-retrospective has no data to analyze. It cannot tell you which phases catch errors, what types of errors recur, or whether rework rates are improving. Log every failure, every time.
+
+---
+
 ### Step 1: Run full test suite
 ```
 Agent tool (subagent_type: hyperpowers:test-runner):
 "Run the full test suite for this project. Report only failures and summary."
 ```
 
-If tests fail: return to Phase 3 to fix. Do NOT proceed.
+If tests fail: **log as bd comment** (category: `test-failure`), then return to Phase 3 to fix. Do NOT proceed.
 
 ### Step 2: Run test effectiveness analysis
 ```
@@ -361,7 +403,7 @@ missing corner cases, and tests that don't actually catch bugs.
 Report issues categorized as CRITICAL / IMPORTANT / MINOR."
 ```
 
-If CRITICAL issues found (tautological tests, tests that prove nothing): fix before proceeding.
+If CRITICAL issues found: **log each as bd comment** (category: `test-quality`), then fix before proceeding.
 
 ### Step 3: Run code review agent
 ```
@@ -375,11 +417,11 @@ Agent tool (subagent_type: hyperpowers:code-reviewer):
 Report any issues found, categorized as CRITICAL / IMPORTANT / MINOR."
 ```
 
-If CRITICAL issues found: return to Phase 3 to fix. Do NOT proceed.
-If IMPORTANT issues found: fix them before proceeding.
-MINOR issues: note for future improvement but can proceed.
+If CRITICAL issues found: **log as bd comment** (category: `code-review`), return to Phase 3 to fix. Do NOT proceed.
+If IMPORTANT issues found: **log as bd comment** (category: `code-review`), fix before proceeding.
+MINOR issues: **log as bd comment** (category: `code-review`), note for future improvement but can proceed.
 
-**Note:** Steps 1, 2, and 3 (test-runner, test-effectiveness-analyst, and code-reviewer) should be dispatched as parallel subagents when possible, since they are independent of each other.
+**Note:** Steps 1, 2, and 3 (test-runner, test-effectiveness-analyst, and code-reviewer) should be dispatched as parallel subagents when possible, since they are independent of each other. Log all failures as bd comments AFTER agents return results.
 
 ### Step 4: Verify Tests task complete
 ```bash
@@ -397,7 +439,7 @@ Walk through EVERY success criterion. For each one:
 - Verify it is objectively met (not "probably" or "should be")
 - Note the evidence (test output, file exists, command output)
 
-If ANY criterion is not met: return to Phase 3.
+If ANY criterion is not met: **log as bd comment** (category: `criteria-gap`), return to Phase 3.
 
 ### Step 6: Final verification skill
 ```
@@ -406,8 +448,8 @@ Use Skill tool: hyperpowers:verification-before-completion
 
 ### Verification Failure Handling
 - Maximum 3 fix-verify cycles before escalating to user
-- Track each failure in beads comments: `bd comment [epic-id] "Verification failure: [description]"`
-- If stuck after 3 cycles: present the issue to user with full context
+- Every failure is already logged as a bd comment (from steps above)
+- If stuck after 3 cycles: present the issue to user with full context and link to the failure comments
 
 ---
 
@@ -623,6 +665,7 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 8. **User override affects planning, not verification** -> "Just a quick fix" reduces brainstorming depth but verification stays full.
 9. **Always use subagents** -> If an operation can run in a subagent (investigation, code review, test running, test analysis), it MUST run in a subagent. Never do manually what an agent can do. This protects context, enables parallelism, and ensures consistent quality.
 10. **Brainstorming MUST block on user answers** -> Use AskUserQuestion tool (not text). Do NOT proceed past Phase 1 until the user has answered all CRITICAL questions. Do NOT dispatch investigation agents "while waiting for answers" — that causes the agent to skip the user's input entirely.
+11. **Log every verification failure as a bd comment** -> Before returning to Phase 3 to fix anything, log a structured comment on the epic (category, severity, source, action). This is the data foundation the retrospective depends on. No comment = no data = blind optimization.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -673,6 +716,7 @@ Before claiming ANY task is complete:
 - [ ] Test effectiveness analyzed (via test-effectiveness-analyst agent)
 - [ ] Code review agent dispatched and findings addressed
 - [ ] All three verification agents dispatched in parallel where possible
+- [ ] **Every failure logged as structured bd comment on epic** (category, severity, source, action)
 - [ ] Tests task closed with evidence
 - [ ] All epic success criteria verified with evidence
 - [ ] verification-before-completion skill used
