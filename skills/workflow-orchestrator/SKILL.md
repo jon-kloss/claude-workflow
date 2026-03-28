@@ -346,6 +346,21 @@ Use Skill tool: hyperpowers:verification-before-completion
 
 ## Phase 5: CLOSE
 
+### Update README (when applicable)
+If this epic added or changed any of the following, update the README before closing:
+- New or changed features, capabilities, or behaviors
+- API changes (new endpoints, changed request/response formats, authentication)
+- UI changes (new pages, components, navigation)
+- New or changed dependencies, setup steps, or configuration
+- Changed usage patterns or examples
+
+Steps:
+1. Read the current `README.md` (if it exists)
+2. Update it to reflect the changes made in this epic
+3. If no `README.md` exists and this is a meaningful project (not a script or throwaway), create one covering: project description, setup, usage, and features
+
+Skip this step only if the epic was purely internal with no external impact (refactor with no API change, test-only changes, internal bug fix with no behavior change).
+
 ### Close beads
 ```bash
 bd close [tests-task-id]   # Tests task first (if not already closed)
