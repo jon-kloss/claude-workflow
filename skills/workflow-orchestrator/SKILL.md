@@ -4,12 +4,12 @@ description: Use for ANY task - classifies complexity into Quick/Standard/Comple
 ---
 
 <skill_overview>
-Adaptive developer workflow that classifies every task into Quick/Standard/Complex tiers and chains 5 mandatory phases. Planning depth scales with complexity; verification never does. Every task gets beads tracking, TDD, and full verification suite + code review agent.
+Adaptive developer workflow that classifies every task into Quick/Standard/Complex tiers and chains 6 mandatory phases. Planning depth scales with complexity; verification never does. Every task gets beads tracking, TDD, and full verification suite + code review agent.
 </skill_overview>
 
 <rigidity_level>
 MIXED:
-- **RIGID**: Phase 1 (Plan) and Phase 4 (Verify) are mandatory and identical across all tiers. Never skip, never scale down.
+- **RIGID**: Phase 0 (Classify), Phase 1 (Plan), and Phase 4 (Verify) are mandatory and identical across all tiers. Never skip, never scale down.
 - **RIGID**: Every epic MUST have a mandatory Tests task. Epic cannot close without it.
 - **RIGID**: Tier classification defaults UP when uncertain.
 - **FLEXIBLE**: Planning depth, investigation scope, and review checkpoints scale with tier.
@@ -22,9 +22,9 @@ MIXED:
 |---|---|---|---|
 | **Scope** | 1-2 files, <50 lines | Multi-file, clear scope | New feature, epic-level |
 | **Planning** | Beads epic + task + Tests task | Brainstorm (light) + beads epic + tasks + Tests task | Full brainstorm + SRE refinement + beads epic + Tests task |
-| **Investigation** | Read target files + Grep | codebase-investigator agent | codebase-investigator + internet-researcher (parallel) |
-| **Implementation** | TDD cycle | TDD per task via executing-plans | TDD + code-reviewer agent after each task |
-| **Verification** | **Full suite + code review agent** | **Full suite + code review agent** | **Full suite + code review agent** |
+| **Investigation** | codebase-investigator agent | codebase-investigator agent (+ internet-researcher if external APIs) | codebase-investigator + internet-researcher (parallel) |
+| **Implementation** | TDD cycle | TDD per task via executing-plans + code-reviewer agent after each task | TDD per task via executing-plans + code-reviewer agent after each task |
+| **Verification** | **Full suite + code review + test-effectiveness-analyst agents** | **Full suite + code review + test-effectiveness-analyst agents** | **Full suite + code review + test-effectiveness-analyst agents** |
 
 ## Phase Chain
 
@@ -46,6 +46,7 @@ User request
 4. TDD: tests before implementation
 5. Full verification suite + code review agent
 6. Epic cannot close with open Tests task
+7. **Always use subagents** for investigation, code review, test running, and test analysis — never do manually what an agent can do in parallel
 </quick_reference>
 
 <when_to_use>
@@ -221,19 +222,30 @@ If no Tests task exists, create one immediately. This is non-negotiable.
 **Purpose:** Understand the codebase BEFORE writing any code. This prevents the #1 correctness failure: not matching existing patterns.
 
 ### Quick Tier Investigation
-Read the target file(s) and their immediate context:
-- Use Read tool on the file(s) you'll modify
-- Use Grep to find similar patterns in nearby files
-- Check for existing conventions (naming, error handling, imports)
+Dispatch a codebase-investigator subagent (even for small changes):
+```
+Agent tool (subagent_type: hyperpowers:codebase-investigator):
+"Read [target file(s)] and find similar patterns in nearby files.
+Check: naming conventions, error handling, imports, and any existing code
+that does something similar to [description].
+Report file paths, line numbers, and patterns to follow."
+```
+This keeps investigation out of your main context and ensures consistent pattern discovery.
 
 ### Standard Tier Investigation
-Dispatch a codebase-investigator subagent:
+Dispatch a codebase-investigator subagent. If the task involves external libraries, APIs, or unfamiliar patterns, also dispatch internet-researcher in parallel:
 ```
 Agent tool (subagent_type: hyperpowers:codebase-investigator):
 "Find existing patterns for [what we're building].
 Check: similar implementations, naming conventions, error handling patterns,
 test patterns, and any existing code that does something like [description].
 Report file paths, line numbers, and patterns to follow."
+
+# If task involves external APIs, libraries, or unfamiliar patterns:
+Agent tool (subagent_type: hyperpowers:internet-researcher):
+"Research [library/API/pattern] usage.
+Find: current documentation, best practices, common pitfalls,
+and code examples relevant to [what we're building]."
 ```
 
 ### Complex Tier Investigation
@@ -288,6 +300,19 @@ Executing-plans will:
 - Run SRE refinement on new tasks
 - STOP after each task for user review
 
+After each task closes, before creating the next, dispatch code-reviewer agent:
+```
+Agent tool (subagent_type: hyperpowers:code-reviewer):
+"Review all changes made in [task-id] against:
+1. Epic requirements and anti-patterns from [epic-id]
+2. Codebase pattern consistency
+3. Edge case coverage
+4. Integration correctness
+Report any issues found."
+```
+
+Address review findings before proceeding to the next task.
+
 ### Complex Tier Implementation
 Same as Standard, plus dispatch code-reviewer agent after each task completes:
 
@@ -322,7 +347,18 @@ Agent tool (subagent_type: hyperpowers:test-runner):
 
 If tests fail: return to Phase 3 to fix. Do NOT proceed.
 
-### Step 2: Run code review agent
+### Step 2: Run test effectiveness analysis
+```
+Agent tool (subagent_type: hyperpowers:test-effectiveness-analyst):
+"Analyze all test files changed or created in this epic.
+Check for: tautological tests, coverage gaming, weak assertions,
+missing corner cases, and tests that don't actually catch bugs.
+Report issues categorized as CRITICAL / IMPORTANT / MINOR."
+```
+
+If CRITICAL issues found (tautological tests, tests that prove nothing): fix before proceeding.
+
+### Step 3: Run code review agent
 ```
 Agent tool (subagent_type: hyperpowers:code-reviewer):
 "Review ALL files changed in this epic against:
@@ -338,14 +374,16 @@ If CRITICAL issues found: return to Phase 3 to fix. Do NOT proceed.
 If IMPORTANT issues found: fix them before proceeding.
 MINOR issues: note for future improvement but can proceed.
 
-### Step 3: Verify Tests task complete
+**Note:** Steps 1, 2, and 3 (test-runner, test-effectiveness-analyst, and code-reviewer) should be dispatched as parallel subagents when possible, since they are independent of each other.
+
+### Step 4: Verify Tests task complete
 ```bash
 bd show [tests-task-id]  # Must be status: closed
 ```
 
 If Tests task is not closed: close it only if ALL test criteria are met (test files exist, tests pass, edge cases covered, no tautological tests).
 
-### Step 4: Check epic success criteria
+### Step 5: Check epic success criteria
 ```bash
 bd show [epic-id]  # Read success criteria
 ```
@@ -356,7 +394,7 @@ Walk through EVERY success criterion. For each one:
 
 If ANY criterion is not met: return to Phase 3.
 
-### Step 5: Final verification skill
+### Step 6: Final verification skill
 ```
 Use Skill tool: hyperpowers:verification-before-completion
 ```
@@ -578,6 +616,7 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 6. **Tests task is a verification gate** -> NEVER close it during Phase 3. Beads auto-closes epics when all children close. The Tests task stays open to prevent this until Phase 4 verification passes.
 7. **Default UP on tier uncertainty** -> When unsure: Quick->Standard, Standard->Complex.
 8. **User override affects planning, not verification** -> "Just a quick fix" reduces brainstorming depth but verification stays full.
+9. **Always use subagents** -> If an operation can run in a subagent (investigation, code review, test running, test analysis), it MUST run in a subagent. Never do manually what an agent can do. This protects context, enables parallelism, and ensures consistent quality.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -589,6 +628,8 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 - "The user is in a hurry" -> Skipping process creates bugs that cost more time later.
 - "This is a trivial change" -> Trivial changes with subtle bugs cause production incidents.
 - "I already know which tier this is" -> Still announce and document the classification signals.
+- "I can just read this file quickly myself" -> Use a codebase-investigator agent. Protects your context window and is more thorough.
+- "I'll review the code myself instead of dispatching an agent" -> Code review agent catches things you'll miss. Always dispatch it.
 </critical_rules>
 
 <verification_checklist>
@@ -616,14 +657,16 @@ Before claiming ANY task is complete:
 
 **Phase 4 (Verify):**
 - [ ] Full test suite passed (via test-runner agent)
+- [ ] Test effectiveness analyzed (via test-effectiveness-analyst agent)
 - [ ] Code review agent dispatched and findings addressed
+- [ ] All three verification agents dispatched in parallel where possible
 - [ ] Tests task closed with evidence
 - [ ] All epic success criteria verified with evidence
 - [ ] verification-before-completion skill used
 
 **Phase 5 (Close):**
-- [ ] Tests task closed
-- [ ] Epic closed
+- [ ] README updated if epic changed features, API, UI, dependencies, or usage (or confirmed skip with reason)
+- [ ] Epic closed (Tests task already closed in Phase 4)
 - [ ] Memory updated if learnings exist
 
 **Cannot check all boxes? Do not claim completion. Return to the incomplete phase.**
@@ -644,10 +687,11 @@ Before claiming ANY task is complete:
 | hyperpowers:executing-plans | - | Yes | Yes |
 | hyperpowers:verification-before-completion | Yes | Yes | Yes |
 | hyperpowers:finishing-a-development-branch | - | Yes | Yes |
-| codebase-investigator agent | - | Yes | Yes |
-| internet-researcher agent | - | - | Yes |
-| code-reviewer agent | Yes (verify only) | Yes (verify only) | Yes (per-task + verify) |
+| codebase-investigator agent | Yes | Yes | Yes |
+| internet-researcher agent | - | Yes (if external APIs, libraries, or unfamiliar patterns) | Yes |
+| code-reviewer agent | Yes (verify only) | Yes (per-task + verify) | Yes (per-task + verify) |
 | test-runner agent | Yes | Yes | Yes |
+| test-effectiveness-analyst agent | Yes | Yes | Yes |
 
 **This skill is called by:**
 - Session start (replaces using-hyper for task dispatch)
