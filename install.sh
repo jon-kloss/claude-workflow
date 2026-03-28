@@ -149,6 +149,15 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
           "command": "bash ${HOME}/.claude/hooks/workflow-reminder.sh"
         }
       ]
+    },
+    {
+      "matcher": "wwiwo",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/wwiwo.sh"
+        }
+      ]
     }
   ],
   "Stop": [
