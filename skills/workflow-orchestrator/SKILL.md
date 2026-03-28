@@ -21,8 +21,8 @@ MIXED:
 | | **Quick** | **Standard** | **Complex** |
 |---|---|---|---|
 | **Scope** | 1-2 files, <50 lines | Multi-file, clear scope | New feature, epic-level |
-| **Planning** | Beads epic + task + Tests task | Brainstorm (light) + beads epic + tasks + Tests task | Full brainstorm + SRE refinement + beads epic + Tests task |
-| **Investigation** | codebase-investigator agent | codebase-investigator agent (+ internet-researcher if external APIs) | codebase-investigator + internet-researcher (parallel) |
+| **Planning** | Beads epic + task + Tests task | Brainstorm (light, 1-2 Qs via AskUserQuestion, BLOCKS) + beads epic + tasks + Tests task | Full brainstorm (multi-round Qs via AskUserQuestion, BLOCKS) + SRE refinement + beads epic + Tests task |
+| **Investigation** | codebase-investigator agent | codebase-investigator agent (AFTER brainstorm answers received) | codebase-investigator + internet-researcher (AFTER brainstorm answers received) |
 | **Implementation** | TDD cycle | TDD per task via executing-plans + code-reviewer agent after each task | TDD per task via executing-plans + code-reviewer agent after each task |
 | **Verification** | **Full suite + code review + test-effectiveness-analyst agents** | **Full suite + code review + test-effectiveness-analyst agents** | **Full suite + code review + test-effectiveness-analyst agents** |
 
@@ -31,8 +31,8 @@ MIXED:
 ```
 User request
   -> Phase 0: CLASSIFY tier (Quick / Standard / Complex)
-  -> Phase 1: PLAN + create beads epic with Tests task (ALWAYS)
-  -> Phase 2: INVESTIGATE codebase (depth scales with tier)
+  -> Phase 1: PLAN + brainstorm via AskUserQuestion (BLOCKS until user answers) + create beads epic with Tests task
+  -> Phase 2: INVESTIGATE codebase (depth scales with tier) — ONLY after Phase 1 questions answered
   -> Phase 3: IMPLEMENT with TDD (review rigor scales with tier)
   -> Phase 4: VERIFY full suite + code review agent (NEVER scales down)
   -> Phase 5: CLOSE beads + update memory
@@ -191,6 +191,14 @@ Use brainstorming skill in lightweight mode (1-2 clarifying questions, not full 
 Use Skill tool: hyperpowers:brainstorming
 ```
 
+**BLOCKING REQUIREMENT: Brainstorming MUST ask questions and WAIT for answers before proceeding.**
+
+Enforcement rules for brainstorming:
+1. **Use AskUserQuestion tool** — Do NOT print questions as text. The AskUserQuestion tool blocks execution until the user responds. Text questions do not block and lead to proceeding without answers.
+2. **Do NOT dispatch investigation agents "while waiting"** — Investigation happens in Phase 2, AFTER the user has answered brainstorming questions. Dispatching codebase-investigator during brainstorming leads to the agent rationalizing that it has "enough context" to skip the user's answers.
+3. **Do NOT proceed until answers are received** — If you asked a question, you must receive and incorporate the answer before moving forward. "Making reasonable defaults for ambiguous parts" is not acceptable — if something is ambiguous, that's exactly what brainstorming questions are for.
+4. **Phase 1 is complete ONLY when the user has answered all CRITICAL questions** — The epic cannot be created until the user has confirmed the design.
+
 Brainstorming will create the beads epic with requirements, anti-patterns, and first task. After brainstorming completes, verify the epic has a Tests task. If not, create one.
 
 ### Complex Tier Planning
@@ -200,6 +208,15 @@ Use full brainstorming skill (Socratic questions, research agents, approach comp
 ```
 Use Skill tool: hyperpowers:brainstorming
 ```
+
+**BLOCKING REQUIREMENT: Full Socratic questioning is mandatory for Complex tier.**
+
+Enforcement rules (same as Standard, plus additional rigor):
+1. **Use AskUserQuestion tool** — Do NOT print questions as text. AskUserQuestion blocks execution until the user responds.
+2. **Do NOT dispatch investigation agents "while waiting"** — Investigation happens in Phase 2, AFTER brainstorming questions are answered. Premature investigation causes the agent to skip user answers.
+3. **Do NOT proceed until answers are received** — Every CRITICAL question must be answered. "Making reasonable defaults" is forbidden.
+4. **Multiple rounds of questions are expected** — Complex tasks have hidden constraints. If you only asked one round of questions, you probably missed something.
+5. **Research agents during brainstorming are for informing questions, not replacing them** — If codebase-investigator reveals the project uses passport.js, that informs what to ask the user, it doesn't eliminate the need to ask.
 
 After brainstorming creates epic and first task, run SRE refinement:
 
@@ -620,6 +637,7 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 7. **Default UP on tier uncertainty** -> When unsure: Quick->Standard, Standard->Complex.
 8. **User override affects planning, not verification** -> "Just a quick fix" reduces brainstorming depth but verification stays full.
 9. **Always use subagents** -> If an operation can run in a subagent (investigation, code review, test running, test analysis), it MUST run in a subagent. Never do manually what an agent can do. This protects context, enables parallelism, and ensures consistent quality.
+10. **Brainstorming MUST block on user answers** -> Use AskUserQuestion tool (not text). Do NOT proceed past Phase 1 until the user has answered all CRITICAL questions. Do NOT dispatch investigation agents "while waiting for answers" — that causes the agent to skip the user's input entirely.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -633,6 +651,10 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 - "I already know which tier this is" -> Still announce and document the classification signals.
 - "I can just read this file quickly myself" -> Use a codebase-investigator agent. Protects your context window and is more thorough.
 - "I'll review the code myself instead of dispatching an agent" -> Code review agent catches things you'll miss. Always dispatch it.
+- "I'll investigate while waiting for answers" -> NO. This leads to skipping answers entirely. Investigation is Phase 2, after brainstorming questions are answered in Phase 1.
+- "I'll make reasonable defaults for the ambiguous parts" -> NO. Ambiguity is exactly what brainstorming questions resolve. Use AskUserQuestion and wait.
+- "The user's description is detailed enough" -> Detailed descriptions still have hidden constraints. Always ask CRITICAL questions via AskUserQuestion.
+- "I have enough context from the codebase" -> Codebase context informs what to ask, it doesn't replace asking. The user's intent matters.
 </critical_rules>
 
 <verification_checklist>
@@ -643,6 +665,9 @@ Before claiming ANY task is complete:
 - [ ] User override respected if given
 
 **Phase 1 (Plan):**
+- [ ] Brainstorming questions asked via AskUserQuestion tool (not printed as text) — for Standard/Complex tiers
+- [ ] User answered all CRITICAL questions before proceeding
+- [ ] No investigation agents dispatched until after user answered brainstorming questions
 - [ ] Beads epic created with plan
 - [ ] Mandatory Tests task exists in epic
 - [ ] Success criteria defined and measurable
