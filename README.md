@@ -1,15 +1,16 @@
 # Adaptive Developer Workflow for Claude Code
 
-An enforced, adaptive developer workflow that classifies tasks into Quick/Standard/Complex tiers and chains 5 mandatory phases with deterministic quality gates.
+An enforced, adaptive developer workflow that classifies tasks into Quick/Standard/Complex tiers and chains 6 mandatory phases with deterministic quality gates.
 
 ## What It Does
 
 Every task goes through:
 1. **Classify** - Quick / Standard / Complex based on scope and complexity
-2. **Plan** - Always creates beads epic with mandatory Tests task
-3. **Investigate** - Read codebase before writing (depth scales with tier)
+2. **Plan** - Brainstorm via AskUserQuestion (blocks until answered), then create beads epic with mandatory Tests task
+3. **Investigate** - Read codebase before writing (depth scales with tier, only after brainstorming answers received)
 4. **Implement** - TDD always (review rigor scales with tier)
-5. **Verify** - Full test suite + code review agent (NEVER scales down)
+5. **Verify** - Full test suite + code review + test-effectiveness-analyst agents (NEVER scales down)
+6. **Close** - Close beads, update README if applicable, save learnings to memory
 
 Planning depth scales with complexity. **Verification never does.**
 
@@ -17,16 +18,19 @@ Planning depth scales with complexity. **Verification never does.**
 
 ```
 .
-├── install.sh                          # One-command installer
+├── install.sh                          # One-command installer (symlinks + backup)
+├── uninstall.sh                        # Restores originals and removes symlinks
 ├── skills/
-│   ├── workflow-orchestrator/SKILL.md  # Master workflow skill (657 lines)
-│   └── workflow-retrospective/SKILL.md # Metrics analysis skill (395 lines)
+│   ├── workflow-orchestrator/SKILL.md  # Master workflow skill
+│   └── workflow-retrospective/SKILL.md # Metrics analysis skill
 ├── hooks/
+│   ├── beads-auto-resume.sh            # Surfaces in-progress/ready work on session start
 │   ├── track-reads.sh                  # Tracks Read/Grep/Glob calls
 │   ├── block-unread-edits.sh           # Blocks edits on unread files
 │   ├── clear-session-reads.sh          # Resets read tracking per session
+│   ├── require-bead-description.sh     # Enforces --description on bd create
 │   ├── workflow-reminder.sh            # Reminds to use workflow on code changes
-│   └── check-open-beads.sh             # Warns about open tasks on session end
+│   └── check-open-beads.sh            # Warns about open tasks on session end
 └── benchmarks/
     ├── 01-quick-fix-typo.md            # Quick tier benchmark
     ├── 02-quick-add-field.md           # Quick tier benchmark
@@ -43,6 +47,7 @@ Planning depth scales with complexity. **Verification never does.**
 - [hyperpowers](https://github.com/withzombies/hyperpowers) plugin enabled
 - [beads](https://github.com/beads-project/beads) plugin enabled
 - `jq` installed (`brew install jq` or `apt install jq`)
+- `python3` available (used by beads-auto-resume hook for JSON encoding)
 
 ## Installation
 
@@ -53,8 +58,8 @@ cd ~/.claude/workflow
 ```
 
 The installer:
-- Copies skills to `~/.claude/skills/`
-- Copies hooks to `~/.claude/hooks/`
+- Symlinks skills to `~/.claude/skills/` (edits in the repo are instantly live)
+- Symlinks hooks to `~/.claude/hooks/` (same - no manual sync needed)
 - Merges hook config into `~/.claude/settings.json` (backs up first)
 - Optionally disables the superpowers plugin (recommended)
 
@@ -63,9 +68,23 @@ The installer:
 After installation, restart Claude Code (or `/clear`). Then:
 
 1. **Start any task** - the workflow-orchestrator skill activates automatically
-2. **Follow the phases** - Claude classifies the tier and chains the right skills
-3. **After 3+ completed epics** - run `/workflow-retrospective` to analyze effectiveness
-4. **Run benchmarks** - use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
+2. **Auto-resume** - on session start, you'll be shown any in-progress or ready beads work
+3. **Follow the phases** - Claude classifies the tier and chains the right skills
+4. **Brainstorming blocks** - for Standard/Complex tiers, Claude asks questions via AskUserQuestion and waits for your answers before proceeding
+5. **After 3+ completed epics** - run `/workflow-retrospective` to analyze effectiveness
+6. **Run benchmarks** - use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
+
+## Hooks
+
+| Hook | Event | What It Does |
+|------|-------|-------------|
+| `beads-auto-resume.sh` | SessionStart | Checks for in-progress/ready beads work and presents it to the user |
+| `clear-session-reads.sh` | SessionStart | Resets file read tracking so each session starts fresh |
+| `block-unread-edits.sh` | PreToolUse (Edit/Write) | Blocks edits on files that haven't been read first |
+| `require-bead-description.sh` | PreToolUse (Bash) | Enforces `--description` flag on `bd create` commands |
+| `track-reads.sh` | PostToolUse (Read/Grep/Glob) | Tracks which files have been read (used by block-unread-edits) |
+| `workflow-reminder.sh` | UserPromptSubmit | Reminds Claude to use the workflow-orchestrator for code changes |
+| `check-open-beads.sh` | Stop | Warns about open beads tasks when the session ends |
 
 ## Workflow Retrospective
 
@@ -118,21 +137,22 @@ All adjustments are **proposed, not auto-applied**. You review and approve befor
 ## Design Principles
 
 - **Verification never scales down** - Full suite + code review agent on every tier
+- **Brainstorming blocks on user answers** - AskUserQuestion tool required, no proceeding without answers
 - **Every epic has a Tests task** - Epic cannot close without it
-- **Hooks enforce, CLAUDE.md advises** - Deterministic gates, not suggestions
+- **Hooks enforce, skills advise** - Deterministic gates, not suggestions
 - **Planning scales, verification doesn't** - Quick tasks get light planning but full verification
 - **Investigate before writing** - Hook blocks edits on files you haven't read
+- **Symlinks, not copies** - Skills and hooks are symlinked so repo edits are instantly live
 
 ## Uninstall
 
-Restore the backed-up settings:
 ```bash
-# Find your backup
-ls ~/.claude/settings.json.backup.*
-# Restore it
-cp ~/.claude/settings.json.backup.YYYYMMDDHHMMSS ~/.claude/settings.json
-# Remove skills and hooks
-rm -rf ~/.claude/skills/workflow-orchestrator
-rm -rf ~/.claude/skills/workflow-retrospective
-rm -rf ~/.claude/hooks/
+cd ~/.claude/workflow
+./uninstall.sh
 ```
+
+The uninstaller:
+- Removes all skill and hook symlinks
+- Restores any original files that were backed up during install (`.pre-workflow` suffix)
+- Restores `settings.json` from its pre-workflow backup
+- Leaves the repo itself untouched

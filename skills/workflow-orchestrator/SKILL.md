@@ -67,21 +67,6 @@ User request
 
 <the_process>
 
-## Auto-Resume (when .beads/ exists)
-
-If a `.beads/` directory exists in the current working directory, check for in-progress work before classifying the new task:
-
-1. Run `bd list --status in_progress` to find actively worked-on tasks
-2. Run `bd ready` to find tasks with no blockers ready to start
-3. If in-progress or ready tasks exist, present them to the user:
-   - "Found in-progress work: [epic/task summary]. Want to continue this, or start on your new request?"
-4. If the user wants to resume: load the epic context (`bd show [epic-id]`) and pick up from the appropriate phase
-5. If the user wants to start fresh: proceed to Phase 0 with their new request
-
-This step is skipped if no `.beads/` directory exists (new project without beads).
-
----
-
 ## Phase 0: CLASSIFY
 
 **Announce:** "I'm using the workflow-orchestrator skill to classify and execute this task."

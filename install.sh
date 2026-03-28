@@ -5,14 +5,18 @@ set -euo pipefail
 # Usage: ./install.sh
 #
 # This script:
-# 1. Copies skills to ~/.claude/skills/
-# 2. Copies hooks to ~/.claude/hooks/
-# 3. Merges hook configuration into ~/.claude/settings.json
+# 1. Symlinks skills to ~/.claude/skills/ (backs up existing files first)
+# 2. Symlinks hooks to ~/.claude/hooks/ (backs up existing files first)
+# 3. Merges hook configuration into ~/.claude/settings.json (backs up first)
 # 4. Creates hook state directory
 # 5. Optionally disables superpowers plugin
+#
+# All originals are backed up with .pre-workflow suffix.
+# Run uninstall.sh to restore them.
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CLAUDE_DIR="${HOME}/.claude"
+BACKUP_SUFFIX=".pre-workflow"
 
 echo "=== Adaptive Developer Workflow Installer ==="
 echo ""
@@ -29,23 +33,35 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
-# 1. Install skills
+# Helper: back up a file before replacing it with a symlink
+# Skips if file is already a symlink (idempotent re-install)
+backup_and_link() {
+    local source="$1"
+    local target="$2"
+
+    if [ -f "$target" ] && [ ! -L "$target" ]; then
+        mv "$target" "${target}${BACKUP_SUFFIX}"
+        echo "    backed up $(basename "$target")"
+    fi
+    ln -sf "$source" "$target"
+}
+
+# 1. Install skills (symlinked so repo edits are instantly live)
 echo "[1/5] Installing skills..."
 mkdir -p "$CLAUDE_DIR/skills/workflow-orchestrator"
 mkdir -p "$CLAUDE_DIR/skills/workflow-retrospective"
-cp "$SCRIPT_DIR/skills/workflow-orchestrator/SKILL.md" "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md"
-cp "$SCRIPT_DIR/skills/workflow-retrospective/SKILL.md" "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
-echo "  - workflow-orchestrator installed"
-echo "  - workflow-retrospective installed"
+backup_and_link "$SCRIPT_DIR/skills/workflow-orchestrator/SKILL.md" "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md"
+backup_and_link "$SCRIPT_DIR/skills/workflow-retrospective/SKILL.md" "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
+echo "  - workflow-orchestrator symlinked"
+echo "  - workflow-retrospective symlinked"
 
-# 2. Install hooks
+# 2. Install hooks (symlinked so repo edits are instantly live)
 echo "[2/5] Installing hooks..."
 mkdir -p "$CLAUDE_DIR/hooks"
 for hook in "$SCRIPT_DIR"/hooks/*.sh; do
-    cp "$hook" "$CLAUDE_DIR/hooks/"
-    chmod +x "$CLAUDE_DIR/hooks/$(basename "$hook")"
+    backup_and_link "$hook" "$CLAUDE_DIR/hooks/$(basename "$hook")"
 done
-echo "  - $(ls "$SCRIPT_DIR"/hooks/*.sh | wc -l | tr -d ' ') hook scripts installed"
+echo "  - $(ls "$SCRIPT_DIR"/hooks/*.sh | wc -l | tr -d ' ') hook scripts symlinked"
 
 # 3. Create hook state directory
 echo "[3/5] Creating hook state directory..."
@@ -63,9 +79,13 @@ if [ ! -f "$SETTINGS_FILE" ]; then
     echo '{}' > "$SETTINGS_FILE"
 fi
 
-# Backup current settings
-cp "$SETTINGS_FILE" "${SETTINGS_FILE}.backup.$(date +%Y%m%d%H%M%S)"
-echo "  - Backed up current settings.json"
+# Back up settings.json (always a copy, not a rename - we still need the file)
+if [ ! -f "${SETTINGS_FILE}${BACKUP_SUFFIX}" ]; then
+    cp "$SETTINGS_FILE" "${SETTINGS_FILE}${BACKUP_SUFFIX}"
+    echo "  - Backed up settings.json"
+else
+    echo "  - settings.json backup already exists (previous install), skipping"
+fi
 
 # Define the hooks to add
 HOOKS_JSON=$(cat <<'HOOKS_EOF'
@@ -77,6 +97,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/clear-session-reads.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/beads-auto-resume.sh"
         }
       ]
     }
@@ -88,6 +112,15 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/block-unread-edits.sh"
+        }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/require-bead-description.sh"
         }
       ]
     }
@@ -158,16 +191,16 @@ echo ""
 echo "=== Installation Complete ==="
 echo ""
 echo "What was installed:"
-echo "  Skills:     ~/.claude/skills/workflow-orchestrator/SKILL.md"
-echo "              ~/.claude/skills/workflow-retrospective/SKILL.md"
-echo "  Hooks:      ~/.claude/hooks/ (5 scripts)"
+echo "  Skills:     ~/.claude/skills/workflow-orchestrator/SKILL.md (symlink)"
+echo "              ~/.claude/skills/workflow-retrospective/SKILL.md (symlink)"
+echo "  Hooks:      ~/.claude/hooks/ (7 symlinked scripts)"
 echo "  Config:     ~/.claude/settings.json (hooks added)"
 echo "  Benchmarks: $(pwd)/benchmarks/ (6 benchmarks + A/B protocol)"
+echo ""
+echo "Any existing files were backed up with a $BACKUP_SUFFIX suffix."
+echo "Run ./uninstall.sh to remove workflow and restore originals."
 echo ""
 echo "Next steps:"
 echo "  1. Restart Claude Code (or /clear) so hooks take effect"
 echo "  2. Start any task - the workflow-orchestrator skill will activate"
 echo "  3. After 3 completed epics, run /workflow-retrospective"
-echo ""
-echo "To uninstall: restore ~/.claude/settings.json from backup"
-echo "  Backups at: ~/.claude/settings.json.backup.*"
