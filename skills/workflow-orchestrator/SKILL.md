@@ -138,6 +138,7 @@ Create a beads epic with a brief plan and the mandatory Tests task:
 bd create "Epic: [Brief description of change]" \
   --type epic \
   --priority 2 \
+  --description "[WHY this epic exists and WHAT it accomplishes]" \
   --design "## Requirements
 - [What must be true when complete]
 
@@ -157,10 +158,12 @@ Then create implementation task + mandatory Tests task:
 
 ```bash
 bd create "Task: [The actual work]" --type feature --priority 2 \
+  --description "[WHY this task exists and WHAT needs to be done]" \
   --design "[Implementation details with file paths]"
 bd dep add [task-id] [epic-id] --type parent-child
 
 bd create "Tests: [Epic name]" --type feature --priority 2 \
+  --description "Verification gate for [Epic name] - ensures all tests pass and edge cases are covered before epic closes" \
   --design "## Goal
 VERIFICATION GATE - This task prevents epic auto-close.
 NEVER close this task during Phase 3 (Implementation).
@@ -476,9 +479,9 @@ Claude (without workflow-orchestrator):
 
 **Phase 1: Plan** -> Create beads epic + Tests task
 ```bash
-bd create "Epic: Fix typo in README" --type epic --priority 3
-bd create "Task: Fix 'recieve' -> 'receive' in README.md" --type feature
-bd create "Tests: Fix typo in README" --type feature  # Mandatory
+bd create "Epic: Fix typo in README" --type epic --priority 3 --description "README has a misspelling that needs correcting"
+bd create "Task: Fix 'recieve' -> 'receive' in README.md" --type feature --description "Fix the 'recieve' typo in README.md"
+bd create "Tests: Fix typo in README" --type feature --description "Verification gate for typo fix epic"  # Mandatory
 ```
 
 **Phase 2: Investigate** -> Read README, grep for other instances
