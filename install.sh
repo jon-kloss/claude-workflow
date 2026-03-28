@@ -97,7 +97,12 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/clear-session-reads.sh"
-        },
+        }
+      ]
+    },
+    {
+      "matcher": "",
+      "hooks": [
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/beads-auto-resume.sh"
