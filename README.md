@@ -67,6 +67,54 @@ After installation, restart Claude Code (or `/clear`). Then:
 3. **After 3+ completed epics** - run `/workflow-retrospective` to analyze effectiveness
 4. **Run benchmarks** - use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
 
+## Workflow Retrospective
+
+The **workflow-retrospective** skill provides a data-driven feedback loop for continuous improvement. It analyzes your completed work to find what's working and what needs tuning.
+
+### What It Measures
+
+| Metric | Target | What It Reveals |
+|--------|--------|-----------------|
+| First-pass verification rate | >80% | How often code passes verification without rework |
+| Rework rate | <20% | How often tasks need fix-verify cycles |
+| Error type distribution | - | Pattern mismatches vs edge cases vs integration failures |
+| Phase effectiveness | - | Which phases catch errors (earlier = cheaper to fix) |
+| Tier classification accuracy | <10% reclassified | Whether Quick/Standard/Complex heuristics are calibrated |
+
+### How to Run
+
+```
+/workflow-retrospective
+```
+
+The skill runs a 5-step process:
+1. **Gather** - Queries beads for closed epics, tasks, and verification failure comments
+2. **Analyze** - Calculates metrics and identifies trends
+3. **Report** - Presents a structured dashboard with tables
+4. **Propose** - Recommends specific workflow adjustments based on the data
+5. **Save** - Persists key findings to memory for cross-session awareness
+
+### When to Run
+
+- **After every epic** - quick metrics capture (5 min)
+- **Weekly during active use** - full analysis with trend detection (15 min)
+- **Monthly** - comprehensive cross-project trend analysis (30 min)
+
+### Getting Started on a New Machine
+
+The retrospective needs completed beads epics to analyze. After a fresh install:
+1. Work through 3+ epics using the workflow-orchestrator
+2. Run `/workflow-retrospective` for your first analysis
+3. The skill handles limited data gracefully - it notes data limitations and tells you when to re-run
+
+### Example Adjustments It Might Propose
+
+- Pattern mismatches >30% of errors? **Strengthen Phase 2** - require codebase-investigator for all tiers
+- Code review catches >50% of errors? **Earlier phases need strengthening** - errors should be caught sooner
+- Quick tier tasks taking >2 hours? **Recalibrate tier heuristics** - raise the bar for Quick
+
+All adjustments are **proposed, not auto-applied**. You review and approve before any workflow changes.
+
 ## Design Principles
 
 - **Verification never scales down** - Full suite + code review agent on every tier
