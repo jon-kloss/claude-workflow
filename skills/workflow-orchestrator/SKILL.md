@@ -316,6 +316,16 @@ Agent tool (subagent_type: hyperpowers:code-reviewer):
 Report any issues found."
 ```
 
+**If code-reviewer finds issues, log each as a bd comment before fixing:**
+```bash
+bd comment [epic-id] "IMPLEMENTATION REVIEW [task-id]: [category] - [description]
+
+Source: code-reviewer agent (Phase 3, per-task review)
+Category: [pattern-mismatch | edge-case | integration | code-quality]
+Severity: [CRITICAL | IMPORTANT | MINOR]
+Action: [fixing before next task]"
+```
+
 Address review findings before proceeding to the next task.
 
 ### Complex Tier Implementation
@@ -335,6 +345,8 @@ Agent tool (subagent_type: hyperpowers:code-reviewer):
 4. Integration correctness
 Report any issues found."
 ```
+
+**If code-reviewer finds issues, log each as a bd comment before fixing** (same format as Standard tier above).
 
 Address review findings before proceeding to the next task.
 
@@ -444,6 +456,16 @@ If ANY criterion is not met: **log as bd comment** (category: `criteria-gap`), r
 ### Step 6: Final verification skill
 ```
 Use Skill tool: hyperpowers:verification-before-completion
+```
+
+**If verification-before-completion reveals any issue not already logged, log it as a bd comment:**
+```bash
+bd comment [epic-id] "VERIFICATION FAILURE Step 6: [category] - [description]
+
+Source: verification-before-completion skill
+Category: [test-failure | test-quality | code-review | criteria-gap]
+Severity: [CRITICAL | IMPORTANT | MINOR]
+Action: [returning to Phase 3 | fixing inline]"
 ```
 
 ### Verification Failure Handling
@@ -710,6 +732,7 @@ Before claiming ANY task is complete:
 - [ ] Tests written before implementation (TDD)
 - [ ] Changes committed
 - [ ] Beads tasks updated/closed
+- [ ] Per-task code review findings logged as bd comments on epic (Standard/Complex tiers)
 
 **Phase 4 (Verify):**
 - [ ] Full test suite passed (via test-runner agent)
