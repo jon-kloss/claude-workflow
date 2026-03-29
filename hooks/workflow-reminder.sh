@@ -5,6 +5,9 @@ set -euo pipefail
 # Uses simple keyword matching - fast and deterministic.
 # Runs on UserPromptSubmit.
 
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/_common.sh"
+
 # Read prompt from stdin
 if ! read -t 2 -r prompt_json; then
     echo '{}'
@@ -12,7 +15,7 @@ if ! read -t 2 -r prompt_json; then
 fi
 
 # Extract prompt text
-prompt_text=$(echo "$prompt_json" | jq -r '.text // ""' 2>/dev/null || echo "")
+prompt_text=$(json_get "$prompt_json" ".text")
 
 if [ -z "$prompt_text" ]; then
     echo '{}'

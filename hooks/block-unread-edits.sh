@@ -5,6 +5,9 @@ set -euo pipefail
 # Enforces the workflow rule: investigate before writing.
 # Companion to track-reads.sh which maintains the reads log.
 
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/_common.sh"
+
 READS_DIR="${HOME}/.claude/hooks/state"
 READS_FILE="${READS_DIR}/session-reads.txt"
 
@@ -21,13 +24,16 @@ if ! read -t 2 -r tool_use_json; then
 fi
 
 # Validate JSON
-if ! echo "$tool_use_json" | jq empty 2>/dev/null; then
+if ! json_valid "$tool_use_json"; then
     echo '{}'
     exit 0
 fi
 
-# Extract the file path being edited
-file_path=$(echo "$tool_use_json" | jq -r '.tool.input.file_path // .tool_input.file_path // "null"' 2>/dev/null || echo "null")
+# Extract the file path being edited (try multiple JSON shapes)
+file_path=$(json_get "$tool_use_json" ".tool.input.file_path" "null")
+if [ "$file_path" = "null" ] || [ -z "$file_path" ]; then
+    file_path=$(json_get "$tool_use_json" ".tool_input.file_path" "null")
+fi
 
 if [ "$file_path" = "null" ] || [ -z "$file_path" ]; then
     # Can't determine file - allow (don't block on parse failures)

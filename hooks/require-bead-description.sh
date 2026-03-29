@@ -5,6 +5,9 @@ set -euo pipefail
 # Every bead needs context about WHY it exists and WHAT needs to be done.
 # Runs as PreToolUse hook on Bash commands.
 
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/_common.sh"
+
 # Read tool use event from stdin
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -12,13 +15,16 @@ if ! read -t 2 -r tool_use_json; then
 fi
 
 # Validate JSON
-if ! echo "$tool_use_json" | jq empty 2>/dev/null; then
+if ! json_valid "$tool_use_json"; then
     echo '{}'
     exit 0
 fi
 
-# Extract the bash command
-command=$(echo "$tool_use_json" | jq -r '.tool.input.command // .tool_input.command // "null"' 2>/dev/null || echo "null")
+# Extract the bash command (try multiple JSON shapes)
+command=$(json_get "$tool_use_json" ".tool.input.command" "null")
+if [ "$command" = "null" ] || [ -z "$command" ]; then
+    command=$(json_get "$tool_use_json" ".tool_input.command" "null")
+fi
 
 if [ "$command" = "null" ] || [ -z "$command" ]; then
     echo '{}'

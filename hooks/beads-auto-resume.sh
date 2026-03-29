@@ -4,6 +4,9 @@ set -euo pipefail
 # On session start, check for in-progress or ready beads work and surface it.
 # This replaces the auto-resume step that was in workflow-orchestrator Phase 1.
 
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/_common.sh"
+
 # Skip if beads not initialized in this project
 if [ ! -d ".beads" ]; then
   echo '{}'
@@ -52,9 +55,4 @@ fi
 msg+="
 **IMPORTANT:** Before starting new work, ask the user: \"Found existing work. Want to continue one of these, or start something new?\""
 
-# Use python to safely JSON-encode the message
-python3 -c "
-import json, sys
-msg = sys.stdin.read()
-print(json.dumps({'additionalContext': msg}))
-" <<< "$msg"
+json_encode_context "$msg"

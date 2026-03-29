@@ -5,11 +5,14 @@ set -euo pipefail
 # Usage: ./install.sh
 #
 # This script:
-# 1. Symlinks skills to ~/.claude/skills/ (backs up existing files first)
-# 2. Symlinks hooks to ~/.claude/hooks/ (backs up existing files first)
+# 1. Links skills to ~/.claude/skills/ (backs up existing files first)
+# 2. Links hooks to ~/.claude/hooks/ (backs up existing files first)
 # 3. Merges hook configuration into ~/.claude/settings.json (backs up first)
 # 4. Creates hook state directory
 # 5. Optionally disables superpowers plugin
+#
+# On macOS/Linux: uses symlinks (repo edits are instantly live)
+# On Windows: uses hard links (repo edits are instantly live, same drive required)
 #
 # All originals are backed up with .pre-workflow suffix.
 # Run uninstall.sh to restore them.
@@ -27,41 +30,129 @@ if [ ! -d "$CLAUDE_DIR" ]; then
     exit 1
 fi
 
-if ! command -v jq &> /dev/null; then
-    echo "ERROR: jq is required for settings.json manipulation."
-    echo "Install with: brew install jq (macOS) or apt install jq (Linux)"
+# Find a working Python 3 interpreter
+PYTHON=""
+for candidate in python3 python; do
+    if command -v "$candidate" &> /dev/null; then
+        # Verify it's actually Python 3 and executable
+        if "$candidate" -c "import sys; assert sys.version_info[0] >= 3" 2>/dev/null; then
+            PYTHON="$candidate"
+            break
+        fi
+    fi
+done
+
+if [ -z "$PYTHON" ]; then
+    echo "ERROR: Python 3 is required but not found."
+    echo "Install from https://www.python.org/downloads/"
     exit 1
 fi
 
-# Helper: back up a file before replacing it with a symlink
-# Skips if file is already a symlink (idempotent re-install)
+# Detect platform
+is_windows() {
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*|*_NT*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+if is_windows; then
+    PLATFORM="windows"
+    LINK_TYPE="hard link"
+else
+    PLATFORM="unix"
+    LINK_TYPE="symlink"
+fi
+
+echo "Detected platform: $(uname -s)"
+echo "Link mode: $LINK_TYPE"
+echo ""
+
+# Helper: create a link (symlink on unix, hard link on windows)
+make_link() {
+    local source="$1"
+    local target="$2"
+
+    if [ "$PLATFORM" = "windows" ]; then
+        # Use PowerShell to create hard links (no elevation required)
+        local win_target win_source
+        win_target="$(cygpath -w "$target")"
+        win_source="$(cygpath -w "$source")"
+        powershell -Command "New-Item -ItemType HardLink -Path '$win_target' -Target '$win_source'" > /dev/null 2>&1
+    else
+        ln -sf "$source" "$target"
+    fi
+}
+
+MANIFEST_FILE="$CLAUDE_DIR/.workflow-manifest"
+
+# Helper: check if a file was installed by us (via manifest or symlink/hard link detection)
+is_our_file() {
+    local target="$1"
+    # Symlink is always ours
+    if [ -L "$target" ]; then
+        return 0
+    fi
+    # Check manifest from previous install
+    if [ -f "$MANIFEST_FILE" ] && grep -qF "$target" "$MANIFEST_FILE" 2>/dev/null; then
+        return 0
+    fi
+    # Hard link check - file has more than 1 link count
+    if [ -f "$target" ]; then
+        local link_count
+        link_count="$(stat -c '%h' "$target" 2>/dev/null || stat -f '%l' "$target" 2>/dev/null || echo 1)"
+        if [ "$link_count" -gt 1 ]; then
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Helper: back up a file before replacing it with a link
+# Skips backup if file is already one of ours (idempotent re-install)
 backup_and_link() {
     local source="$1"
     local target="$2"
 
-    if [ -f "$target" ] && [ ! -L "$target" ]; then
-        mv "$target" "${target}${BACKUP_SUFFIX}"
-        echo "    backed up $(basename "$target")"
+    if [ -f "$target" ] || [ -L "$target" ]; then
+        if is_our_file "$target"; then
+            # Previous install - remove old file before re-creating
+            rm "$target"
+        else
+            # User's own file - back it up
+            mv "$target" "${target}${BACKUP_SUFFIX}"
+            echo "    backed up $(basename "$target")"
+        fi
     fi
-    ln -sf "$source" "$target"
+    make_link "$source" "$target"
 }
 
-# 1. Install skills (symlinked so repo edits are instantly live)
+# 1. Install skills
 echo "[1/5] Installing skills..."
 mkdir -p "$CLAUDE_DIR/skills/workflow-orchestrator"
 mkdir -p "$CLAUDE_DIR/skills/workflow-retrospective"
 backup_and_link "$SCRIPT_DIR/skills/workflow-orchestrator/SKILL.md" "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/workflow-retrospective/SKILL.md" "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
-echo "  - workflow-orchestrator symlinked"
-echo "  - workflow-retrospective symlinked"
+echo "  - workflow-orchestrator linked"
+echo "  - workflow-retrospective linked"
 
-# 2. Install hooks (symlinked so repo edits are instantly live)
+# 2. Install hooks
 echo "[2/5] Installing hooks..."
 mkdir -p "$CLAUDE_DIR/hooks"
+hook_count=0
 for hook in "$SCRIPT_DIR"/hooks/*.sh; do
     backup_and_link "$hook" "$CLAUDE_DIR/hooks/$(basename "$hook")"
+    hook_count=$((hook_count + 1))
 done
-echo "  - $(ls "$SCRIPT_DIR"/hooks/*.sh | wc -l | tr -d ' ') hook scripts symlinked"
+echo "  - $hook_count hook scripts linked"
+
+# Write manifest of installed files (used by uninstall to identify our files)
+echo "# Workflow install manifest - do not edit" > "$MANIFEST_FILE"
+echo "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md" >> "$MANIFEST_FILE"
+echo "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md" >> "$MANIFEST_FILE"
+for hook in "$SCRIPT_DIR"/hooks/*.sh; do
+    echo "$CLAUDE_DIR/hooks/$(basename "$hook")" >> "$MANIFEST_FILE"
+done
 
 # 3. Create hook state directory
 echo "[3/5] Creating hook state directory..."
@@ -174,28 +265,60 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
 HOOKS_EOF
 )
 
-# Merge hooks into settings (preserves existing hooks, adds ours)
-if jq -e '.hooks' "$SETTINGS_FILE" > /dev/null 2>&1; then
-    echo "  - Existing hooks found. Merging (existing hooks preserved)..."
-    # Deep merge: for each event, concatenate arrays
-    jq --argjson new_hooks "$HOOKS_JSON" '
-      .hooks as $existing |
-      reduce ($new_hooks | keys[]) as $event (
-        .;
-        .hooks[$event] = (($existing[$event] // []) + $new_hooks[$event])
-      )
-    ' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
-else
-    echo "  - No existing hooks. Adding hook configuration..."
-    jq --argjson hooks "$HOOKS_JSON" '.hooks = $hooks' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
-fi
+# Merge hooks into settings using python3 (cross-platform, no jq dependency)
+# Deduplicates on re-install: skips entries whose command already exists
+"$PYTHON" -c "
+import json, sys
+
+settings_path = sys.argv[1]
+new_hooks = json.loads(sys.argv[2])
+
+with open(settings_path, 'r') as f:
+    settings = json.load(f)
+
+existing_hooks = settings.get('hooks', {})
+
+# Collect all existing hook commands for deduplication
+def get_commands(entries):
+    cmds = set()
+    for entry in entries:
+        for h in entry.get('hooks', []):
+            cmds.add(h.get('command', ''))
+    return cmds
+
+# For each event, append only entries not already present
+for event, new_entries in new_hooks.items():
+    existing_entries = existing_hooks.get(event, [])
+    existing_cmds = get_commands(existing_entries)
+    for entry in new_entries:
+        entry_cmds = {h.get('command', '') for h in entry.get('hooks', [])}
+        if not entry_cmds & existing_cmds:
+            existing_entries.append(entry)
+    existing_hooks[event] = existing_entries
+
+settings['hooks'] = existing_hooks
+
+with open(settings_path, 'w') as f:
+    json.dump(settings, f, indent=2)
+" "$SETTINGS_FILE" "$HOOKS_JSON"
+
 echo "  - Hooks configured"
 
 # 5. Optionally disable superpowers
 echo ""
 read -p "[5/5] Disable superpowers plugin? (Recommended - hyperpowers covers all features) [y/N]: " disable_sp
 if [[ "$disable_sp" =~ ^[Yy]$ ]]; then
-    jq '.enabledPlugins["superpowers@claude-plugins-official"] = false' "$SETTINGS_FILE" > "${SETTINGS_FILE}.tmp" && mv "${SETTINGS_FILE}.tmp" "$SETTINGS_FILE"
+    "$PYTHON" -c "
+import json, sys
+path = sys.argv[1]
+with open(path, 'r') as f:
+    settings = json.load(f)
+plugins = settings.get('enabledPlugins', {})
+plugins['superpowers@claude-plugins-official'] = False
+settings['enabledPlugins'] = plugins
+with open(path, 'w') as f:
+    json.dump(settings, f, indent=2)
+" "$SETTINGS_FILE"
     echo "  - Superpowers disabled"
 else
     echo "  - Superpowers left as-is"
@@ -205,9 +328,9 @@ echo ""
 echo "=== Installation Complete ==="
 echo ""
 echo "What was installed:"
-echo "  Skills:     ~/.claude/skills/workflow-orchestrator/SKILL.md (symlink)"
-echo "              ~/.claude/skills/workflow-retrospective/SKILL.md (symlink)"
-echo "  Hooks:      ~/.claude/hooks/ (8 symlinked scripts)"
+echo "  Skills:     ~/.claude/skills/workflow-orchestrator/SKILL.md ($LINK_TYPE)"
+echo "              ~/.claude/skills/workflow-retrospective/SKILL.md ($LINK_TYPE)"
+echo "  Hooks:      ~/.claude/hooks/ ($hook_count scripts, $LINK_TYPE)"
 echo "  Config:     ~/.claude/settings.json (hooks added)"
 echo "  Benchmarks: $(pwd)/benchmarks/ (6 benchmarks + A/B protocol)"
 echo ""

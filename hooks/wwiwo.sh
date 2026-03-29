@@ -4,12 +4,12 @@ set -euo pipefail
 # "What Was I Working On?" — triggered by typing "wwiwo?" in the prompt.
 # Shows in-progress, ready, and recently closed beads work.
 
+HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$HOOK_DIR/_common.sh"
+
 # Skip if beads not initialized
 if [ ! -d ".beads" ]; then
-  python3 -c "
-import json
-print(json.dumps({'additionalContext': 'No .beads/ directory in this project. Run \`bd init\` to set up issue tracking.'}))
-"
+  json_encode_context 'No .beads/ directory in this project. Run `bd init` to set up issue tracking.'
   exit 0
 fi
 
@@ -64,8 +64,4 @@ fi
 msg+="
 **Present this to the user in a clear, readable format. If there is in-progress or ready work, ask which one they want to pick up.**"
 
-python3 -c "
-import json, sys
-msg = sys.stdin.read()
-print(json.dumps({'additionalContext': msg}))
-" <<< "$msg"
+json_encode_context "$msg"

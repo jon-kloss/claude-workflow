@@ -47,8 +47,8 @@ Planning depth scales with complexity. **Verification never does.**
 - [Claude Code](https://claude.ai/code) installed
 - [hyperpowers](https://github.com/withzombies/hyperpowers) plugin enabled
 - [beads](https://github.com/beads-project/beads) plugin enabled
-- `jq` installed (`brew install jq` or `apt install jq`)
-- `python3` available (used by beads-auto-resume hook for JSON encoding)
+- `python3` available (used by installer and beads-auto-resume hook)
+- A bash-compatible shell (bash on macOS/Linux, Git Bash on Windows)
 
 ## Installation
 
@@ -59,10 +59,14 @@ cd ~/.claude/workflow
 ```
 
 The installer:
-- Symlinks skills to `~/.claude/skills/` (edits in the repo are instantly live)
-- Symlinks hooks to `~/.claude/hooks/` (same - no manual sync needed)
+- Links skills to `~/.claude/skills/` (edits in the repo are instantly live)
+- Links hooks to `~/.claude/hooks/` (same - no manual sync needed)
 - Merges hook config into `~/.claude/settings.json` (backs up first)
 - Optionally disables the superpowers plugin (recommended)
+
+On macOS/Linux, symlinks are used. On Windows, hard links are used (no
+Developer Mode or Admin prompt required, but source and target must be on
+the same drive).
 
 ## Usage
 
@@ -145,7 +149,7 @@ All adjustments are **proposed, not auto-applied**. You review and approve befor
 - **Hooks enforce, skills advise** - Deterministic gates, not suggestions
 - **Planning scales, verification doesn't** - Quick tasks get light planning but full verification
 - **Investigate before writing** - Hook blocks edits on files you haven't read
-- **Symlinks, not copies** - Skills and hooks are symlinked so repo edits are instantly live
+- **Links, not copies** - Skills and hooks are linked (symlinks on macOS/Linux, hard links on Windows) so repo edits are instantly live
 
 ## Uninstall
 
