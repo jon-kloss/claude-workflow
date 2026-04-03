@@ -21,9 +21,9 @@ MIXED:
 | | **Quick** | **Standard** | **Complex** |
 |---|---|---|---|
 | **Scope** | 1-2 files, <50 lines | Multi-file, clear scope | New feature, epic-level |
-| **Planning** | Beads epic + task + Tests task | Brainstorm (light, 1-2 Qs via AskUserQuestion, BLOCKS) + beads epic + tasks + Tests task | Full brainstorm (multi-round Qs via AskUserQuestion, BLOCKS) + SRE refinement + beads epic + Tests task |
+| **Planning** | Beads epic + task + Tests task | Brainstorm (light, 1-2 Qs via AskUserQuestion, BLOCKS) + SRE refinement + beads epic + tasks + Tests task | Full brainstorm (multi-round Qs via AskUserQuestion, BLOCKS) + SRE refinement + beads epic + Tests task |
 | **Investigation** | codebase-investigator agent | codebase-investigator agent (AFTER brainstorm answers received) | codebase-investigator + internet-researcher (AFTER brainstorm answers received) |
-| **Implementation** | TDD cycle | TDD per task via executing-plans + code-reviewer agent after each task | TDD per task via executing-plans + code-reviewer agent after each task |
+| **Implementation** | TDD cycle | TDD per task via executing-plans + continuous verifier agent (gates task closure) | TDD per task via executing-plans + continuous verifier agent (gates task closure) |
 | **Verification** | **Full suite + code review + test-effectiveness-analyst agents** | **Full suite + code review + test-effectiveness-analyst agents** | **Full suite + code review + test-effectiveness-analyst agents** |
 
 ## Phase Chain
@@ -42,11 +42,14 @@ User request
 
 1. Beads epic created with plan
 2. Mandatory Tests task in every epic
-3. Codebase investigated before writing code
+3. Codebase investigated before writing code; findings logged as bd comments (Standard+)
 4. TDD: tests before implementation
 5. Full verification suite + code review agent
 6. Epic cannot close with open Tests task
 7. **Always use subagents** for investigation, code review, test running, and test analysis — never do manually what an agent can do in parallel
+8. SRE refinement on all Standard+ tasks (boundary conditions, error paths, concurrency, environment)
+9. Continuous verifier agent gates task closure on Standard+ epics
+10. VERIFICATION comment logged on every epic before closing
 </quick_reference>
 
 <when_to_use>
@@ -186,6 +189,20 @@ Enforcement rules for brainstorming:
 
 Brainstorming will create the beads epic with requirements, anti-patterns, and first task. After brainstorming completes, verify the epic has a Tests task. If not, create one.
 
+After tasks are created, run SRE refinement on each task:
+
+```
+Use Skill tool: hyperpowers:sre-task-refinement
+```
+
+SRE refinement must explicitly address:
+- **Boundary conditions**: empty inputs, first-time state, fresh/uninitialized environments
+- **Error paths**: what happens on failure mid-operation? Resource/handle cleanup?
+- **Concurrent/async edge cases**: race conditions, ordering assumptions, lifecycle timing
+- **Environment differences**: paths, OS behavior, missing config, subprocess availability
+
+**Quality minimum:** SRE refinement output must identify at least 1 edge case NOT already present in the user's description or the pattern being followed. The edge case must be specific to THIS task's domain entities and operations — not a generic infrastructure concern (database failure, network timeout, large input) that could be pasted into any SRE output. Name the specific entity, the specific state, and the specific incorrect behavior that would result. "Same as existing endpoint" is not valid SRE output. Example of a phoned-in edge case: "What if the database is unavailable?" Example of a real edge case: "What if the user has no activity yet — does the endpoint return an empty array or 404?" If SRE refinement cannot find a domain-specific novel edge case, the task scope is likely under-specified.
+
 ### Complex Tier Planning
 
 Use full brainstorming skill (Socratic questions, research agents, approach comparison):
@@ -203,11 +220,19 @@ Enforcement rules (same as Standard, plus additional rigor):
 4. **Multiple rounds of questions are expected** — Complex tasks have hidden constraints. If you only asked one round of questions, you probably missed something.
 5. **Research agents during brainstorming are for informing questions, not replacing them** — If codebase-investigator reveals the project uses passport.js, that informs what to ask the user, it doesn't eliminate the need to ask.
 
-After brainstorming creates epic and first task, run SRE refinement:
+After brainstorming creates epic and first task, run SRE refinement on each task:
 
 ```
 Use Skill tool: hyperpowers:sre-task-refinement
 ```
+
+SRE refinement must explicitly address:
+- **Boundary conditions**: empty inputs, first-time state, fresh/uninitialized environments
+- **Error paths**: what happens on failure mid-operation? Resource/handle cleanup?
+- **Concurrent/async edge cases**: race conditions, ordering assumptions, lifecycle timing
+- **Environment differences**: paths, OS behavior, missing config, subprocess availability
+
+**Quality minimum:** SRE refinement output must identify at least 1 edge case NOT already present in the user's description or the pattern being followed. "Same as existing endpoint" is not valid SRE output.
 
 Verify the epic has a Tests task. If not, create one.
 
@@ -271,6 +296,27 @@ After investigation, briefly note findings before proceeding:
 - "No existing pattern found - will establish new convention based on [research]"
 - "Discovered [unexpected finding] - adjusting plan"
 
+### MANDATORY for Standard+ Epics: Log Investigation Findings (Enforcement 3)
+
+For Standard and Complex tier epics, investigation findings MUST be logged as bd comments on the epic before proceeding to Phase 3. This creates an auditable trail of what was known before implementation began.
+
+```bash
+bd comment [epic-id] "INVESTIGATION FINDING: [what was learned]
+
+Patterns discovered:
+- [Existing patterns for the same concern — e.g., how does other code handle output, logging, error reporting?]
+- [Current conventions for naming, error handling, event emission, styling, configuration]
+- [Integration points with existing code — what interfaces does the consumer expect? What types/formats?]
+
+Decision: [How findings will influence implementation approach]"
+```
+
+**Quality minimum:** Investigation findings must reference at least 2 specific file paths with line numbers and at least 1 concrete convention or pattern discovered (not just "will follow existing pattern"). The act of writing the finding forces you to articulate what you actually learned — vague findings mean vague understanding, which leads to pattern mismatches during implementation.
+
+**Why this must be a separate artifact (not just "I investigated in my head"):** When a verification failure occurs later, the investigation log lets you distinguish three cases: (1) a known risk that was accepted, (2) an unknown the investigation missed, or (3) a known finding the implementation failed to address. Without the log, you cannot tell which failure mode occurred during post-mortem, and the retrospective cannot improve the investigation process. The code shows what you built; the log shows what you knew when you built it.
+
+**Why:** Pattern mismatches are 12% of all errors. These happen when new code uses a different convention than existing code — writing to a different output stream, matching by name when existing code matches by ID, hardcoding values when a config/theme system exists. All preventable by reading existing code first and documenting what was found.
+
 ---
 
 ## Phase 3: IMPLEMENT (TDD always. Review rigor scales.)
@@ -291,7 +337,8 @@ Use Skill tool: hyperpowers:test-driven-development
 
 Update beads task to in_progress, then close when done.
 
-### Standard Tier Implementation
+### Standard and Complex Tier Implementation
+
 Use executing-plans to work through tasks iteratively:
 
 ```
@@ -302,59 +349,124 @@ Executing-plans will:
 - Execute tasks one at a time with TDD
 - Review learnings after each task
 - Create next task based on reality
-- Run SRE refinement on new tasks
+- Run SRE refinement on new tasks (Enforcement 2)
 - STOP after each task for user review
 
-After each task closes, before creating the next, dispatch code-reviewer agent:
+#### Continuous Verifier Agent (Enforcement 7)
+
+**When the first implementation task moves to `in_progress`, spawn a background verifier agent.** The verifier persists for the duration of the epic and gates task closure.
+
+**Spawn timing:** When the first Standard+ implementation task moves to `in_progress`.
+
+**Per-task review cycle:** After writing code for a task but BEFORE `bd close`, send the verifier the following context:
+1. The git diff of all files changed by this task
+2. The bd task description and acceptance criteria (`bd show [task-id]`)
+3. The bd epic description for broader context (`bd show [epic-id]`)
+
 ```
-Agent tool (subagent_type: hyperpowers:code-reviewer):
-"Review all changes made in [task-id] against:
-1. Epic requirements and anti-patterns from [epic-id]
-2. Codebase pattern consistency
-3. Edge case coverage
-4. Integration correctness
-Report any issues found."
+Agent tool (subagent_type: hyperpowers:code-reviewer, run_in_background: false):
+"You are the CONTINUOUS VERIFIER for epic [epic-id].
+
+## Context
+- Task: [task-id] — [task title]
+- Epic: [epic-id] — [epic title]
+- Task description: [paste from bd show]
+- Epic requirements: [paste from bd show]
+
+## Git diff to review
+[paste git diff]
+
+## Review these 5 dimensions IN ORDER:
+
+### 1. Correctness against spec
+Does the code actually implement what the task description says? Are all acceptance criteria met, or are any silently skipped or stubbed?
+
+### 2. Consistency with codebase
+Does the new code follow the same patterns as existing code? Check: naming conventions, error handling style, output targets (stdout vs stderr vs logging), ID vs name usage, configuration approach (hardcoded vs config/theme system).
+Read 2-3 existing files that do similar things to compare.
+
+### 3. Edge cases and error paths
+For each new function or branch:
+- What happens with empty/nil/zero input?
+- What happens if this is called twice?
+- What happens on failure mid-operation (resource cleanup)?
+- What happens in a fresh/uninitialized environment?
+- Are error returns checked, or silently discarded?
+
+### 4. Integration soundness
+For code that connects to other components:
+- Are events/callbacks emitted at the right lifecycle point?
+- Does the consumer handle all variants the producer can emit?
+- Are there ordering assumptions that could break under concurrency?
+- Are there capacity limits (queues, buffers) that could silently drop data?
+
+### 5. Dead weight
+Is there any code in this diff that:
+- Is declared but never called?
+- Accepts config/options it doesn't act on?
+- Stubs out behavior that's exposed as functional?
+
+## For test-only or documentation-only changes
+If this task only modifies tests or documentation (no production code), skip the 5 dimensions and instead check test quality:
+- Are any tests tautological (cannot fail regardless of implementation)?
+- Do assertions check correctness, not just existence?
+- Are edge cases covered?
+
+## Output format
+Return a structured verdict:
+
+VERIFIER [task-id]: PASS | PASS_WITH_NOTES | FAIL
+
+Findings:
+- [CRITICAL] C1: <description>. Recommendation: <fix>
+- [IMPORTANT] I1: <description>. Recommendation: <fix>
+- [MINOR] M1: <description>. Recommendation: <fix>
+
+## Rules
+- Do NOT write code or make changes. Only read and review.
+- Do NOT second-guess architectural decisions from the epic design phase.
+- Do NOT block on style preferences. Findings must be tied to: correctness, consistency, edge case, integration, or dead weight.
+- Only review the diff, not the entire codebase."
 ```
 
-**If code-reviewer finds issues, log each as a bd comment before fixing:**
+**Log each finding as a bd comment on the task:**
 ```bash
-bd comment [epic-id] "IMPLEMENTATION REVIEW [task-id]: [category] - [description]
+bd comment [task-id] "VERIFIER [task-id]: [PASS|PASS_WITH_NOTES|FAIL]
 
-Source: code-reviewer agent (Phase 3, per-task review)
-Category: [pattern-mismatch | edge-case | integration | code-quality]
-Severity: [CRITICAL | IMPORTANT | MINOR]
-Action: [fixing before next task]"
+- [CRITICAL] C1: <description>. Recommendation: <fix>
+- [IMPORTANT] I1: <description>. Recommendation: <fix>
+- [MINOR] M1: <description>. Recommendation: <fix>"
 ```
 
-Address review findings before proceeding to the next task.
+#### What blocks task closure
 
-### Complex Tier Implementation
-Same as Standard, plus dispatch code-reviewer agent after each task completes:
+| Severity | Action Required |
+|---|---|
+| **CRITICAL** | Task CANNOT be closed. Fix the issue, then re-submit the diff to the verifier. Loop until no CRITICALs remain. |
+| **IMPORTANT** | Task can be closed IF the implementing agent addresses the finding OR logs a justification for deferral as a bd comment. The verifier must acknowledge the response. |
+| **MINOR** | Logged for the record. Does not block closure. |
 
-```
-Use Skill tool: hyperpowers:executing-plans
-```
+#### Verifier efficiency rules
+- Only reviews the diff per task, not the entire codebase on each pass
+- For consistency checks (dimension 2), reads at most 3 existing reference files
+- Does NOT re-review files already approved unless they were modified again
+- For Quick tier epics, the verifier is optional — the standard Phase 4 review at epic close is sufficient
 
-After each task closes, before creating the next:
-```
-Agent tool (subagent_type: hyperpowers:code-reviewer):
-"Review all changes made in [task-id] against:
-1. Epic requirements and anti-patterns from [epic-id]
-2. Codebase pattern consistency
-3. Edge case coverage
-4. Integration correctness
-Report any issues found."
-```
+**Why the verifier runs during Phase 3, not Phase 4:** Catching errors after all tasks are complete means rework cascades across dependent tasks; catching them per-task bounds the blast radius to one task. The verifier is not "verification in the wrong phase" — it is a quality gate on implementation output, analogous to a compiler error: you fix it before proceeding, not at the end. Phase 4 serves a different purpose: it reviews the composed whole, not the individual parts.
 
-**If code-reviewer finds issues, log each as a bd comment before fixing** (same format as Standard tier above).
+**Why (multi-task epics):** Code review catches 97% of errors but only at epic close, after all tasks are done. By then, early mistakes compound: later tasks build on flawed code. A continuous verifier catches issues at the task boundary, when the fix is one function not a cascade.
 
-Address review findings before proceeding to the next task.
+**Why (single-task epics):** Yes, the diff is the same for a single-task epic. No, the reviews are not redundant. The verifier runs BEFORE the Tests task is written — its findings inform what tests to write. Phase 4 runs AFTER the Tests task — it checks whether those tests are adequate. They see the same code at different points in the workflow, which means they catch different classes of issues: the verifier catches implementation bugs before tests exist; Phase 4 catches test-quality bugs after tests exist. Additionally: (1) the verifier gates task closure so that test-writing is informed by review findings, not written against potentially flawed code; (2) the verifier's 5-dimension structured review is more rigorous than the Phase 4 general review — it forces systematic per-function checking; (3) findings logged on the task create a per-task audit trail that Phase 4's epic-level comments cannot provide. Do not skip the verifier for single-task epics.
+
+**SRE re-run on modified tasks:** If a task's scope changes materially during Phase 3 (new acceptance criteria added, approach changed, scope expanded beyond original description), SRE refinement must re-run on the modified task before continuing implementation. "Material change" = the task description was updated via `bd update`.
 
 ---
 
 ## Phase 4: VERIFY (Full suite. EVERY tier. NEVER scales down.)
 
 This phase is IDENTICAL regardless of tier. No exceptions.
+
+**Phase 4 is NOT redundant with the continuous verifier (Enforcement 7).** The verifier reviews each task's diff in isolation during Phase 3. Phase 4's code reviewer sees the full epic diff and catches cross-task issues: naming inconsistencies between tasks, integration assumptions that hold per-task but break when composed, dead code left by earlier tasks that later tasks obsoleted, and emergent patterns visible only at epic scope. Both are required. If the verifier already caught everything, Phase 4 will be fast — that's a feature, not a reason to skip it.
 
 ### MANDATORY: Log ALL verification failures as bd comments
 
@@ -417,6 +529,35 @@ Report issues categorized as CRITICAL / IMPORTANT / MINOR."
 
 If CRITICAL issues found: **log each as bd comment** (category: `test-quality`), then fix before proceeding.
 
+#### Test Quality Gate (Enforcement 6)
+
+In addition to the test-effectiveness-analyst agent, apply these specific thresholds:
+
+**Tautological test** = a test that cannot fail regardless of implementation correctness:
+- Testing that a constant is non-empty
+- Testing that a builder/constructor returns a value
+- Testing that an object has the fields you just set on it
+- Testing that a function doesn't throw when called with valid input (with no assertion on the result)
+
+**Weak assertion** = checks existence or type but not correctness (e.g., `!= nil` instead of `== expectedValue`)
+
+**Manual review procedure (required even when agent finds 0 issues):**
+Open each test file changed in this epic and spot-check at least 3 test functions against the tautological/weak-assertion definitions above. For each, ask: "What specific bug would this catch? Could production code break while this test passes?" If you cannot name a specific failure mode, the test is suspect. The test-effectiveness-analyst agent catches patterns; manual review catches individual tests the agent may have classified too generously.
+
+**Output requirement:** Log the manual review as a bd comment on the epic. For each spot-checked test, name the test function, the specific bug it would catch, and your verdict (PASS/SUSPECT). Example: `test_nearby_returns_empty_for_zero_radius` — catches: radius=0 returns empty instead of all results — PASS. If any test is SUSPECT, it becomes a test-quality finding.
+
+**Thresholds:**
+- **3+ tautological tests in one epic = CRITICAL** `test-quality` finding
+- Log with structured format:
+```bash
+bd comment [epic-id] "VERIFICATION Phase 4: test-quality - [count] tautological tests (RED): [list]. [count] YELLOW tests with weak assertions.
+
+Source: test-effectiveness-analyst agent + manual review
+Category: test-quality
+Severity: CRITICAL
+Action: returning to Phase 3 to replace tautological tests with meaningful ones"
+```
+
 ### Step 3: Run code review agent
 ```
 Agent tool (subagent_type: hyperpowers:code-reviewer):
@@ -432,6 +573,48 @@ Report any issues found, categorized as CRITICAL / IMPORTANT / MINOR."
 If CRITICAL issues found: **log as bd comment** (category: `code-review`), return to Phase 3 to fix. Do NOT proceed.
 If IMPORTANT issues found: **log as bd comment** (category: `code-review`), fix before proceeding.
 MINOR issues: **log as bd comment** (category: `code-review`), note for future improvement but can proceed.
+
+#### Integration Point Verification (Enforcement 4)
+
+When the epic touches multiple modules/packages/services or connects components that communicate via events, channels, callbacks, or shared interfaces, the code review agent prompt MUST include this explicit integration checklist:
+
+```
+Additionally, check these integration points:
+- Events/signals are emitted at the correct lifecycle point (not before preconditions are met)
+- Buffers, queues, and channels have sufficient capacity or overflow behavior is documented and acceptable
+- Consumer code handles all variants/states the producer can emit
+- State transitions are complete (no dead variables that promise behavior they don't deliver)
+```
+
+Any integration finding gets logged with category `integration`.
+
+**Why:** Integration failures are 15% of all errors. Examples: events firing before preconditions were met, bounded queues silently dropping messages, state clearing that breaks downstream consumers, displays that render once but never update.
+
+#### Dead Code / Stale Assumption Check (Enforcement 5)
+
+During Phase 4 verification, explicitly scan for dead code, unused variables, and config/API surface that promises behavior it doesn't deliver:
+
+1. Run the project's linter with all warnings enabled and treat warnings as findings
+2. Specifically look for:
+   - Config fields, options, or parameters that are parsed/accepted but never acted on
+   - Variables assigned but never used in the intended way
+   - Stub implementations that are exposed as if functional (e.g., a handler that accepts input but does nothing)
+   - Public API surface that implies capabilities that aren't wired up
+
+**Dead config/API that promises safety or correctness behavior it doesn't deliver is CRITICAL severity.**
+
+```bash
+bd comment [epic-id] "VERIFICATION Phase 4: code-review - Dead config: [field/option] is accepted but never acted on. Users may rely on behavior that doesn't exist.
+
+Source: dead code scan (Phase 4)
+Category: code-review
+Severity: CRITICAL
+Action: [wire up the behavior | remove the config surface | document as not-yet-implemented]"
+```
+
+**Note: Enforcement 5 is NOT satisfied by the continuous verifier's Dimension 5.** The verifier checks dead weight per-task diff. But cross-task dead code — a function added in task 1 whose usage is removed or changed in task 3, or config surface that was wired up in one task but silently unwired by a later task — is only visible in a full-project scan at epic scope. Both are required; they catch different things.
+
+**Why:** Stale assumptions / dead code account for 9% of errors. The worst case is a config option or API parameter that promises behavior (like error cancellation or resource limits) but is never wired up. This applies equally to new code: new features often implement the data model before the behavior, leaving config surface that promises functionality it doesn't yet deliver.
 
 **Note:** Steps 1, 2, and 3 (test-runner, test-effectiveness-analyst, and code-reviewer) should be dispatched as parallel subagents when possible, since they are independent of each other. Log all failures as bd comments AFTER agents return results.
 
@@ -492,10 +675,28 @@ Steps:
 
 Skip this step only if the epic was purely internal with no external impact (refactor with no API change, test-only changes, internal bug fix with no behavior change).
 
+### MANDATORY: Log Verification Comment Before Closing (Enforcement 1)
+
+Before closing the epic, verify that at least one bd comment containing the word "VERIFICATION" exists on the epic. If Phase 4 found issues, each should already be logged. If Phase 4 found NO issues, you MUST add a pass comment:
+
+```bash
+bd comment [epic-id] "VERIFICATION Phase 4: PASSED — no issues found"
+```
+
+If verification found issues, each finding should already have its own comment with this format:
+```bash
+bd comment [epic-id] "VERIFICATION Phase 4: [category] - [SEVERITY] [ID]: [description]. Action: [action taken]"
+```
+
+Categories: `code-review`, `test-quality`, `integration`
+Severities: `CRITICAL`, `IMPORTANT`, `MINOR`
+
+**This is non-negotiable.** Without verification comments, retrospectives have no data. 67% of past epics had no verification comments logged.
+
 ### Close beads
 ```bash
 bd close [tests-task-id]   # Tests task first (if not already closed)
-bd close [epic-id]          # Then epic
+bd close [epic-id]          # Then epic (ONLY after verification comment exists)
 ```
 
 ### Update memory
@@ -688,6 +889,13 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 9. **Always use subagents** -> If an operation can run in a subagent (investigation, code review, test running, test analysis), it MUST run in a subagent. Never do manually what an agent can do. This protects context, enables parallelism, and ensures consistent quality.
 10. **Brainstorming MUST block on user answers** -> Use AskUserQuestion tool (not text). Do NOT proceed past Phase 1 until the user has answered all CRITICAL questions. Do NOT dispatch investigation agents "while waiting for answers" — that causes the agent to skip the user's input entirely.
 11. **Log every verification failure as a bd comment** -> Before returning to Phase 3 to fix anything, log a structured comment on the epic (category, severity, source, action). This is the data foundation the retrospective depends on. No comment = no data = blind optimization.
+12. **Log a VERIFICATION comment on every epic close** (Enforcement 1) -> Even when verification passes with no issues, log "VERIFICATION Phase 4: PASSED — no issues found" before closing. 67% of past epics had no verification comments — retrospectives are blind without this trail.
+13. **SRE refinement on all Standard+ tasks** (Enforcement 2) -> Run `hyperpowers:sre-task-refinement` on every task in Standard and Complex tier epics. Must address: boundary conditions, error paths, concurrent/async edge cases, environment differences. Edge cases are 30% of all errors.
+14. **Log investigation findings on Standard+ epics** (Enforcement 3) -> Before implementation, log `INVESTIGATION FINDING:` comments on the epic documenting patterns, conventions, and integration points discovered. Pattern mismatches are 12% of all errors.
+15. **Integration point checklist for cross-module tasks** (Enforcement 4) -> Phase 4 code review must explicitly check: event lifecycle timing, buffer/queue capacity, consumer-producer variant coverage, and state transition completeness. Integration failures are 15% of all errors.
+16. **Dead code / stale assumption scan** (Enforcement 5) -> Phase 4 must scan for config/API surface that promises behavior it doesn't deliver. Dead config promising nonexistent safety behavior = CRITICAL. Stale assumptions are 9% of errors.
+17. **Test quality gate with thresholds** (Enforcement 6) -> 3+ tautological tests in one epic = CRITICAL. Flag weak assertions that check existence but not correctness.
+18. **Continuous verifier agent for Standard+ epics** (Enforcement 7) -> Spawn background verifier when first implementation task starts. Reviews 5 dimensions per task. CRITICAL findings block task closure. Catches errors at task boundary instead of at epic close.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -705,6 +913,12 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 - "I'll make reasonable defaults for the ambiguous parts" -> NO. Ambiguity is exactly what brainstorming questions resolve. Use AskUserQuestion and wait.
 - "The user's description is detailed enough" -> Detailed descriptions still have hidden constraints. Always ask CRITICAL questions via AskUserQuestion.
 - "I have enough context from the codebase" -> Codebase context informs what to ask, it doesn't replace asking. The user's intent matters.
+- "The old workflow worked fine without these enforcements" -> Those epics may have had undetected errors the retrospective couldn't measure BECAUSE E1-E3 were not in place. Prior success without enforcement does not validate skipping enforcement — it means you were flying blind.
+- "The user says this component is well-tested" -> User assertions about existing code quality do not reduce verification requirements for new integration code. The user is telling you about THEIR code; you are verifying YOUR code's interaction with it.
+- "These enforcements were written for a specific project" -> The error categories (pattern mismatch, edge case, integration, stale assumption, test quality) are universal. The specific percentages come from retrospective data, but every codebase has these failure modes. The enforcements apply to all projects.
+- "The continuous verifier already covered this in Phase 3" -> The verifier checks per-task diffs in isolation. Phase 4 checks the full epic diff and cross-task interactions. A function added in task 1 and silently broken by task 3 is invisible to the verifier but visible to Phase 4. Both are required; they catch different things.
+- "SRE refinement will just say 'same as existing pattern'" -> That is not valid SRE output. Even pattern-following tasks have unique edge cases. If SRE cannot find a novel edge case, the task is under-specified, not over-refined.
+- "Investigation findings are obvious, logging them is ceremony" -> The log is not for you now — it is for post-mortem later. When a verification failure occurs, the log lets you distinguish: was this a known risk, an investigation miss, or an implementation failure? Without the log, you cannot tell. If findings feel obvious, they should be fast to write — not a reason to skip.
 </critical_rules>
 
 <verification_checklist>
@@ -722,22 +936,29 @@ Before claiming ANY task is complete:
 - [ ] Mandatory Tests task exists in epic
 - [ ] Success criteria defined and measurable
 - [ ] Anti-patterns defined (for Standard/Complex)
+- [ ] SRE refinement run on all tasks (Standard/Complex — Enforcement 2)
 
 **Phase 2 (Investigate):**
 - [ ] Target files read before any edits
 - [ ] Existing patterns identified
 - [ ] Investigation findings noted
+- [ ] Investigation findings logged as bd comments on epic (Standard/Complex — Enforcement 3)
 
 **Phase 3 (Implement):**
 - [ ] Tests written before implementation (TDD)
 - [ ] Changes committed
 - [ ] Beads tasks updated/closed
-- [ ] Per-task code review findings logged as bd comments on epic (Standard/Complex tiers)
+- [ ] Continuous verifier agent spawned for Standard/Complex (Enforcement 7)
+- [ ] Each task reviewed by verifier BEFORE bd close — CRITICAL findings block closure
+- [ ] Verifier findings logged as bd comments on tasks
 
 **Phase 4 (Verify):**
 - [ ] Full test suite passed (via test-runner agent)
 - [ ] Test effectiveness analyzed (via test-effectiveness-analyst agent)
+- [ ] Test quality gate applied: 3+ tautological tests = CRITICAL (Enforcement 6)
 - [ ] Code review agent dispatched and findings addressed
+- [ ] Integration point checklist included for cross-module tasks (Enforcement 4)
+- [ ] Dead code / stale assumption scan completed (Enforcement 5)
 - [ ] All three verification agents dispatched in parallel where possible
 - [ ] **Every failure logged as structured bd comment on epic** (category, severity, source, action)
 - [ ] Tests task closed with evidence
@@ -745,6 +966,7 @@ Before claiming ANY task is complete:
 - [ ] verification-before-completion skill used
 
 **Phase 5 (Close):**
+- [ ] VERIFICATION comment logged on epic — either PASSED or structured findings (Enforcement 1)
 - [ ] README updated if epic changed features, API, UI, dependencies, or usage (or confirmed skip with reason)
 - [ ] Epic closed (Tests task already closed in Phase 4)
 - [ ] Memory updated if learnings exist
@@ -762,14 +984,14 @@ Before claiming ANY task is complete:
 | Skill / Agent | Quick | Standard | Complex |
 |---|---|---|---|
 | hyperpowers:brainstorming | - | Light | Full |
-| hyperpowers:sre-task-refinement | - | - | Yes |
+| hyperpowers:sre-task-refinement | - | Yes (Enforcement 2) | Yes |
 | hyperpowers:test-driven-development | Yes | Via executing-plans | Via executing-plans |
 | hyperpowers:executing-plans | - | Yes | Yes |
 | hyperpowers:verification-before-completion | Yes | Yes | Yes |
 | hyperpowers:finishing-a-development-branch | - | Yes | Yes |
 | codebase-investigator agent | Yes | Yes | Yes |
 | internet-researcher agent | - | Yes (if external APIs, libraries, or unfamiliar patterns) | Yes |
-| code-reviewer agent | Yes (verify only) | Yes (per-task + verify) | Yes (per-task + verify) |
+| code-reviewer agent | Yes (verify only) | Yes (continuous verifier + verify) | Yes (continuous verifier + verify) |
 | test-runner agent | Yes | Yes | Yes |
 | test-effectiveness-analyst agent | Yes | Yes | Yes |
 
