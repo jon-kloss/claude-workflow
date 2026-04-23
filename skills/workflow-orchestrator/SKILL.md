@@ -517,6 +517,8 @@ bd create "Epic: [Brief description]" \
   --design "Spec: specs/<feature-slug>.md"
 ```
 
+**After generating spec files, reconcile plan.md:** Update the plan.md acceptance checks to reference the spec files (see "Reconcile plan.md with Specs" in Phase 3). Behavioral acceptance criteria belong in the spec scenarios, not duplicated in plan.md.
+
 After brainstorming creates the epic and first task, verify the epic has a Tests task. If not, create one.
 
 After tasks are created, run SRE refinement on each task:
@@ -592,6 +594,8 @@ bd create "Epic: [Brief description]" \
 - specs/<feature-2>.md
 - specs/<feature-3>.md"
 ```
+
+**After generating spec files, reconcile plan.md:** Update the plan.md acceptance checks to reference the spec files (see "Reconcile plan.md with Specs" in Phase 3). Behavioral acceptance criteria belong in the spec scenarios, not duplicated in plan.md.
 
 After brainstorming creates epic and first task, run SRE refinement on each task:
 
@@ -721,6 +725,35 @@ Decision: [How findings will influence implementation approach]"
 ## Phase 3: IMPLEMENT (TDD always. Review rigor scales.)
 
 **CRITICAL: Do NOT close the Tests task during this phase.** The Tests task is a verification gate that prevents beads from auto-closing the epic. It stays open until Phase 4 verification passes. Closing it prematurely will auto-close the epic and skip verification.
+
+### Reconcile plan.md with Specs (Standard/Complex Tiers)
+
+The brainstorming skill creates `plans/active/<slug>/plan.md` with its own "acceptance checks" section. After generating Gherkin spec files, **update plan.md so its acceptance checks reference the specs rather than duplicating behavioral details.**
+
+The specs define WHAT the feature does (scenarios, technical context). The plan.md defines WHY this approach was chosen (problem, goals, anti-goals, rejected alternatives). Do not duplicate behavioral acceptance criteria in both places — the specs are the source of truth for behavior.
+
+**After generating spec files, update plan.md acceptance checks:**
+
+```markdown
+## Acceptance Checks
+- [ ] All scenarios in specs/<feature-slug>.md implemented and passing
+- [ ] Spec coverage check passes in Phase 4 (every scenario has code + test)
+- [ ] [Any NON-behavioral acceptance criteria that don't belong in specs]
+- [ ] All tests passing
+- [ ] Pre-commit hooks passing
+```
+
+**What stays in plan.md** (not in specs):
+- Problem statement, goals, anti-goals, constraints
+- Research notes and sources
+- Chosen approach and rejected alternatives
+- Process-level acceptance (tests passing, hooks passing, README updated)
+
+**What moves to specs** (not duplicated in plan.md):
+- Feature behavior (Given/When/Then scenarios)
+- Edge cases and error handling
+- API contracts and data structures
+- Business rules
 
 ### Living Spec Updates (All Tiers)
 
