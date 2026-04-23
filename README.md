@@ -6,11 +6,11 @@ An enforced, adaptive developer workflow that classifies tasks into Quick/Standa
 
 Every task goes through:
 1. **Classify** - Quick / Standard / Complex based on scope and complexity
-2. **Plan** - Brainstorm via AskUserQuestion (blocks until answered), then create beads epic with mandatory Tests task
-3. **Investigate** - Read codebase before writing (depth scales with tier, only after brainstorming answers received)
-4. **Implement** - TDD always (review rigor scales with tier)
-5. **Verify** - Full test suite + code review + test-effectiveness-analyst agents (NEVER scales down)
-6. **Close** - Close beads, update README if applicable, save learnings to memory
+2. **Plan** - Brainstorm via AskUserQuestion (blocks until answered), generate Gherkin spec files in `specs/`, create beads epic referencing specs
+3. **Investigate** - Read specs and codebase before writing (depth scales with tier, only after brainstorming answers received)
+4. **Implement** - Spec-driven TDD always: generate failing tests from spec scenarios (RED), implement to pass (GREEN), refactor. Update specs as living docs.
+5. **Verify** - Full test suite + code review + spec scenario coverage check + test-effectiveness-analyst agents (NEVER scales down)
+6. **Close** - Update spec status to verified, close beads, update README if applicable, save learnings to memory
 
 Planning depth scales with complexity. **Verification never does.**
 
@@ -80,6 +80,76 @@ After installation, restart Claude Code (or `/clear`). Then:
 6. **After 3+ completed epics** - run `/workflow-retrospective` to analyze effectiveness
 7. **Run benchmarks** - use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
 
+## Gherkin Spec Files
+
+The workflow generates Gherkin-style Markdown spec files in `specs/` during the planning phase. These specs are the **source of truth** for design intent — beads epics link to them, they don't contain inline requirements.
+
+### Format
+
+Specs use Markdown Gherkin: `#` headings for keywords, `- ` bullet lists for steps, `@tags` for metadata.
+
+```markdown
+@status(draft)
+@api @breweries
+
+# Feature: Nearby Breweries Endpoint
+
+As an API consumer
+I want to query breweries by location
+So that I can find nearby breweries for a given coordinate
+
+## Technical Context
+
+- **Endpoint**: GET /api/breweries/nearby
+- **Parameters**: lat (float), lng (float), radius (integer, miles)
+- **Response**: Array of Brewery objects sorted by distance
+
+## Rule: Valid coordinates return nearby results
+
+### Scenario: Successful nearby query
+
+- Given breweries exist within 10 miles of coordinates 40.7128, -74.0060
+- When I GET /api/breweries/nearby?lat=40.7128&lng=-74.0060&radius=10
+- Then I receive a 200 response
+- And the response contains breweries sorted by distance
+```
+
+### Spec Types
+
+| Type | File | When |
+|------|------|------|
+| **System spec** | `specs/system.md` | Greenfield projects and major architectural changes. Captures tech stack, data model, feature map, API conventions. |
+| **Feature spec** | `specs/<feature-slug>.md` | Every feature. Self-contained with `@depends-on`/`@blocks` tags for cross-feature relationships. |
+
+### Tags
+
+| Tag | Purpose |
+|-----|---------|
+| `@status(draft\|approved\|implemented\|verified)` | Lifecycle tracking |
+| `@depends-on(feature-slug)` | This feature requires another feature |
+| `@blocks(feature-slug)` | Another feature depends on this one |
+| `@system` | Marks the system-level spec |
+| Custom: `@auth`, `@api`, `@ui`, etc. | Domain categorization |
+
+### Tier Scaling
+
+| Tier | Spec Complexity |
+|------|----------------|
+| **Quick** | Feature + 1-3 Scenarios. No Rules, no Background. |
+| **Standard** | Feature + As/I want/So that + Technical Context + Rules + Background + Scenarios. |
+| **Complex** | Multiple spec files with `@depends-on`/`@blocks`. System spec required for greenfield. Scenario Outlines with Examples tables. |
+
+### Lifecycle
+
+1. **Draft** (`@status(draft)`) — Generated during Phase 1 (Plan)
+2. **Approved** (`@status(approved)`) — After user confirms design (Standard+)
+3. **Implemented** (`@status(implemented)`) — Updated during Phase 3 as edge cases discovered
+4. **Verified** (`@status(verified)`) — After Phase 4 verification passes
+
+### Greenfield Rebuild
+
+For greenfield projects, the complete set of specs in `specs/` must be sufficient to **rebuild the entire application from scratch**. The system spec + feature specs + dependency graph collectively capture everything needed: architecture, data models, API contracts, and all feature behaviors.
+
 ## Hooks
 
 | Hook | Event | What It Does |
@@ -143,7 +213,11 @@ All adjustments are **proposed, not auto-applied**. You review and approve befor
 
 ## Design Principles
 
-- **Verification never scales down** - Full suite + code review agent on every tier
+- **Specs are the source of truth** - Gherkin spec files in `specs/` define what to build; beads tracks who's doing it and when
+- **Specs enable full rebuild** - For greenfield projects, specs capture enough detail (architecture, data model, API contracts, behaviors) to reconstruct the entire app
+- **Specs are living documents** - Updated during implementation as edge cases are discovered, not frozen after planning
+- **Spec-driven TDD** - Tests are generated FROM spec scenarios before implementation. Each scenario becomes a failing test (RED), then implementation makes it pass (GREEN). No exceptions across all tiers.
+- **Verification never scales down** - Full suite + code review agent + spec coverage check on every tier
 - **Brainstorming blocks on user answers** - AskUserQuestion tool required, no proceeding without answers
 - **Every epic has a Tests task** - Epic cannot close without it
 - **Hooks enforce, skills advise** - Deterministic gates, not suggestions

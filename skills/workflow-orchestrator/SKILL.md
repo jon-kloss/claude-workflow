@@ -52,6 +52,299 @@ User request
 10. VERIFICATION comment logged on every epic before closing
 </quick_reference>
 
+<gherkin_spec_reference>
+## Gherkin Spec Files
+
+Every task generates a Gherkin-style Markdown spec file in the project's `specs/` directory during Phase 1. These specs are the **source of truth** for design intent — beads epics link to specs, they do not contain inline requirements.
+
+### Format
+
+Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists for steps, `@tags` at the top of the file.
+
+### Tags
+
+- `@status(draft|approved|implemented|verified)` — lifecycle tracking (required on every spec)
+- `@depends-on(feature-slug)` — this feature requires another feature to be implemented first
+- `@blocks(feature-slug)` — another feature depends on this one
+- Custom domain tags: `@auth`, `@api`, `@ui`, `@security`, etc. — categorization
+
+### Greenfield Rebuild Principle
+
+For greenfield projects, the complete set of specs in `specs/` must be **sufficient to rebuild the entire application from scratch**. An agent or developer reading only the specs should understand:
+- What the system is and why it exists (system spec)
+- The tech stack, data model, and architecture (system spec)
+- Every feature's behavior, edge cases, and integration points (feature specs)
+- The build order via `@depends-on` dependency chains
+
+This is achieved through two spec types:
+
+1. **System spec** (`specs/system.md`) — Required for greenfield and major architectural changes. Describes the application as a whole: purpose, tech stack, data model, deployment, and a feature map showing how all features relate.
+
+2. **Feature specs** (`specs/<feature-slug>.md`) — One per feature. Self-contained but linked via `@depends-on`/`@blocks` tags. Must include enough technical detail (data shapes, API contracts, integration points) that someone could implement the feature given only the spec and the system spec.
+
+### System Spec Template (Greenfield / Architectural Changes)
+
+```markdown
+@status(draft)
+@system
+
+# System: [Application Name]
+
+[What this application is and why it exists — 2-3 sentences]
+
+## Tech Stack
+
+- **Runtime**: [e.g., Node.js 20, Python 3.12]
+- **Framework**: [e.g., Express, FastAPI, Next.js]
+- **Database**: [e.g., PostgreSQL 16, SQLite]
+- **Auth**: [e.g., JWT, session-based, OAuth2]
+- **Deployment**: [e.g., Docker, Vercel, bare metal]
+- **Testing**: [e.g., Jest, pytest, Go test]
+
+## Data Model
+
+### [Entity Name]
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| id | UUID | primary key |
+| name | string | required, max 255 |
+| created_at | timestamp | default now() |
+
+### [Entity Name]
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| ... | ... | ... |
+
+### Relationships
+
+- [Entity A] has many [Entity B]
+- [Entity B] belongs to [Entity A]
+- [Entity C] has one [Entity D]
+
+## Feature Map
+
+| Feature | Spec | Dependencies | Priority |
+|---------|------|--------------|----------|
+| User Registration | user-registration.md | (none) | P0 |
+| User Authentication | user-authentication.md | user-registration | P0 |
+| User Profile | user-profile.md | user-authentication | P1 |
+| Payment Processing | payment-processing.md | user-authentication | P1 |
+
+## API Overview
+
+- Base URL: `/api/v1`
+- Auth: Bearer token in Authorization header
+- Response format: JSON with `{ data, error, meta }` envelope
+- Error format: `{ error: { code, message, details } }`
+
+## Non-Functional Requirements
+
+### Scenario: Response time under load
+
+- Given 100 concurrent users
+- When they make API requests
+- Then 95th percentile response time is under 200ms
+
+### Scenario: Data persistence
+
+- Given the application restarts
+- When a user returns
+- Then all their data is intact
+```
+
+### Tier-Scaled Templates
+
+**Quick Tier** — Feature + 1-3 Scenarios. No Rules, no Background.
+
+```markdown
+@status(draft)
+
+# Feature: Fix typo in README
+
+Correct the misspelling 'recieve' to 'receive' across the project.
+
+## Scenario: All instances are corrected
+
+- Given the project contains the misspelling 'recieve'
+- When the fix is applied
+- Then all instances of 'recieve' are replaced with 'receive'
+- And no other text is modified
+```
+
+**Standard Tier** — Feature + As/I want/So that + Technical Context + Rules + Background + multiple Scenarios.
+
+```markdown
+@status(draft)
+@api @breweries
+
+# Feature: Nearby Breweries Endpoint
+
+As an API consumer
+I want to query breweries by location
+So that I can find nearby breweries for a given coordinate
+
+## Technical Context
+
+- **Endpoint**: GET /api/breweries/nearby
+- **Parameters**: lat (float, required), lng (float, required), radius (integer, miles, default 10, max 100)
+- **Response**: Array of Brewery objects sorted by distance ascending
+- **Auth**: None (public endpoint)
+
+### Response Shape
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | Brewery identifier |
+| name | string | Brewery name |
+| distance | float | Miles from query point |
+| lat | float | Brewery latitude |
+| lng | float | Brewery longitude |
+
+## Background
+
+- Given the brewery database is populated
+- And the API server is running
+
+## Rule: Valid coordinates return nearby results
+
+### Scenario: Successful nearby query
+
+- Given breweries exist within 10 miles of coordinates 40.7128, -74.0060
+- When I GET /api/breweries/nearby?lat=40.7128&lng=-74.0060&radius=10
+- Then I receive a 200 response
+- And the response contains breweries sorted by distance
+
+### Scenario: No results within radius
+
+- Given no breweries exist within 1 mile of coordinates 0.0, 0.0
+- When I GET /api/breweries/nearby?lat=0.0&lng=0.0&radius=1
+- Then I receive a 200 response
+- And the response contains an empty array
+
+## Rule: Invalid input is rejected
+
+### Scenario: Missing required parameters
+
+- Given I omit the lat parameter
+- When I GET /api/breweries/nearby?lng=-74.0060&radius=10
+- Then I receive a 400 response
+- And the error message indicates lat is required
+
+### Scenario: Negative radius
+
+- Given a valid coordinate
+- When I GET /api/breweries/nearby?lat=40.7128&lng=-74.0060&radius=-5
+- Then I receive a 400 response
+- And the error message indicates radius must be positive
+```
+
+**Complex Tier** — Multiple spec files with `@depends-on`/`@blocks` cross-references. Full Gherkin structure including Scenario Outlines, Examples tables, and detailed technical context. For greenfield projects, always generate a `specs/system.md` first.
+
+```markdown
+@status(draft)
+@auth @security @mvp
+@depends-on(user-registration)
+@blocks(payment-processing)
+@blocks(user-profile)
+
+# Feature: User Authentication
+
+As a registered user
+I want to log in securely
+So that I can access my account
+
+## Technical Context
+
+- **Endpoint**: POST /api/auth/login
+- **Request Body**: `{ email: string, password: string }`
+- **Response**: `{ token: string, expiresIn: number, user: UserSummary }`
+- **Token**: JWT signed with RS256, 1-hour expiry
+- **Session**: Token stored in httpOnly cookie, refresh token in database
+- **Dependencies**: User table from user-registration feature
+
+### Data Structures
+
+| Field | Type | Description |
+|-------|------|-------------|
+| token | JWT | Access token, 1h TTL |
+| refreshToken | UUID | Stored in DB, 30d TTL |
+| failedAttempts | integer | Per-user counter, resets on success |
+| lockedUntil | timestamp | Null when unlocked |
+
+## Background
+
+- Given the authentication service is running
+- And the user database is available
+
+## Rule: Valid credentials grant access
+
+### Scenario: Successful login with email
+
+- Given a registered user with email "user@test.com"
+- When they submit valid credentials
+- Then they receive a session token
+- And they are redirected to the dashboard
+
+### Scenario: Successful login with username
+
+- Given a registered user with username "jdoe"
+- When they submit valid credentials
+- Then they receive a session token
+
+## Rule: Invalid credentials are rejected
+
+### Scenario: Wrong password
+
+- Given a registered user with email "user@test.com"
+- When they submit an incorrect password
+- Then they see an error "Invalid credentials"
+- And no session token is issued
+
+### Scenario Outline: Rate limiting after failures
+
+- Given a registered user
+- When they fail to log in <attempts> times
+- Then their account is locked for <duration>
+
+#### Examples
+
+| attempts | duration   |
+|----------|------------|
+| 3        | 5 minutes  |
+| 5        | 30 minutes |
+| 10       | 24 hours   |
+```
+
+### Lifecycle
+
+Specs are **living documents**:
+1. **Draft** — Generated during Phase 1 (Plan). `@status(draft)`
+2. **Approved** — After user confirms design (Standard+ brainstorming). `@status(approved)`
+3. **Implemented** — Updated during Phase 3 as edge cases are discovered. `@status(implemented)`
+4. **Verified** — After Phase 4 passes. `@status(verified)`
+
+### File Naming
+
+`specs/<feature-slug>.md` where `<feature-slug>` is kebab-case derived from the feature name.
+Examples: `specs/user-authentication.md`, `specs/nearby-breweries-endpoint.md`, `specs/fix-readme-typo.md`.
+
+### Directory Structure
+
+```
+project/
+  specs/
+    user-registration.md
+    user-authentication.md      # @depends-on(user-registration)
+    payment-processing.md       # @depends-on(user-authentication)
+    ...
+  src/
+  tests/
+  ...
+```
+</gherkin_spec_reference>
+
 <when_to_use>
 **Use for ANY task given to you.** This skill replaces ad-hoc skill selection.
 
@@ -120,27 +413,30 @@ ls .beads/ 2>/dev/null
 
 ### Quick Tier Planning
 
-Create a beads epic with a brief plan and the mandatory Tests task:
+Generate a minimal Gherkin spec file, then create the beads epic referencing it:
 
 ```bash
+# 1. Ensure specs/ directory exists
+mkdir -p specs
+
+# 2. Generate spec file (Feature + 1-3 Scenarios, no Rules/Background)
+# Write to specs/<feature-slug>.md using the Quick tier template
+# See Gherkin Spec Reference above for format
+
+# 3. Create beads epic referencing the spec
 bd create "Epic: [Brief description of change]" \
   --type epic \
   --priority 2 \
   --description "[WHY this epic exists and WHAT it accomplishes]" \
-  --design "## Requirements
-- [What must be true when complete]
-
-## Success Criteria
-- [ ] [Specific, measurable outcome]
-- [ ] All tests passing
-- [ ] Pre-commit hooks passing
-
-## Anti-Patterns
-- [Relevant forbidden patterns]
-
-## Approach
-[1-2 sentences on how to do it]"
+  --design "Spec: specs/<feature-slug>.md"
 ```
+
+**Quick Tier spec generation rules:**
+- One spec file per epic
+- Feature heading + brief description (no As/I want/So that needed)
+- 1-3 Scenarios covering the change and its key edge case(s)
+- No Technical Context section needed (changes are small enough to be self-evident)
+- `@status(draft)` tag required
 
 Then create implementation task + mandatory Tests task:
 
@@ -187,7 +483,41 @@ Enforcement rules for brainstorming:
 3. **Do NOT proceed until answers are received** — If you asked a question, you must receive and incorporate the answer before moving forward. "Making reasonable defaults for ambiguous parts" is not acceptable — if something is ambiguous, that's exactly what brainstorming questions are for.
 4. **Phase 1 is complete ONLY when the user has answered all CRITICAL questions** — The epic cannot be created until the user has confirmed the design.
 
-Brainstorming will create the beads epic with requirements, anti-patterns, and first task. After brainstorming completes, verify the epic has a Tests task. If not, create one.
+**After brainstorming answers are received, generate Gherkin spec file(s):**
+
+```bash
+# 1. Ensure specs/ directory exists
+mkdir -p specs
+
+# 2. Generate spec file from brainstorming output
+# Use the Standard tier template: Feature + As/I want/So that + Technical Context + Rules + Background + Scenarios
+# Include Technical Context section with endpoint/API details, data structures, response shapes
+# Write to specs/<feature-slug>.md
+
+# 3. If this is a greenfield project and no specs/system.md exists, generate it first
+# System spec captures: purpose, tech stack, data model, feature map, API overview
+```
+
+**Standard Tier spec generation rules:**
+- One spec file per feature (may be one or a few per epic)
+- Full As/I want/So that narrative
+- Technical Context section with API contracts, data structures, and integration points
+- Rules grouping related scenarios under business rules
+- Background for shared preconditions
+- `@status(draft)` tag, updated to `@status(approved)` after user confirms
+- For greenfield projects: generate `specs/system.md` first if it doesn't exist
+
+Create the beads epic referencing the spec file(s):
+
+```bash
+bd create "Epic: [Brief description]" \
+  --type epic \
+  --priority 2 \
+  --description "[WHY this epic exists]" \
+  --design "Spec: specs/<feature-slug>.md"
+```
+
+After brainstorming creates the epic and first task, verify the epic has a Tests task. If not, create one.
 
 After tasks are created, run SRE refinement on each task:
 
@@ -220,6 +550,49 @@ Enforcement rules (same as Standard, plus additional rigor):
 4. **Multiple rounds of questions are expected** — Complex tasks have hidden constraints. If you only asked one round of questions, you probably missed something.
 5. **Research agents during brainstorming are for informing questions, not replacing them** — If codebase-investigator reveals the project uses passport.js, that informs what to ask the user, it doesn't eliminate the need to ask.
 
+**After brainstorming answers are received, generate Gherkin spec files:**
+
+```bash
+# 1. Ensure specs/ directory exists
+mkdir -p specs
+
+# 2. For greenfield projects: ALWAYS generate specs/system.md first
+# System spec: purpose, tech stack, data model, feature map, API overview, non-functional requirements
+# This is the anchor document that all feature specs reference
+
+# 3. Generate one spec file per feature identified during brainstorming
+# Use the Complex tier template: Feature + Technical Context + Data Structures + Rules + Scenarios + Scenario Outlines
+# Each spec includes @depends-on(feature-slug) and @blocks(feature-slug) tags
+# The dependency graph must form a valid topological order (no cycles)
+
+# 4. Verify dependency integrity
+# Every @depends-on(x) reference must have a corresponding specs/x.md file
+# Every @blocks(x) reference must have a corresponding specs/x.md file
+```
+
+**Complex Tier spec generation rules:**
+- `specs/system.md` required for greenfield projects (generate first)
+- One spec file per feature — multiple features per epic is expected
+- Full Technical Context with API contracts, data structures, auth requirements
+- `@depends-on`/`@blocks` tags forming a dependency graph
+- Scenario Outlines with Examples tables for parameterized behavior
+- The complete set of specs must be sufficient to rebuild the application from scratch
+- `@status(draft)` on all specs, updated to `@status(approved)` after user confirms
+
+Create the beads epic referencing all spec files:
+
+```bash
+bd create "Epic: [Brief description]" \
+  --type epic \
+  --priority 2 \
+  --description "[WHY this epic exists]" \
+  --design "Specs:
+- specs/system.md (system architecture)
+- specs/<feature-1>.md
+- specs/<feature-2>.md
+- specs/<feature-3>.md"
+```
+
 After brainstorming creates epic and first task, run SRE refinement on each task:
 
 ```
@@ -251,6 +624,23 @@ If no Tests task exists, create one immediately. This is non-negotiable.
 
 **Purpose:** Understand the codebase BEFORE writing any code. This prevents the #1 correctness failure: not matching existing patterns.
 
+### Pre-Investigation: Read Existing Specs
+
+Before dispatching investigation agents, check for existing specs in the project:
+
+```bash
+# Check if specs/ directory exists and list existing spec files
+ls specs/ 2>/dev/null
+```
+
+If `specs/` exists with files:
+1. **Read the spec(s) generated in Phase 1** to understand what you're about to build
+2. **Read any specs referenced via `@depends-on` tags** — these are prerequisite features whose patterns, data structures, and integration points your implementation must align with
+3. **Read `specs/system.md`** if it exists — this defines the system-wide conventions (API envelope format, error format, auth approach, data model) that all features must follow
+4. **Note any `@blocks` references** — features that depend on this one. Be aware of their expected integration points so you don't create incompatible interfaces.
+
+Feed spec context into the codebase-investigator prompt so it knows what patterns and integration points to look for.
+
 ### Quick Tier Investigation
 Dispatch a codebase-investigator subagent (even for small changes):
 ```
@@ -258,6 +648,7 @@ Agent tool (subagent_type: hyperpowers:codebase-investigator):
 "Read [target file(s)] and find similar patterns in nearby files.
 Check: naming conventions, error handling, imports, and any existing code
 that does something similar to [description].
+Spec context: [paste key details from the spec file — feature description, scenarios, technical context if present]
 Report file paths, line numbers, and patterns to follow."
 ```
 This keeps investigation out of your main context and ensures consistent pattern discovery.
@@ -269,6 +660,9 @@ Agent tool (subagent_type: hyperpowers:codebase-investigator):
 "Find existing patterns for [what we're building].
 Check: similar implementations, naming conventions, error handling patterns,
 test patterns, and any existing code that does something like [description].
+Spec context: [paste key details from the spec file — feature description, scenarios, technical context, data structures]
+System spec context: [if specs/system.md exists, paste API conventions, data model, and relevant tech stack details]
+Dependency specs: [if @depends-on specs exist, paste their Technical Context sections — these define the interfaces this feature must integrate with]
 Report file paths, line numbers, and patterns to follow."
 
 # If task involves external APIs, libraries, or unfamiliar patterns:
@@ -282,7 +676,8 @@ and code examples relevant to [what we're building]."
 Dispatch both agents in parallel:
 ```
 Agent tool (subagent_type: hyperpowers:codebase-investigator):
-"[Codebase investigation prompt as above]"
+"[Codebase investigation prompt as above, including spec context,
+system spec context, and dependency spec context]"
 
 Agent tool (subagent_type: hyperpowers:internet-researcher):
 "Research [external API/library/pattern].
@@ -295,6 +690,10 @@ After investigation, briefly note findings before proceeding:
 - "Found existing pattern at [file:line] - will follow this approach"
 - "No existing pattern found - will establish new convention based on [research]"
 - "Discovered [unexpected finding] - adjusting plan"
+- "Spec dependency [feature-slug] defines [interface/data structure] - will integrate with this"
+- "System spec requires [convention] - will follow this for consistency"
+
+If investigation reveals that the spec is missing scenarios or technical details, note them for addition during Phase 3 (specs are living documents).
 
 ### MANDATORY for Standard+ Epics: Log Investigation Findings (Enforcement 3)
 
@@ -323,17 +722,81 @@ Decision: [How findings will influence implementation approach]"
 
 **CRITICAL: Do NOT close the Tests task during this phase.** The Tests task is a verification gate that prevents beads from auto-closing the epic. It stays open until Phase 4 verification passes. Closing it prematurely will auto-close the epic and skip verification.
 
+### Living Spec Updates (All Tiers)
+
+Specs are living documents. During implementation, update the spec file(s) when:
+- **New edge cases are discovered** — add new Scenarios to the appropriate Rule section
+- **A Scenario turns out to be wrong** — correct it to reflect actual behavior (not the other way around — don't implement wrong behavior to match the spec)
+- **Technical Context changes** — e.g., you discover the API contract needs an additional field, or the data structure needs a column
+- **New dependencies emerge** — add `@depends-on(feature-slug)` tags if you discover the feature requires another feature not originally identified
+- **Implementation reveals new business rules** — add new `## Rule:` sections
+
+When updating a spec, also update the `@status` tag:
+- Change `@status(draft)` or `@status(approved)` to `@status(implemented)` when you begin implementing its scenarios
+
+**What NOT to change in specs during Phase 3:**
+- Do not remove scenarios — if a scenario is no longer needed, mark it with `@deprecated` and add a note explaining why
+- Do not change the feature's core purpose (As/I want/So that) — that's a plan change requiring user confirmation
+
+### Spec-Driven TDD (All Tiers — No Exceptions)
+
+**Before writing ANY implementation code**, generate failing tests from the Gherkin spec scenarios. This is non-negotiable across all tiers.
+
+**The cycle:**
+1. **READ** the spec file(s) for this epic
+2. **RED** — For each `### Scenario:` in the spec, write a failing test that exercises the Given/When/Then steps. For each `### Scenario Outline:` with `#### Examples`, write one test case per row in the Examples table. All tests must fail (they test behavior that doesn't exist yet).
+3. **GREEN** — Write the minimal implementation code to make the failing tests pass. One scenario at a time.
+4. **REFACTOR** — Clean up implementation while keeping tests green.
+5. **REPEAT** — Next scenario, next failing test, next implementation.
+
+**Mapping spec scenarios to tests:**
+
+| Spec Element | Test Element |
+|---|---|
+| `## Background` | Test setup / beforeEach / fixture |
+| `### Scenario: Name` | One test function: `test_name` or `it("Name", ...)` |
+| `### Scenario Outline: Name` + `#### Examples` table | One test per Examples row, parameterized |
+| `- Given [context]` | Test setup / arrange |
+| `- When [action]` | Test action / act |
+| `- Then [outcome]` | Test assertion / assert |
+| `- And [additional]` | Additional setup, action, or assertion (follows the preceding step type) |
+
+**Example — spec scenario to test:**
+
+Spec:
+```markdown
+### Scenario: Missing required parameters
+- Given I omit the lat parameter
+- When I GET /api/breweries/nearby?lng=-74.0060&radius=10
+- Then I receive a 400 response
+- And the error message indicates lat is required
+```
+
+Generated failing test:
+```javascript
+test("Missing required parameters - omitting lat returns 400", async () => {
+  // Given: omit the lat parameter (no setup needed)
+  // When
+  const response = await request(app).get("/api/breweries/nearby?lng=-74.0060&radius=10");
+  // Then
+  expect(response.status).toBe(400);
+  expect(response.body.error.message).toContain("lat");
+});
+```
+
+This test MUST fail before implementation (the endpoint doesn't exist yet). Implementation makes it pass.
+
 ### Quick Tier Implementation
-Follow the TDD cycle directly:
 
 ```
 Use Skill tool: hyperpowers:test-driven-development
 ```
 
-1. Write failing test (RED)
-2. Write minimal implementation (GREEN)
-3. Refactor if needed
-4. Commit
+1. Read the spec file for this epic
+2. **RED**: Write failing tests for each scenario in the spec (typically 1-3 tests)
+3. **GREEN**: Write minimal implementation to pass each test
+4. **REFACTOR**: Clean up
+5. Commit
 
 Update beads task to in_progress, then close when done.
 
@@ -346,8 +809,12 @@ Use Skill tool: hyperpowers:executing-plans
 ```
 
 Executing-plans will:
-- Execute tasks one at a time with TDD
+- **Start each task by reading the relevant spec scenarios and writing failing tests for them (RED)**
+- Implement to make tests pass (GREEN), one scenario at a time
+- Refactor while tests stay green
 - Review learnings after each task
+- **Update spec file(s) with new scenarios or corrected technical context discovered during implementation**
+- **Write failing tests for any NEW scenarios added to the spec before implementing them**
 - Create next task based on reality
 - Run SRE refinement on new tasks (Enforcement 2)
 - STOP after each task for user review
@@ -362,6 +829,7 @@ Executing-plans will:
 1. The git diff of all files changed by this task
 2. The bd task description and acceptance criteria (`bd show [task-id]`)
 3. The bd epic description for broader context (`bd show [epic-id]`)
+4. The Gherkin spec file(s) referenced by the epic (`cat specs/<feature-slug>.md`)
 
 ```
 Agent tool (subagent_type: hyperpowers:code-reviewer, run_in_background: false):
@@ -372,6 +840,7 @@ Agent tool (subagent_type: hyperpowers:code-reviewer, run_in_background: false):
 - Epic: [epic-id] — [epic title]
 - Task description: [paste from bd show]
 - Epic requirements: [paste from bd show]
+- Gherkin spec: [paste contents of the spec file(s) referenced by this epic]
 
 ## Git diff to review
 [paste git diff]
@@ -379,7 +848,7 @@ Agent tool (subagent_type: hyperpowers:code-reviewer, run_in_background: false):
 ## Review these 5 dimensions IN ORDER:
 
 ### 1. Correctness against spec
-Does the code actually implement what the task description says? Are all acceptance criteria met, or are any silently skipped or stubbed?
+Does the code implement the scenarios described in the Gherkin spec? For each scenario in the spec that this task touches, verify the Given/When/Then steps are faithfully implemented. Flag any scenario that is silently skipped, stubbed, or only partially addressed.
 
 ### 2. Consistency with codebase
 Does the new code follow the same patterns as existing code? Check: naming conventions, error handling style, output targets (stdout vs stderr vs logging), ID vs name usage, configuration approach (hardcoded vs config/theme system).
@@ -477,7 +946,7 @@ This phase is IDENTICAL regardless of tier. No exceptions.
 bd comment [epic-id] "VERIFICATION FAILURE [step]: [category] - [description]
 
 Source: [which verification step caught it]
-Category: [test-failure | test-quality | code-review | criteria-gap]
+Category: [test-failure | test-quality | code-review | spec-coverage | criteria-gap]
 Severity: [CRITICAL | IMPORTANT | MINOR]
 Action: [returning to Phase 3 | fixing inline | deferring]"
 ```
@@ -562,12 +1031,14 @@ Action: returning to Phase 3 to replace tautological tests with meaningful ones"
 ```
 Agent tool (subagent_type: hyperpowers:code-reviewer):
 "Review ALL files changed in this epic against:
-1. Beads epic requirements and anti-patterns (read epic [epic-id] first)
+1. Gherkin spec scenarios (read the spec file(s) listed in the epic's design field — e.g., specs/<feature-slug>.md)
+   For EVERY scenario in the spec, verify the implementation addresses it. Flag any scenario that has no corresponding code path.
 2. Codebase pattern consistency - does new code match existing patterns?
-3. Edge case coverage - are boundary conditions handled?
-4. Integration correctness - do pieces connect properly?
-5. Test quality - are tests meaningful, not tautological?
-Report any issues found, categorized as CRITICAL / IMPORTANT / MINOR."
+3. Edge case coverage - are boundary conditions handled? Cross-reference the spec's scenarios for edge cases the spec defined.
+4. Integration correctness - do pieces connect properly? If specs/system.md exists, verify API conventions (envelope format, error format, auth) match.
+5. Test quality - are tests meaningful, not tautological? Each spec scenario should have at least one corresponding test.
+Report any issues found, categorized as CRITICAL / IMPORTANT / MINOR.
+An unimplemented spec scenario is a CRITICAL finding (category: spec-coverage)."
 ```
 
 If CRITICAL issues found: **log as bd comment** (category: `code-review`), return to Phase 3 to fix. Do NOT proceed.
@@ -618,6 +1089,34 @@ Action: [wire up the behavior | remove the config surface | document as not-yet-
 
 **Note:** Steps 1, 2, and 3 (test-runner, test-effectiveness-analyst, and code-reviewer) should be dispatched as parallel subagents when possible, since they are independent of each other. Log all failures as bd comments AFTER agents return results.
 
+### Step 3.5: Spec Scenario Coverage Check
+
+After the code review agent returns, perform a manual spec coverage check:
+
+1. Read each spec file referenced by the epic
+2. For every `### Scenario:` and `### Scenario Outline:` in the spec, verify:
+   - There is implementation code that addresses the scenario's Given/When/Then steps
+   - There is at least one test that exercises the scenario
+3. Log the coverage check as a bd comment on the epic:
+
+```bash
+bd comment [epic-id] "SPEC COVERAGE CHECK:
+
+Spec: specs/<feature-slug>.md
+Total scenarios: [N]
+Implemented: [N]
+Tested: [N]
+Missing implementation: [list any unimplemented scenarios]
+Missing tests: [list any untested scenarios]
+
+Verdict: [PASS | FAIL - N scenarios missing coverage]"
+```
+
+**An unimplemented scenario is category `spec-coverage`, severity CRITICAL.** Return to Phase 3 to implement it.
+**An untested scenario is category `spec-coverage`, severity IMPORTANT.** Add a test before proceeding.
+
+**Why this is separate from the code review agent:** The code review agent may miss scenarios buried in a long spec or misidentify partial implementations as complete. The manual check is a systematic walkthrough — each scenario checked, each one accounted for. This is the mechanism that enforces the plan's acceptance check: "Verify phase checks implementation coverage against spec scenarios."
+
 ### Step 4: Verify Tests task complete
 ```bash
 bd show [tests-task-id]  # Must be status: closed
@@ -660,6 +1159,22 @@ Action: [returning to Phase 3 | fixing inline]"
 
 ## Phase 5: CLOSE
 
+### Update Spec Status
+
+Update all spec files referenced by this epic to reflect verified status:
+
+1. Change `@status(implemented)` (or `@status(draft)` / `@status(approved)` if not updated during Phase 3) to `@status(verified)`
+2. For Complex tier epics with multiple specs: update each spec that was fully implemented and verified in this epic
+3. If a spec was only partially implemented (some scenarios deferred to a future epic), leave it at `@status(implemented)` and note which scenarios remain
+
+```bash
+# Example: Update the status tag in the spec file
+# Change @status(implemented) to @status(verified)
+# This is a simple text replacement in the spec file
+```
+
+**Why:** The `@status` tag creates a visual audit trail. Anyone reading `specs/` can immediately see which features are designed but unbuilt (`draft`), approved (`approved`), coded (`implemented`), or fully verified (`verified`).
+
 ### Update README (when applicable)
 If this epic added or changed any of the following, update the README before closing:
 - New or changed features, capabilities, or behaviors
@@ -688,7 +1203,7 @@ If verification found issues, each finding should already have its own comment w
 bd comment [epic-id] "VERIFICATION Phase 4: [category] - [SEVERITY] [ID]: [description]. Action: [action taken]"
 ```
 
-Categories: `code-review`, `test-quality`, `integration`
+Categories: `code-review`, `test-quality`, `integration`, `spec-coverage`
 Severities: `CRITICAL`, `IMPORTANT`, `MINOR`
 
 **This is non-negotiable.** Without verification comments, retrospectives have no data. 67% of past epics had no verification comments logged.
@@ -744,32 +1259,52 @@ Claude (without workflow-orchestrator):
 **Phase 0: Classify** -> Quick (1 file, <50 lines, typo fix)
 "This is a **Quick** tier task because it's a single-file typo fix."
 
-**Phase 1: Plan** -> Create beads epic + Tests task
+**Phase 1: Plan** -> Generate spec file, create beads epic + Tests task
 ```bash
-bd create "Epic: Fix typo in README" --type epic --priority 3 --description "README has a misspelling that needs correcting"
-bd create "Task: Fix 'recieve' -> 'receive' in README.md" --type feature --description "Fix the 'recieve' typo in README.md"
+mkdir -p specs
+# Generate specs/fix-readme-typo.md:
+# @status(draft)
+#
+# # Feature: Fix typo in README
+#
+# Correct the misspelling 'recieve' to 'receive' across the project.
+#
+# ## Scenario: All instances are corrected
+# - Given the project contains the misspelling 'recieve'
+# - When the fix is applied
+# - Then all instances of 'recieve' are replaced with 'receive'
+# - And no other text is modified
+
+bd create "Epic: Fix typo in README" --type epic --priority 3 \
+  --description "README has a misspelling that needs correcting" \
+  --design "Spec: specs/fix-readme-typo.md"
+bd create "Task: Fix 'recieve' -> 'receive'" --type feature --description "Fix the 'recieve' typo"
 bd create "Tests: Fix typo in README" --type feature --description "Verification gate for typo fix epic"  # Mandatory
 ```
 
-**Phase 2: Investigate** -> Read README, grep for other instances
+**Phase 2: Investigate** -> Read spec, read README, grep for other instances
 ```bash
+# Read spec for what we're fixing
+Read specs/fix-readme-typo.md
 # Read target file
 Read README.md
 # Check for same typo elsewhere
 Grep "recieve" across project
 ```
-Discovery: typo appears in 3 files, not just README.
+Discovery: typo appears in 3 files, not just README. Update spec to note this.
 
-**Phase 3: Implement** -> Fix all instances, verify
-Fix all 3 occurrences. Commit.
+**Phase 3: Implement** -> Fix all instances, update spec, commit
+Fix all 3 occurrences. Update spec @status(draft) -> @status(implemented). Commit.
 
-**Phase 4: Verify** -> Full suite
+**Phase 4: Verify** -> Full suite + spec coverage check
 - Run tests (verify no strings broke)
-- Code review agent confirms all instances fixed
+- Code review agent confirms all instances fixed (references spec scenarios)
+- Spec coverage check: 1 scenario, 1 implemented, 1 tested
 - Grep confirms no remaining instances
 - Close Tests task
 
-**Phase 5: Close** -> Close epic, note discovery
+**Phase 5: Close** -> Update spec status, close epic, note discovery
+Update spec @status(implemented) -> @status(verified).
 "Found and fixed 3 instances instead of 1. Beads tracked."
 </correction>
 </example>
@@ -798,27 +1333,39 @@ Claude (without workflow-orchestrator):
 **Phase 0: Classify** -> Standard (multi-file, adding endpoint with clear pattern to follow)
 "This is a **Standard** tier task because it adds a new endpoint to an existing API."
 
-**Phase 1: Plan** -> Light brainstorm, create beads
+**Phase 1: Plan** -> Light brainstorm, generate Gherkin spec, create beads
 Use brainstorming skill (1-2 questions about radius units, max results, etc.)
-Create epic with requirements, anti-patterns, tasks, and Tests task.
+After answers received, generate `specs/nearby-breweries-endpoint.md`:
+- Feature + As/I want/So that narrative
+- Technical Context: endpoint details, parameters, response shape
+- Rule: Valid coordinates return nearby results (2 scenarios)
+- Rule: Invalid input is rejected (2 scenarios)
+- @status(draft), @api, @breweries tags
+Create epic with `--design "Spec: specs/nearby-breweries-endpoint.md"` + Tests task.
+Update spec to @status(approved) after user confirms.
 
-**Phase 2: Investigate** -> Dispatch codebase-investigator
+**Phase 2: Investigate** -> Read spec + existing specs, dispatch codebase-investigator
+Read the spec for context. Feed Technical Context into investigator prompt.
 "Find existing API endpoint patterns: route structure, error handling,
-response format, validation approach, test patterns."
+response format, validation approach, test patterns.
+Spec context: GET /api/breweries/nearby with lat/lng/radius params, returns Brewery[] sorted by distance."
 Discovery: All endpoints use consistent middleware, validation, response format.
 
-**Phase 3: Implement** -> TDD via executing-plans
-RED: Write test for nearby endpoint
+**Phase 3: Implement** -> TDD via executing-plans, update spec as living doc
+RED: Write test for each spec scenario
 GREEN: Implement following discovered patterns
 REFACTOR: Clean up
+Discover edge case: radius=0 should return empty, not all results. Add new scenario to spec.
+Update spec @status(approved) -> @status(implemented). Commit.
 
-**Phase 4: Verify** -> Full suite + code review
+**Phase 4: Verify** -> Full suite + code review + spec coverage check
 - All tests pass (including new endpoint tests)
-- Code review agent confirms pattern consistency
-- Edge cases: no lat/lng params, invalid radius, no results
+- Code review agent confirms pattern consistency (references spec for expected behavior)
+- Spec coverage check: 5 scenarios (4 original + 1 discovered), 5 implemented, 5 tested
 - Tests task closed with evidence
 
-**Phase 5: Close** -> Close epic, commit, offer PR
+**Phase 5: Close** -> Update spec status, close epic, commit, offer PR
+Update spec @status(implemented) -> @status(verified).
 </correction>
 </example>
 
@@ -847,28 +1394,41 @@ Claude (without workflow-orchestrator):
 **Phase 0: Classify** -> Complex (new external integration, cross-cutting concern)
 "This is a **Complex** tier task because it's a new external integration with cross-cutting auth concerns."
 
-**Phase 1: Plan** -> Full brainstorm + SRE refinement
+**Phase 1: Plan** -> Full brainstorm + generate multiple Gherkin specs + SRE refinement
 Full Socratic brainstorming: token storage, session handling, user model integration, error states.
 Research: codebase-investigator (existing auth) + internet-researcher (OAuth best practices).
-Create epic with immutable requirements, anti-patterns, design rationale.
-SRE refinement on first task.
-Mandatory Tests task created.
+Generate spec files:
+- `specs/system.md` — if greenfield, defines tech stack, data model (User entity with auth fields), API conventions
+- `specs/user-registration.md` — @status(draft), @blocks(user-authentication)
+- `specs/user-authentication.md` — @status(draft), @depends-on(user-registration), @blocks(user-profile)
+  Technical Context: POST /api/auth/login, JWT with RS256, httpOnly cookies, refresh tokens
+  Rules: valid credentials, invalid credentials, rate limiting, token refresh
+  Scenario Outlines with Examples tables for rate limiting thresholds
+Create epic with `--design "Specs:\n- specs/system.md\n- specs/user-registration.md\n- specs/user-authentication.md"`
+SRE refinement on first task. Mandatory Tests task created.
+Update specs to @status(approved) after user confirms.
 
-**Phase 2: Investigate** -> Both agents in parallel
+**Phase 2: Investigate** -> Read all specs + both agents in parallel
+Read specs/system.md for conventions, specs/user-authentication.md for what to build.
+Read @depends-on spec (user-registration) for interfaces to integrate with.
+Feed spec Technical Context into investigator prompts.
 Codebase: Find existing auth, session handling, user model.
 External: Google OAuth2 docs, passport strategy options.
 
-**Phase 3: Implement** -> TDD via executing-plans + code review per task
-Each task: RED -> GREEN -> REFACTOR -> commit -> code-reviewer agent -> next task.
+**Phase 3: Implement** -> TDD via executing-plans + code review per task + update specs
+Each task: RED -> GREEN -> REFACTOR -> commit -> code-reviewer agent (with spec context) -> next task.
 SRE refinement on each new task before starting.
+Update specs as edge cases are discovered. Update @status(approved) -> @status(implemented).
 
-**Phase 4: Verify** -> Full suite + code review
+**Phase 4: Verify** -> Full suite + code review + spec coverage check
 - All tests pass (unit + integration)
-- Code review: pattern consistency, security, edge cases
+- Code review references spec scenarios for expected behavior
+- Spec coverage check per spec file: all scenarios implemented and tested
 - Tests task closed: auth flow tests, error state tests, token handling tests
 - Every success criterion verified with evidence
 
-**Phase 5: Close** -> Close epic, memory update, offer PR
+**Phase 5: Close** -> Update spec statuses, close epic, memory update, offer PR
+Update all specs @status(implemented) -> @status(verified).
 Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 </correction>
 </example>
@@ -881,7 +1441,7 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 1. **Always classify before acting** -> Every task gets a tier. No "just do it" shortcuts.
 2. **Always create beads** -> Every tier gets an epic with plan and mandatory Tests task. No exceptions.
 3. **Always investigate before writing** -> Read target files minimum. Dispatch agents for Standard+.
-4. **Always TDD** -> Tests before implementation. RED before GREEN. Every tier.
+4. **Always spec-driven TDD** -> Tests are generated FROM spec scenarios before implementation. Read spec → write failing tests for each scenario (RED) → implement to pass (GREEN) → refactor. Every tier. No exceptions. If a new scenario is added to the spec during implementation, write a failing test for it BEFORE implementing it.
 5. **Never scale down verification** -> Full suite + code review agent. Quick tier gets same verification as Complex.
 6. **Tests task is a verification gate** -> NEVER close it during Phase 3. Beads auto-closes epics when all children close. The Tests task stays open to prevent this until Phase 4 verification passes.
 7. **Default UP on tier uncertainty** -> When unsure: Quick->Standard, Standard->Complex.
@@ -896,6 +1456,8 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 16. **Dead code / stale assumption scan** (Enforcement 5) -> Phase 4 must scan for config/API surface that promises behavior it doesn't deliver. Dead config promising nonexistent safety behavior = CRITICAL. Stale assumptions are 9% of errors.
 17. **Test quality gate with thresholds** (Enforcement 6) -> 3+ tautological tests in one epic = CRITICAL. Flag weak assertions that check existence but not correctness.
 18. **Continuous verifier agent for Standard+ epics** (Enforcement 7) -> Spawn background verifier when first implementation task starts. Reviews 5 dimensions per task. CRITICAL findings block task closure. Catches errors at task boundary instead of at epic close.
+19. **Always generate Gherkin spec files** -> Every tier generates spec files in `specs/` during Phase 1. Quick = Feature + 1-3 Scenarios. Standard = full Gherkin structure. Complex = multiple specs with @depends-on/@blocks. Greenfield projects require `specs/system.md`. Specs are living documents updated during Phase 3 and verified for scenario coverage in Phase 4.
+20. **Spec scenario coverage is mandatory** (Phase 4 Step 3.5) -> Every scenario in the spec must have corresponding implementation code and at least one test. Unimplemented scenarios are CRITICAL (`spec-coverage`). Untested scenarios are IMPORTANT. The spec coverage check is a separate manual step after the code review agent.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -919,6 +1481,16 @@ Memory: "Project uses passport.js for auth, sessions in httpOnly cookies"
 - "The continuous verifier already covered this in Phase 3" -> The verifier checks per-task diffs in isolation. Phase 4 checks the full epic diff and cross-task interactions. A function added in task 1 and silently broken by task 3 is invisible to the verifier but visible to Phase 4. Both are required; they catch different things.
 - "SRE refinement will just say 'same as existing pattern'" -> That is not valid SRE output. Even pattern-following tasks have unique edge cases. If SRE cannot find a novel edge case, the task is under-specified, not over-refined.
 - "Investigation findings are obvious, logging them is ceremony" -> The log is not for you now — it is for post-mortem later. When a verification failure occurs, the log lets you distinguish: was this a known risk, an investigation miss, or an implementation failure? Without the log, you cannot tell. If findings feel obvious, they should be fast to write — not a reason to skip.
+- "I'll write the tests without reading the spec" -> NO. Tests must be derived FROM spec scenarios. The spec defines WHAT to test; the test implements HOW to test it. Writing tests without the spec means testing whatever you feel like instead of what was designed.
+- "I'll implement first and then write tests to match" -> NO. This is the opposite of TDD. Tests must fail BEFORE implementation exists. Write the test, watch it fail, THEN write code. Implementing first means you're writing tests that confirm what you built, not tests that drive what you build.
+- "The spec only has 1 scenario, I don't need TDD for this" -> Yes you do. Even 1 scenario gets 1 failing test before implementation. The cycle is the same regardless of count.
+- "A spec is overkill for this change" -> Every tier gets a spec. Quick tier specs are 5-10 lines. If a Feature + 1 Scenario is too much overhead, the change is probably a no-op.
+- "I'll write the spec after I implement it" -> Specs are design documents, not documentation. Writing them after defeats the purpose. The spec captures intent BEFORE code exists — it's what you implement AGAINST, not what you describe AFTER.
+- "The spec scenarios are obvious from the code" -> The spec exists so someone (or an agent) can rebuild the app without reading the code. If specs only repeat what the code says, they add no value. Capture the WHY and the WHAT, not just the HOW.
+- "I don't need a system spec for this project" -> If it's greenfield or a major architectural change, `specs/system.md` is required. It's the anchor that all feature specs reference for conventions, data model, and API format.
+- "The spec is getting too long, I'll skip some scenarios" -> Long specs mean complex features. Split the feature into multiple specs with `@depends-on` relationships instead of trimming scenarios. Every behavior needs a scenario.
+- "I'll update the spec later" -> Specs are living documents. Update them NOW when you discover new edge cases during implementation. "Later" means never — and then the spec drifts from reality.
+- "The @depends-on tags aren't important" -> The dependency graph IS the build order. For greenfield projects, it's what enables rebuilding the entire app from specs alone. Missing dependencies mean missing context for agents implementing downstream features.
 </critical_rules>
 
 <verification_checklist>
@@ -932,23 +1504,33 @@ Before claiming ANY task is complete:
 - [ ] Brainstorming questions asked via AskUserQuestion tool (not printed as text) — for Standard/Complex tiers
 - [ ] User answered all CRITICAL questions before proceeding
 - [ ] No investigation agents dispatched until after user answered brainstorming questions
-- [ ] Beads epic created with plan
+- [ ] **Gherkin spec file(s) generated in `specs/`** — Quick: Feature + 1-3 Scenarios; Standard: full structure; Complex: multiple files with @depends-on/@blocks
+- [ ] **System spec (`specs/system.md`) generated for greenfield/architectural changes** (Complex tier)
+- [ ] Spec file(s) tagged with `@status(draft)` — updated to `@status(approved)` after user confirms (Standard/Complex)
+- [ ] Beads epic created with `--design "Spec: specs/<feature-slug>.md"` referencing spec file(s)
 - [ ] Mandatory Tests task exists in epic
-- [ ] Success criteria defined and measurable
 - [ ] Anti-patterns defined (for Standard/Complex)
 - [ ] SRE refinement run on all tasks (Standard/Complex — Enforcement 2)
 
 **Phase 2 (Investigate):**
+- [ ] **Spec file(s) read before dispatching investigation agents** — spec context included in agent prompts
+- [ ] **@depends-on specs read** for prerequisite feature interfaces and data structures
+- [ ] **specs/system.md read** (if exists) for system-wide conventions
 - [ ] Target files read before any edits
 - [ ] Existing patterns identified
 - [ ] Investigation findings noted
 - [ ] Investigation findings logged as bd comments on epic (Standard/Complex — Enforcement 3)
 
 **Phase 3 (Implement):**
-- [ ] Tests written before implementation (TDD)
+- [ ] **Failing tests generated FROM spec scenarios before any implementation code** (spec-driven TDD)
+- [ ] Each spec Scenario has a corresponding test; each Scenario Outline row has a parameterized test case
+- [ ] Tests failed first (RED), then implementation made them pass (GREEN)
+- [ ] **Spec updated as living doc** — new scenarios added for discovered edge cases, Technical Context corrected if changed
+- [ ] **New spec scenarios get failing tests BEFORE implementation** (living doc + TDD combined)
+- [ ] **Spec @status updated** to `@status(implemented)`
 - [ ] Changes committed
 - [ ] Beads tasks updated/closed
-- [ ] Continuous verifier agent spawned for Standard/Complex (Enforcement 7)
+- [ ] Continuous verifier agent spawned for Standard/Complex (Enforcement 7) — **verifier receives spec file as context**
 - [ ] Each task reviewed by verifier BEFORE bd close — CRITICAL findings block closure
 - [ ] Verifier findings logged as bd comments on tasks
 
@@ -956,16 +1538,18 @@ Before claiming ANY task is complete:
 - [ ] Full test suite passed (via test-runner agent)
 - [ ] Test effectiveness analyzed (via test-effectiveness-analyst agent)
 - [ ] Test quality gate applied: 3+ tautological tests = CRITICAL (Enforcement 6)
-- [ ] Code review agent dispatched and findings addressed
+- [ ] Code review agent dispatched with spec files as reference — findings addressed
+- [ ] **Spec scenario coverage check completed (Step 3.5)** — every scenario implemented and tested
 - [ ] Integration point checklist included for cross-module tasks (Enforcement 4)
 - [ ] Dead code / stale assumption scan completed (Enforcement 5)
 - [ ] All three verification agents dispatched in parallel where possible
-- [ ] **Every failure logged as structured bd comment on epic** (category, severity, source, action)
+- [ ] **Every failure logged as structured bd comment on epic** (category, severity, source, action) — includes `spec-coverage` category
 - [ ] Tests task closed with evidence
 - [ ] All epic success criteria verified with evidence
 - [ ] verification-before-completion skill used
 
 **Phase 5 (Close):**
+- [ ] **Spec @status updated** to `@status(verified)` for all fully-implemented specs
 - [ ] VERIFICATION comment logged on epic — either PASSED or structured findings (Enforcement 1)
 - [ ] README updated if epic changed features, API, UI, dependencies, or usage (or confirmed skip with reason)
 - [ ] Epic closed (Tests task already closed in Phase 4)
