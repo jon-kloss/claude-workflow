@@ -841,8 +841,29 @@ Use executing-plans to work through tasks iteratively:
 Use Skill tool: hyperpowers:executing-plans
 ```
 
+**IMPORTANT: Seed task docs with spec references before invoking executing-plans.**
+
+The executing-plans skill only reads `plan.md`, `context.md`, and `tasks.md` — it has no concept of Gherkin specs. You must ensure the spec context is embedded in those docs so executing-plans naturally uses it:
+
+1. **context.md must list spec files as Key Files** with instructions to read them:
+   ```markdown
+   ## Key Files
+   - `specs/<feature-slug>.md` — Gherkin spec defining all scenarios for this feature. READ THIS before each task to know what to implement and what failing tests to write.
+   - `specs/system.md` — (if exists) System-level conventions, data model, API format.
+   ```
+
+2. **tasks.md Now items must reference which spec scenarios they address:**
+   ```markdown
+   ## Now
+   - [ ] Implement Rule: Valid coordinates return nearby results (specs/nearby-breweries-endpoint.md — 2 scenarios)
+   ```
+
+3. **plan.md acceptance checks must reference specs** (already handled by "Reconcile plan.md with Specs" above)
+
+This ensures executing-plans reads the spec files as part of its normal "Load the contract" step, writes failing tests from spec scenarios, and updates specs when it discovers new edge cases.
+
 Executing-plans will:
-- **Start each task by reading the relevant spec scenarios and writing failing tests for them (RED)**
+- **Start each task by reading the spec scenarios referenced in the task description and writing failing tests for them (RED)**
 - Implement to make tests pass (GREEN), one scenario at a time
 - Refactor while tests stay green
 - Review learnings after each task
