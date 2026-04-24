@@ -23,7 +23,8 @@ MIXED:
 ```
 /build
   -> Entry validation: scan specs/ for @status(approved|implemented), check beads for open tasks
-  -> Parse @depends-on graph, topological sort for build order
+  -> Parse @depends-on/@parallel-risk graph, topological sort for build order
+  -> Show dependency graph with parallel lanes, user confirms execution plan
   -> For each spec in order:
      -> Validate prerequisites @status(verified)
      -> Investigate codebase for this spec's requirements
@@ -64,6 +65,10 @@ MIXED:
 | `@status(approved)` | Ready to implement | START here — this is /build's input |
 | `@status(implemented)` | In progress or interrupted | RESUME — continue implementation |
 | `@status(verified)` | Complete | DONE — skip, prerequisite satisfied |
+
+### Parallel-Risk Tag
+
+`@parallel-risk(feature-slug)` indicates this spec modifies the same files as another independent spec (no `@depends-on` relationship). Both specs remain parallel. /build displays a warning about potential merge conflicts and recommends building the smaller/simpler spec first.
 
 ### Mapping Spec Scenarios to Tests
 
@@ -173,19 +178,62 @@ Note: Per-spec implementation tasks are created by /build after investigation (S
 
 ## Phase 2: Dependency Graph
 
-Parse `@depends-on` tags from all spec files to build the build order:
+Parse `@depends-on` and `@parallel-risk` tags from all spec files to build the build order:
 
 1. Read all spec files in `specs/`
-2. Extract `@depends-on(feature-slug)` tags from each
+2. Extract `@depends-on(feature-slug)` and `@parallel-risk(feature-slug)` tags from each
 3. Build a directed dependency graph
 4. Topological sort for build order (no dependencies first, then dependents)
-5. Validate: no circular dependencies, all referenced specs exist
+5. Validate: no circular dependencies, all referenced specs exist, all `@parallel-risk` tags reference existing specs
 
-**Announce the build order:**
-"Build order based on dependencies:
-1. `specs/user-registration.md` (no dependencies)
-2. `specs/user-authentication.md` (depends on: user-registration)
-3. `specs/payment-processing.md` (depends on: user-authentication)"
+### Parallel Risk Analysis
+
+For specs with `@parallel-risk` tags:
+1. Identify pairs of specs with mutual `@parallel-risk` tags
+2. Note: parallel-risk specs remain parallel — they are NOT sequenced by `@depends-on`
+3. Recommendation: build smaller/simpler spec first to minimize merge conflict resolution
+4. Warn about file overlap when announcing build order
+
+### Graph Visualization and Confirmation
+
+Present the dependency graph to the user via AskUserQuestion, showing parallel lanes and sequential chains:
+
+**When parallel specs exist** (any specs at the same dependency level with no `@depends-on` between them), present the graph and ask the user to confirm:
+
+```
+"Here is the build order based on spec dependencies:
+
+Lane 1 (parallel):
+  ├── specs/user-registration.md (no dependencies)
+  └── specs/email-service.md (no dependencies)
+
+Lane 2 (after Lane 1):
+  └── specs/user-authentication.md (depends on: user-registration)
+
+⚠ Parallel-risk: user-registration.md and email-service.md share file overlap (user-routes.ts)
+  → Recommend building email-service.md first (smaller/simpler)
+
+Confirm this execution plan? You can request sequential execution for any parallel specs."
+```
+
+**When all specs are independent** (no `@depends-on` between any), all appear in a single parallel lane:
+
+```
+"All 3 specs are independent — can be built in parallel:
+
+  ├── specs/cli-export.md
+  ├── specs/api-export.md
+  └── specs/config-validation.md
+
+Confirm parallel execution?"
+```
+
+**When all specs are purely sequential** (a single chain with no parallel lanes), announce the build order as a printed message (not via AskUserQuestion) and proceed immediately — there is no parallel decision to make.
+
+**User overrides:**
+- User can request sequential execution of parallel specs (e.g., "run these in order")
+- User can reorder within a lane
+- No `@depends-on` tags are modified — the specs remain logically independent
 
 ### Dependency validation before starting a spec
 
@@ -561,10 +609,11 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 6. **Log every verification failure** -> Structured bd comment with category, severity, source, action.
 7. **Log a VERIFICATION comment before closing** -> Even when all passes: "VERIFICATION: PASSED — no issues found."
 8. **Dependency order is mandatory** -> Verify prerequisites are `@status(verified)` before starting dependents.
-9. **Pause on fundamental spec drift** -> Wrong approach, missing feature, incorrect data model = STOP, direct to /design. Do NOT silently rewrite specs.
-10. **Always use subagents** -> Investigation, code review, test running, test analysis = subagents. Never do manually what an agent can do.
-11. **Continuous verifier for multi-scenario specs** -> Spawn when first task starts. Reviews 5 dimensions per task. CRITICAL blocks closure.
-12. **New spec scenarios get failing tests FIRST** -> If you add a scenario during implementation, write its failing test before implementing it.
+9. **Parallel-risk is a warning, not a blocker** -> `@parallel-risk` specs have no `@depends-on` relationship. They are not sequenced relative to each other. /build warns about file overlap but does not add sequencing.
+10. **Pause on fundamental spec drift** -> Wrong approach, missing feature, incorrect data model = STOP, direct to /design. Do NOT silently rewrite specs.
+11. **Always use subagents** -> Investigation, code review, test running, test analysis = subagents. Never do manually what an agent can do.
+12. **Continuous verifier for multi-scenario specs** -> Spawn when first task starts. Reviews 5 dimensions per task. CRITICAL blocks closure.
+13. **New spec scenarios get failing tests FIRST** -> If you add a scenario during implementation, write its failing test before implementing it.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -590,6 +639,7 @@ Before claiming /build is complete for a spec:
 **Investigation:**
 - [ ] Spec file read before investigation
 - [ ] @depends-on specs read for interface context
+- [ ] @parallel-risk specs identified and flagged in build order announcement
 - [ ] specs/system.md read (if exists) for conventions
 - [ ] Investigation agents dispatched
 - [ ] Findings logged as bd comments with file paths and conventions

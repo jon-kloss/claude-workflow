@@ -21,10 +21,11 @@ MIXED:
 ```
 User request
   -> Socratic questioning via AskUserQuestion (BLOCKS until answered)
-  -> Generate Gherkin spec files in specs/
-  -> Reality check: agent pre-checks for gaps, then user confirms via AskUserQuestion
-  -> If gaps found: ask more questions, regenerate specs
-  -> Create beads epic + one task per spec + Tests gate task
+  -> Decompose: apply independence test, identify seams, produce decomposition map
+  -> Generate Gherkin spec files in specs/ (one per entry in decomposition map)
+  -> Reality check: agent pre-checks for gaps, shows dependency graph, user confirms
+  -> If gaps found: ask more questions, re-decompose, regenerate specs
+  -> Create beads epic + Tests gate task
   -> SRE refinement on tasks (when specs have multiple scenarios/rules)
   -> Exit: all specs @status(approved), beads tasks created
 ```
@@ -63,6 +64,7 @@ Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists
 - `@status(draft|approved|implemented|verified)` — lifecycle tracking (required on every spec)
 - `@depends-on(feature-slug)` — this feature requires another feature to be implemented first
 - `@blocks(feature-slug)` — another feature depends on this one
+- `@parallel-risk(feature-slug)` — this spec modifies the same files as another independent spec. Both specs remain parallel (no `@depends-on` added). /build warns about potential merge conflicts and builds the smaller spec first.
 - Custom domain tags: `@auth`, `@api`, `@ui`, `@security`, etc. — categorization
 
 ### Greenfield Rebuild Principle
@@ -289,6 +291,38 @@ project/
   src/
   tests/
 ```
+
+### Decomposition Heuristics
+
+When generating multiple specs, use these heuristics to decide what should be a separate spec vs. scenarios within one spec.
+
+#### The Independence Test
+
+A piece of work is independent from another if:
+1. You can write tests for it without the other piece existing
+2. It has its own inputs and outputs (even if they share a file)
+3. Removing it doesn't break the other piece's tests
+
+If all three hold, the pieces should be **separate specs**. If any fail, they belong in the **same spec** (as scenarios under different Rules).
+
+#### Seam Types
+
+Look for these natural boundaries when decomposing:
+
+| Seam | Example | Signal |
+|------|---------|--------|
+| Data boundary | API endpoint vs. CLI command — different input sources, same DB | Different entry points to the system |
+| Lifecycle boundary | User registration vs. user authentication — different user journeys | Different "when" triggers |
+| Consumer boundary | Admin dashboard vs. public API — different audiences | Different "who" uses it |
+| Layer boundary | Database schema vs. API routes vs. UI components | Can be built bottom-up independently |
+| Rule boundary | Validation rules vs. business logic vs. formatting | Different "what kind" of behavior |
+
+#### Parallel Risk: File Overlap
+
+When two independent specs will modify the same file:
+- Tag both specs with `@parallel-risk(other-spec-slug)`
+- They remain parallel (do NOT add `@depends-on`)
+- /build warns about potential merge conflicts and builds the smaller spec first
 </gherkin_spec_reference>
 
 <when_to_use>
@@ -336,9 +370,49 @@ Questions to stabilize:
 
 For simple changes (typo, rename, config), 0-1 questions may suffice — the request itself may be fully specified. Don't ask questions for the sake of asking.
 
+## Step 2.5: Decompose
+
+Before generating specs, apply the decomposition heuristics (see Decomposition Heuristics in gherkin_spec_reference) to identify how the work should be split.
+
+**Inputs:** Answers from Socratic questioning.
+**Outputs:** A decomposition map — list of specs to generate with their `@depends-on` and `@parallel-risk` relationships.
+
+### Process
+
+1. **Apply the independence test** to the work: can each piece be tested without the others existing? Does each have its own inputs/outputs? Would removing one break the other's tests?
+2. **Scan for seams** — look for data boundaries, lifecycle boundaries, consumer boundaries, layer boundaries, and rule boundaries (see Seam Types table).
+3. **Build the decomposition map** — list each spec to generate, with:
+   - Feature name and slug
+   - `@depends-on` relationships (pieces that fail the independence test)
+   - `@parallel-risk` relationships (independent pieces that modify the same file)
+4. **Skip for trivially single-behavior work** — typo fixes, renames, config changes. If the request maps to one cohesive behavior with no seams, the decomposition map is one entry. No seam analysis needed.
+
+### Example Decomposition Maps
+
+**Single behavior (no decomposition):**
+```
+Decomposition map:
+1. fix-readme-typo (no dependencies)
+```
+
+**Two independent behaviors:**
+```
+Decomposition map:
+1. cli-export-command (no dependencies)
+2. api-export-endpoint (no dependencies, @parallel-risk: cli-export-command — both modify exports.ts)
+```
+
+**Behaviors with shared dependency:**
+```
+Decomposition map:
+1. user-data-model (no dependencies)
+2. user-registration (@depends-on: user-data-model)
+3. user-authentication (@depends-on: user-data-model, @parallel-risk: user-registration — both modify user-routes.ts)
+```
+
 ## Step 3: Generate Gherkin Spec Files
 
-After all questions are answered, generate spec files in `specs/`:
+After decomposition, generate one spec file per entry in the decomposition map:
 
 ```bash
 # 1. Ensure specs/ directory exists
@@ -351,11 +425,12 @@ mkdir -p specs
 # Complexity scales naturally:
 #   - Simple change: Feature + 1-3 Scenarios
 #   - Standard feature: Feature + As/I want/So that + Technical Context + Rules + Scenarios
-#   - Complex/multi-feature: Multiple spec files with @depends-on/@blocks
+#   - Complex/multi-feature: Multiple spec files with @depends-on/@blocks/@parallel-risk
 
 # 4. For multi-spec designs, verify dependency integrity
 # Every @depends-on(x) must have a corresponding specs/x.md
 # Every @blocks(x) must have a corresponding specs/x.md
+# Every @parallel-risk(x) must reference another existing spec
 # No circular dependencies
 ```
 
@@ -376,6 +451,7 @@ Mentally compare the generated specs against the user's original request:
 - Does every requirement from the original ask have at least one spec scenario?
 - Are there specs that address things the user didn't ask for? (scope creep)
 - Are the `@depends-on` relationships correct?
+- Are `@parallel-risk` tags consistent? (mutual references, no phantom slugs)
 - For greenfield: does the system spec + feature specs cover the entire application?
 
 ### Part 2: User Confirmation
@@ -389,9 +465,17 @@ Present the specs to the user via AskUserQuestion:
 - specs/feature-a.md — [summary] (X scenarios)
 - specs/feature-b.md — [summary] (Y scenarios, depends on feature-a)
 
+[Dependency graph showing build order and parallel lanes]
+Build order:
+  feature-a          (no dependencies)
+  feature-b          (depends on: feature-a)
+  feature-c          (no dependencies) ▐ parallel with feature-a
+  ⚠ feature-a and feature-c: @parallel-risk — both modify server.ts
+
 [Note any gaps or assumptions identified in Part 1]
 
-Do these specs capture what you asked for?"
+Do these specs capture what you asked for? You can also request re-decomposition
+('these two should be one spec' or 'this should be split further')."
 ```
 
 Options:
@@ -479,7 +563,6 @@ This ensures the /build skill (which uses executing-plans) naturally reads spec 
 - All spec files exist in `specs/` with `@status(approved)`
 - Beads epic created referencing spec files
 - Tests gate task created in epic
-- Beads epic + per-spec tasks + Tests gate task created
 - User has confirmed specs via reality check
 - Task docs (if brainstorming was used) reference specs
 
@@ -496,6 +579,8 @@ This ensures the /build skill (which uses executing-plans) naturally reads spec 
 **Step 1:** "I'm using the /design skill."
 
 **Step 2:** No questions needed — request is fully specified.
+
+**Step 2.5:** Single behavior, no seams — decomposition map: one entry (fix-readme-typo, no dependencies). Seam analysis skipped.
 
 **Step 3:** Generate `specs/fix-readme-typo.md`:
 ```markdown
@@ -532,6 +617,8 @@ Correct the misspelling 'recieve' to 'receive' across the project.
 - "Should there be a max radius? What's a reasonable upper bound?"
 - "Should the endpoint require authentication or be public?"
 
+**Step 2.5:** One cohesive behavior — decomposition map: one entry (nearby-breweries-endpoint, no dependencies).
+
 **Step 3:** Generate `specs/nearby-breweries-endpoint.md` with full Standard structure (As/I want/So that, Technical Context, Rules, Scenarios for happy path + error cases).
 
 **Step 4:** Reality check:
@@ -554,7 +641,13 @@ Correct the misspelling 'recieve' to 'receive' across the project.
 - Round 1: Provider (Google? GitHub?), token storage, session handling
 - Round 2: User model fields, role-based access, refresh token strategy
 
-**Step 3:** Generate multiple specs:
+**Step 2.5:** Three behaviors identified via independence test — registration and authentication fail the test (auth needs a registered user), so auth `@depends-on(user-registration)`. System spec is a shared foundation.
+Decomposition map:
+1. system (no dependencies)
+2. user-registration (@depends-on: system)
+3. user-authentication (@depends-on: user-registration)
+
+**Step 3:** Generate multiple specs (one per decomposition map entry):
 - `specs/system.md` — tech stack, data model (User entity), API conventions
 - `specs/user-registration.md` — @blocks(user-authentication)
 - `specs/user-authentication.md` — @depends-on(user-registration), @blocks(payment-processing)
@@ -610,11 +703,13 @@ Before claiming /design is complete:
 - [ ] All critical questions asked via AskUserQuestion (not text)
 - [ ] User answered all critical questions before proceeding
 - [ ] No investigation agents dispatched during design
+- [ ] Decomposition heuristics applied (independence test, seam scan) — or skipped for trivially single-behavior work
+- [ ] Decomposition map produced before spec generation
 - [ ] Gherkin spec file(s) generated in `specs/`
 - [ ] System spec generated for greenfield projects
 - [ ] All specs tagged with `@status(approved)` (after reality check)
-- [ ] Dependency integrity verified (all @depends-on/@blocks reference existing specs)
-- [ ] Reality check passed: agent pre-checked for gaps AND user confirmed via AskUserQuestion
+- [ ] Dependency integrity verified (all @depends-on/@blocks/@parallel-risk reference existing specs)
+- [ ] Reality check passed: agent pre-checked for gaps, showed dependency graph, offered re-decomposition, AND user confirmed via AskUserQuestion
 - [ ] Beads epic created referencing spec files
 - [ ] Mandatory Tests gate task exists in epic
 - [ ] Task docs (if brainstorming used) reconciled with spec references
@@ -662,5 +757,27 @@ REFUSE. Design is non-negotiable. Explain: "Specs are required for /build to wor
 
 ## Existing specs in project
 Read existing specs to understand context and dependencies. New specs should integrate with the existing dependency graph via `@depends-on`/`@blocks` tags.
+
+## Decomposing an existing spec
+
+When a user asks to decompose/split an existing spec that turns out to be too large (often discovered during /build):
+
+1. **Read the existing spec** — understand its scenarios, rules, and dependencies
+2. **Apply decomposition heuristics** — use the independence test and seam types from the Decomposition Heuristics reference to identify natural split points
+3. **Generate replacement specs** — create one spec per independent piece, with correct `@depends-on` and `@parallel-risk` tags
+4. **Preserve and refine dependencies:**
+   - If the original spec had `@blocks(X)` or was referenced as `@depends-on` by other specs, ask the user via AskUserQuestion which replacement spec is the real dependency
+   - Edit each dependent spec file to update its `@depends-on` tag from the original slug to the correct replacement slug
+5. **Preserve status:**
+   - If original was `@status(approved)` → all replacements get `@status(approved)`
+   - If original was `@status(implemented)` → completed behaviors get `@status(implemented)`, incomplete get `@status(approved)`
+6. **Confirm status assignments via AskUserQuestion** (mandatory for partially-implemented specs) — present the proposed status for each replacement spec and block until the user confirms
+7. **Update beads:**
+   - Close the original beads task that referenced the old spec
+   - Create new beads tasks for each replacement spec
+   - Preserve the Tests gate task (do not duplicate it)
+8. **Remove the original spec file** — the replacements fully supersede it
+
+**No full Socratic re-questioning needed.** The design was already confirmed — this is a structural refactor of the spec, not a re-design.
 
 </edge_cases>
