@@ -7,18 +7,20 @@ An enforced, spec-driven developer workflow with two skills: `/design` for Socra
 Every task flows through two phases:
 
 ### /design — Shape the Work
-1. **Socratic Questioning** — Ask focused questions via AskUserQuestion (blocks until answered)
-2. **Spec Generation** — Generate Gherkin-style Markdown spec files in `specs/`
-3. **Reality Check** — Agent pre-checks specs for gaps, then user confirms via AskUserQuestion
-4. **Beads Setup** — Create epic + Tests gate task referencing spec files
+1. **Socratic Questioning** — Ask focused questions via AskUserQuestion (blocks until answered). Internet research (`internet-researcher`) allowed to inform questions and validate feasibility.
+2. **Decompose** — Apply independence test and seam analysis to break work into well-sized specs. Produces a decomposition map with `@depends-on` and `@parallel-risk` relationships.
+3. **Validate Feasibility** — For external APIs/libraries, dispatch `internet-researcher` to verify technical claims before writing specs.
+4. **Spec Generation** — Generate Gherkin-style Markdown spec files in `specs/`, one per entry in the decomposition map.
+5. **Reality Check** — Agent pre-checks specs for gaps, shows dependency graph with parallel lanes, user confirms (can request re-decomposition).
+6. **Beads Setup** — Create epic + Tests gate task referencing spec files.
 
 ### /build — Implement the Specs
 1. **Entry Validation** — Verify specs exist with `@status(approved)`, check beads for open work
-2. **Dependency Graph** — Parse `@depends-on` tags, topological sort for build order
+2. **Dependency Graph** — Parse `@depends-on` and `@parallel-risk` tags, topological sort for build order. Show graph with parallel lanes, user confirms execution plan.
 3. **Per-Spec Iteration** (auto-iterates all specs in order):
    - **Investigate** — Codebase analysis, create informed beads task with real file paths
    - **TDD** — RED: failing tests from spec scenarios. GREEN: implement. REFACTOR.
-   - **Verify** — Full test suite + code review + spec coverage + test effectiveness (NEVER scales down)
+   - **Verify** — Full test suite + code review + spec coverage + test effectiveness (NEVER scales down). Status updates blocked until verification agents return and pass.
    - **Update** — `@status(verified)`, close beads task
 4. **Close** — Close epic, update README, save learnings
 
@@ -39,9 +41,13 @@ Every task flows through two phases:
 │   ├── block-unread-edits.sh           # Blocks edits on unread files
 │   ├── clear-session-reads.sh          # Resets read tracking per session
 │   ├── require-bead-description.sh     # Enforces --description on bd create
+│   ├── remind-integration-tests.sh     # Reminds to write integration tests after code review
+│   ├── verifier-dispatch.sh            # Tracks verification agent dispatch
+│   ├── verifier-return.sh              # Tracks verification results, blocks premature closure
 │   ├── wwiwo.sh                        # "What Was I Working On?" — beads + spec status
 │   ├── workflow-reminder.sh            # Context-aware reminder (/design vs /build)
 │   └── check-open-beads.sh            # Warns about open tasks + non-verified specs on session end
+├── specs/                              # Gherkin spec files (per-project, not shipped)
 └── benchmarks/
     ├── 01-quick-fix-typo.md            # Quick tier benchmark
     ├── 02-quick-add-field.md           # Quick tier benchmark
@@ -137,6 +143,7 @@ So that I can find nearby breweries for a given coordinate
 | `@status(draft\|approved\|implemented\|verified)` | Lifecycle tracking |
 | `@depends-on(feature-slug)` | This feature requires another feature |
 | `@blocks(feature-slug)` | Another feature depends on this one |
+| `@parallel-risk(feature-slug)` | Independent specs that modify the same files — warns about merge conflicts, recommends building smaller first |
 | `@system` | Marks the system-level spec |
 | Custom: `@auth`, `@api`, `@ui`, etc. | Domain categorization |
 
@@ -170,6 +177,9 @@ For greenfield projects, the complete set of specs in `specs/` must be sufficien
 | `block-unread-edits.sh` | PreToolUse (Edit/Write) | Blocks edits on files that haven't been read first |
 | `require-bead-description.sh` | PreToolUse (Bash) | Enforces `--description` flag on `bd create` commands |
 | `track-reads.sh` | PostToolUse (Read/Grep/Glob) | Tracks which files have been read (used by block-unread-edits) |
+| `remind-integration-tests.sh` | PostToolUse (Agent) | Reminds to write integration tests after code review agents return |
+| `verifier-dispatch.sh` | PreToolUse (Agent) | Tracks when verification agents are dispatched |
+| `verifier-return.sh` | PostToolUse (Agent) | Tracks verification agent results; blocks premature task closure |
 | `wwiwo.sh` | UserPromptSubmit (matcher: `wwiwo`) | Shows beads tasks + Gherkin spec statuses |
 | `workflow-reminder.sh` | UserPromptSubmit | Context-aware: suggests `/build` if approved specs exist, `/design` if not |
 | `check-open-beads.sh` | Stop | Warns about open beads tasks + non-verified specs on session end |
@@ -219,8 +229,12 @@ The retrospective needs completed beads epics to analyze. After a fresh install:
 - **Specs are the source of truth** — Gherkin spec files in `specs/` define what to build; beads tracks sub-task progress
 - **Specs enable full rebuild** — For greenfield projects, specs capture enough detail to reconstruct the entire app
 - **Specs are living documents** — Updated during implementation as edge cases are discovered, not frozen after planning
+- **Decompose at natural seams** — Work is split into multiple specs using the independence test: if you can test it without the other thing existing, it's a separate spec. No arbitrary thresholds.
+- **Parallelism is first-class** — Independent specs can be built in parallel. `@parallel-risk` flags file overlap without blocking. /build shows the dependency graph and asks before dispatching.
+- **Research informs, never replaces asking** — Internet research during /design makes questions sharper and validates feasibility, but findings become questions to the user, not silent assumptions.
 - **Spec-driven TDD** — Tests are generated FROM spec scenarios before implementation. No exceptions.
 - **Verification never scales down** — Full suite + code review agent + spec coverage check on every spec
+- **Verification gates completion** — Status updates and task closures are blocked until verification agents return results and pass. No "updating while waiting."
 - **Questioning blocks on user answers** — AskUserQuestion tool required, no proceeding without answers
 - **Tasks created after investigation** — /build creates beads tasks with real codebase context, not guesswork
 - **Pause on spec drift** — Fundamental spec changes require /design, not silent fixes during /build
