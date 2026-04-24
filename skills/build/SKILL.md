@@ -614,6 +614,7 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 11. **Always use subagents** -> Investigation, code review, test running, test analysis = subagents. Never do manually what an agent can do.
 12. **Continuous verifier for multi-scenario specs** -> Spawn when first task starts. Reviews 5 dimensions per task. CRITICAL blocks closure.
 13. **New spec scenarios get failing tests FIRST** -> If you add a scenario during implementation, write its failing test before implementing it.
+14. **Never update status while verification is in flight** -> Do NOT update `@status` or close beads tasks while verification agents are still running. Verification results MUST be received and passed BEFORE any status change or closure. "While waiting for verification" is never a valid reason to update status — that is the one thing that depends on the results.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -623,6 +624,7 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 - "I'll investigate while coding" -> Investigate FIRST, log findings, THEN code.
 - "I'll review the code myself" -> Code review agent catches things you'll miss. Always dispatch.
 - "The continuous verifier already covered this" -> Verifier checks per-task diffs. Final verification checks full epic. Both required.
+- "I'll update the status while waiting for verification" -> NO. Status updates and task closures depend on verification results. Wait for agents to return, confirm they passed, THEN update. Doing it early defeats the entire purpose of verification as a gate.
 - "SRE refinement will just say 'same as pattern'" -> Not valid output. Every task has unique edge cases.
 - "Investigation findings are obvious" -> The log is for post-mortem later, not for you now.
 - "I'll write tests without reading the spec" -> Tests MUST come from spec scenarios. No freelancing.
