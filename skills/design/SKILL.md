@@ -355,10 +355,11 @@ Ask focused questions using AskUserQuestion until you can fully define the work.
 
 Enforcement rules:
 1. **Use AskUserQuestion tool** — Do NOT print questions as text. AskUserQuestion blocks execution until the user responds. Text questions do not block and lead to proceeding without answers.
-2. **Do NOT dispatch investigation agents** — Investigation is /build's job. Dispatching codebase-investigator during design leads to the agent rationalizing that it has "enough context" to skip the user's answers.
-3. **Do NOT proceed until answers are received** — If you asked a question, you must receive and incorporate the answer before moving forward. "Making reasonable defaults for ambiguous parts" is not acceptable.
-4. **Multiple rounds are expected for complex work** — If the work involves new features, integrations, or architectural decisions, one round of questions is probably insufficient.
-5. **Research agents during questioning inform questions, not replace them** — If you learn the project uses passport.js, that informs what to ask, it doesn't eliminate the need to ask.
+2. **Do NOT dispatch codebase investigation agents** — Codebase investigation is /build's job. Dispatching codebase-investigator during design leads to the agent rationalizing that it has "enough context" to skip the user's answers.
+3. **Internet research IS allowed** — Dispatch `hyperpowers:internet-researcher` to research the user's domain, tech choices, API capabilities, and library constraints. This makes questions sharper. If research reveals a problem or constraint, surface it as a new question to the user — do NOT silently assume or skip asking.
+4. **Do NOT proceed until answers are received** — If you asked a question, you must receive and incorporate the answer before moving forward. "Making reasonable defaults for ambiguous parts" is not acceptable.
+5. **Multiple rounds are expected for complex work** — If the work involves new features, integrations, or architectural decisions, one round of questions is probably insufficient.
+6. **Research informs and validates — it never replaces asking** — If you learn the project uses passport.js, that informs what to ask, it doesn't eliminate the need to ask. If research shows an API doesn't support webhooks, that becomes a question ("The Stripe API doesn't support X — how should we handle this?"), not a silent design decision.
 
 Questions to stabilize:
 - **What** — What is being built/changed/fixed?
@@ -410,9 +411,28 @@ Decomposition map:
 3. user-authentication (@depends-on: user-data-model, @parallel-risk: user-registration — both modify user-routes.ts)
 ```
 
+## Step 2.75: Validate Feasibility (when applicable)
+
+For work involving external APIs, third-party libraries, unfamiliar protocols, or technical claims from the user, dispatch `hyperpowers:internet-researcher` to verify:
+
+- **API contracts** — Does the API actually support the operations the user described? What are the real request/response shapes?
+- **Library capabilities** — Does the library handle the use case? Are there version constraints or known limitations?
+- **Protocol/standard compliance** — Is the approach compatible with the relevant standards (OAuth2, JWT, WebSocket, etc.)?
+
+```
+Agent tool (subagent_type: hyperpowers:internet-researcher):
+"Verify technical feasibility for [feature description].
+Check: [specific claims to validate — API capabilities, library support, etc.]
+Report: confirmed capabilities, limitations, and anything that contradicts the current design assumptions."
+```
+
+**If research reveals problems:** Surface them as new questions to the user via AskUserQuestion. Do NOT silently adjust the design. Example: "Research shows the Stripe API doesn't support partial refunds on ACH transfers. Should we handle this differently?"
+
+**Skip this step for:** Work that doesn't involve external dependencies, well-understood internal changes, typo fixes, config changes.
+
 ## Step 3: Generate Gherkin Spec Files
 
-After decomposition, generate one spec file per entry in the decomposition map:
+After decomposition and feasibility validation, generate one spec file per entry in the decomposition map:
 
 ```bash
 # 1. Ensure specs/ directory exists
@@ -671,7 +691,7 @@ Each with full Technical Context, Rules, Scenario Outlines with Examples tables.
 ## Rules That Have No Exceptions
 
 1. **All questions via AskUserQuestion** -> Blocks execution until user responds. Text questions do not block.
-2. **No investigation during design** -> Investigation is /build's job. Dispatching agents during questioning leads to skipping user answers.
+2. **No codebase investigation during design** -> Codebase investigation is /build's job. Internet research (hyperpowers:internet-researcher) IS allowed — it informs questions and validates feasibility, but never replaces asking the user.
 3. **No proceeding without answers** -> "Making reasonable defaults for ambiguous parts" is not acceptable.
 4. **Every design produces spec files** -> All work gets specs in `specs/`. Simple work gets simple specs (Feature + 1-3 Scenarios). Complex work gets multiple specs with dependencies.
 5. **Reality check before approval** -> Agent pre-checks for gaps, then user confirms. Both parts required.
@@ -685,7 +705,7 @@ Each with full Technical Context, Rules, Scenario Outlines with Examples tables.
 - "It's just a typo" -> Simple work gets simple specs. Still gets a spec file.
 - "The user is in a hurry" -> Skipping design creates bugs that cost more time later.
 - "I know this codebase well enough" -> Your knowledge doesn't replace user intent. Ask questions.
-- "I'll investigate while waiting for answers" -> NO. Investigation is /build's job. This leads to skipping user answers entirely.
+- "I'll investigate the codebase while waiting for answers" -> NO. Codebase investigation is /build's job. This leads to skipping user answers entirely. Internet research is fine — it makes questions better.
 - "I'll make reasonable defaults for the ambiguous parts" -> NO. Ambiguity is exactly what questions resolve.
 - "The user's description is detailed enough" -> Detailed descriptions still have hidden constraints. Ask critical questions.
 - "I have enough context from the codebase" -> Codebase context informs what to ask, it doesn't replace asking.
@@ -702,7 +722,8 @@ Before claiming /design is complete:
 
 - [ ] All critical questions asked via AskUserQuestion (not text)
 - [ ] User answered all critical questions before proceeding
-- [ ] No investigation agents dispatched during design
+- [ ] No codebase investigation agents dispatched during design (internet research is allowed)
+- [ ] Feasibility validated via internet-researcher (when external APIs/libraries involved) — or skipped for internal-only changes
 - [ ] Decomposition heuristics applied (independence test, seam scan) — or skipped for trivially single-behavior work
 - [ ] Decomposition map produced before spec generation
 - [ ] Gherkin spec file(s) generated in `specs/`
@@ -723,6 +744,7 @@ Before claiming /design is complete:
 | Skill / Tool | When |
 |---|---|
 | AskUserQuestion | Socratic questioning + reality check confirmation |
+| hyperpowers:internet-researcher | During questioning (inform better questions) + feasibility validation (Step 2.75) |
 | hyperpowers:brainstorming | For complex work requiring approach comparison |
 | hyperpowers:sre-task-refinement | On non-trivial implementation tasks |
 
