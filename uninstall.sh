@@ -57,17 +57,22 @@ restore_or_remove() {
 
 # 1. Remove skills
 echo "[1/3] Removing skills..."
+restore_or_remove "$CLAUDE_DIR/skills/design/SKILL.md"
+restore_or_remove "$CLAUDE_DIR/skills/build/SKILL.md"
 restore_or_remove "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md"
 restore_or_remove "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
 
 # Clean up empty skill directories
+rmdir "$CLAUDE_DIR/skills/design" 2>/dev/null || true
+rmdir "$CLAUDE_DIR/skills/build" 2>/dev/null || true
 rmdir "$CLAUDE_DIR/skills/workflow-orchestrator" 2>/dev/null || true
 rmdir "$CLAUDE_DIR/skills/workflow-retrospective" 2>/dev/null || true
 
 # 2. Remove hooks
 echo "[2/3] Removing hooks..."
 for hook in _common.sh beads-auto-resume.sh block-unread-edits.sh check-open-beads.sh \
-            clear-session-reads.sh require-bead-description.sh track-reads.sh \
+            clear-session-reads.sh remind-integration-tests.sh require-bead-description.sh \
+            track-reads.sh verifier-dispatch.sh verifier-return.sh \
             wwiwo.sh workflow-reminder.sh; do
     restore_or_remove "$CLAUDE_DIR/hooks/$hook"
 done
@@ -105,7 +110,9 @@ if not hooks:
 # Our hooks all reference scripts in ~/.claude/hooks/
 our_scripts = {
     'beads-auto-resume.sh', 'block-unread-edits.sh', 'check-open-beads.sh',
-    'clear-session-reads.sh', 'require-bead-description.sh', 'track-reads.sh',
+    'clear-session-reads.sh', 'remind-integration-tests.sh',
+    'require-bead-description.sh', 'track-reads.sh',
+    'verifier-dispatch.sh', 'verifier-return.sh',
     'workflow-reminder.sh', 'wwiwo.sh'
 }
 

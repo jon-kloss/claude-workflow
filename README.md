@@ -1,18 +1,26 @@
 # Adaptive Developer Workflow for Claude Code
 
-An enforced, adaptive developer workflow that classifies tasks into Quick/Standard/Complex tiers and chains 6 mandatory phases with deterministic quality gates.
+An enforced, spec-driven developer workflow with two skills: `/design` for Socratic planning and Gherkin spec generation, `/build` for spec-driven TDD implementation with dependency ordering and full verification.
 
 ## What It Does
 
-Every task goes through:
-1. **Classify** - Quick / Standard / Complex based on scope and complexity
-2. **Plan** - Brainstorm via AskUserQuestion (blocks until answered), then create beads epic with mandatory Tests task
-3. **Investigate** - Read codebase before writing (depth scales with tier, only after brainstorming answers received)
-4. **Implement** - TDD always (review rigor scales with tier)
-5. **Verify** - Full test suite + code review + test-effectiveness-analyst agents (NEVER scales down)
-6. **Close** - Close beads, update README if applicable, save learnings to memory
+Every task flows through two phases:
 
-Planning depth scales with complexity. **Verification never does.**
+### /design — Shape the Work
+1. **Socratic Questioning** — Ask focused questions via AskUserQuestion (blocks until answered)
+2. **Spec Generation** — Generate Gherkin-style Markdown spec files in `specs/`
+3. **Reality Check** — Agent pre-checks specs for gaps, then user confirms via AskUserQuestion
+4. **Beads Setup** — Create epic + Tests gate task referencing spec files
+
+### /build — Implement the Specs
+1. **Entry Validation** — Verify specs exist with `@status(approved)`, check beads for open work
+2. **Dependency Graph** — Parse `@depends-on` tags, topological sort for build order
+3. **Per-Spec Iteration** (auto-iterates all specs in order):
+   - **Investigate** — Codebase analysis, create informed beads task with real file paths
+   - **TDD** — RED: failing tests from spec scenarios. GREEN: implement. REFACTOR.
+   - **Verify** — Full test suite + code review + spec coverage + test effectiveness (NEVER scales down)
+   - **Update** — `@status(verified)`, close beads task
+4. **Close** — Close epic, update README, save learnings
 
 ## What's Included
 
@@ -21,17 +29,19 @@ Planning depth scales with complexity. **Verification never does.**
 ├── install.sh                          # One-command installer (symlinks + backup)
 ├── uninstall.sh                        # Restores originals and removes symlinks
 ├── skills/
-│   ├── workflow-orchestrator/SKILL.md  # Master workflow skill
+│   ├── design/SKILL.md                 # /design — Socratic questioning + spec generation
+│   ├── build/SKILL.md                  # /build — Spec-driven TDD + verification
+│   ├── workflow-orchestrator/SKILL.md  # Deprecated — redirects to /design + /build
 │   └── workflow-retrospective/SKILL.md # Metrics analysis skill
 ├── hooks/
-│   ├── beads-auto-resume.sh            # Surfaces in-progress/ready work on session start
+│   ├── beads-auto-resume.sh            # Surfaces in-progress work + spec statuses on session start
 │   ├── track-reads.sh                  # Tracks Read/Grep/Glob calls
 │   ├── block-unread-edits.sh           # Blocks edits on unread files
 │   ├── clear-session-reads.sh          # Resets read tracking per session
 │   ├── require-bead-description.sh     # Enforces --description on bd create
-│   ├── wwiwo.sh                        # "What Was I Working On?" — type wwiwo? to see work status
-│   ├── workflow-reminder.sh            # Reminds to use workflow on code changes
-│   └── check-open-beads.sh            # Warns about open tasks on session end
+│   ├── wwiwo.sh                        # "What Was I Working On?" — beads + spec status
+│   ├── workflow-reminder.sh            # Context-aware reminder (/design vs /build)
+│   └── check-open-beads.sh            # Warns about open tasks + non-verified specs on session end
 └── benchmarks/
     ├── 01-quick-fix-typo.md            # Quick tier benchmark
     ├── 02-quick-add-field.md           # Quick tier benchmark
@@ -72,26 +82,97 @@ the same drive).
 
 After installation, restart Claude Code (or `/clear`). Then:
 
-1. **Start any task** - the workflow-orchestrator skill activates automatically
-2. **Auto-resume** - on session start, you'll be shown any in-progress or ready beads work
-3. **Type `wwiwo?`** - "What Was I Working On?" shows in-progress, ready, and recently closed work at any time
-4. **Follow the phases** - Claude classifies the tier and chains the right skills
-5. **Brainstorming blocks** - for Standard/Complex tiers, Claude asks questions via AskUserQuestion and waits for your answers before proceeding
-6. **After 3+ completed epics** - run `/workflow-retrospective` to analyze effectiveness
-7. **Run benchmarks** - use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
+1. **`/design`** — Start new work. Socratic questioning shapes the design, Gherkin specs are generated, reality check confirms with you, beads epic is created.
+2. **`/build`** — Implement approved specs. Auto-iterates through specs in dependency order: investigate, TDD, verify.
+3. **Auto-resume** — On session start, you'll see in-progress beads work AND spec statuses
+4. **Type `wwiwo?`** — Shows beads tasks + spec statuses at any time
+5. **After 3+ completed epics** — Run `/workflow-retrospective` to analyze effectiveness
+6. **Run benchmarks** — Use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
+
+## Gherkin Spec Files
+
+Both skills generate and consume Gherkin-style Markdown spec files in `specs/`. These specs are the **source of truth** for design intent — beads epics link to them, they don't contain inline requirements.
+
+### Format
+
+Specs use Markdown Gherkin: `#` headings for keywords, `- ` bullet lists for steps, `@tags` for metadata.
+
+```markdown
+@status(draft)
+@api @breweries
+
+# Feature: Nearby Breweries Endpoint
+
+As an API consumer
+I want to query breweries by location
+So that I can find nearby breweries for a given coordinate
+
+## Technical Context
+
+- **Endpoint**: GET /api/breweries/nearby
+- **Parameters**: lat (float), lng (float), radius (integer, miles)
+- **Response**: Array of Brewery objects sorted by distance
+
+## Rule: Valid coordinates return nearby results
+
+### Scenario: Successful nearby query
+
+- Given breweries exist within 10 miles of coordinates 40.7128, -74.0060
+- When I GET /api/breweries/nearby?lat=40.7128&lng=-74.0060&radius=10
+- Then I receive a 200 response
+- And the response contains breweries sorted by distance
+```
+
+### Spec Types
+
+| Type | File | When |
+|------|------|------|
+| **System spec** | `specs/system.md` | Greenfield projects and major architectural changes. Captures tech stack, data model, feature map, API conventions. |
+| **Feature spec** | `specs/<feature-slug>.md` | Every feature. Self-contained with `@depends-on`/`@blocks` tags for cross-feature relationships. |
+
+### Tags
+
+| Tag | Purpose |
+|-----|---------|
+| `@status(draft\|approved\|implemented\|verified)` | Lifecycle tracking |
+| `@depends-on(feature-slug)` | This feature requires another feature |
+| `@blocks(feature-slug)` | Another feature depends on this one |
+| `@system` | Marks the system-level spec |
+| Custom: `@auth`, `@api`, `@ui`, etc. | Domain categorization |
+
+### Spec Complexity (Inferred)
+
+Spec complexity scales naturally with the work. No explicit tier classification required.
+
+| Signal | Spec Style |
+|--------|------------|
+| 1-2 files, <50 lines change | Feature + 1-3 Scenarios. No Rules, no Background. |
+| Multi-file, new endpoint/component | Feature + As/I want/So that + Technical Context + Rules + Scenarios. |
+| New feature, greenfield, architectural | Multiple spec files with `@depends-on`/`@blocks`. System spec required. Scenario Outlines with Examples. |
+
+### Lifecycle
+
+1. **Draft** (`@status(draft)`) — Generated during `/design`
+2. **Approved** (`@status(approved)`) — After user confirms via reality check
+3. **Implemented** (`@status(implemented)`) — Updated during `/build` as edge cases discovered
+4. **Verified** (`@status(verified)`) — After `/build` verification passes
+
+### Greenfield Rebuild
+
+For greenfield projects, the complete set of specs in `specs/` must be sufficient to **rebuild the entire application from scratch**. The system spec + feature specs + dependency graph collectively capture everything needed: architecture, data models, API contracts, and all feature behaviors.
 
 ## Hooks
 
 | Hook | Event | What It Does |
 |------|-------|-------------|
-| `beads-auto-resume.sh` | SessionStart | Checks for in-progress/ready beads work and presents it to the user |
+| `beads-auto-resume.sh` | SessionStart | Checks for in-progress beads work + Gherkin spec statuses |
 | `clear-session-reads.sh` | SessionStart | Resets file read tracking so each session starts fresh |
 | `block-unread-edits.sh` | PreToolUse (Edit/Write) | Blocks edits on files that haven't been read first |
 | `require-bead-description.sh` | PreToolUse (Bash) | Enforces `--description` flag on `bd create` commands |
 | `track-reads.sh` | PostToolUse (Read/Grep/Glob) | Tracks which files have been read (used by block-unread-edits) |
-| `wwiwo.sh` | UserPromptSubmit (matcher: `wwiwo`) | "What Was I Working On?" — shows in-progress, ready, and recently closed work |
-| `workflow-reminder.sh` | UserPromptSubmit | Reminds Claude to use the workflow-orchestrator for code changes |
-| `check-open-beads.sh` | Stop | Warns about open beads tasks when the session ends |
+| `wwiwo.sh` | UserPromptSubmit (matcher: `wwiwo`) | Shows beads tasks + Gherkin spec statuses |
+| `workflow-reminder.sh` | UserPromptSubmit | Context-aware: suggests `/build` if approved specs exist, `/design` if not |
+| `check-open-beads.sh` | Stop | Warns about open beads tasks + non-verified specs on session end |
 
 ## Workflow Retrospective
 
@@ -105,7 +186,6 @@ The **workflow-retrospective** skill provides a data-driven feedback loop for co
 | Rework rate | <20% | How often tasks need fix-verify cycles |
 | Error type distribution | - | Pattern mismatches vs edge cases vs integration failures |
 | Phase effectiveness | - | Which phases catch errors (earlier = cheaper to fix) |
-| Tier classification accuracy | <10% reclassified | Whether Quick/Standard/Complex heuristics are calibrated |
 
 ### How to Run
 
@@ -129,27 +209,25 @@ The skill runs a 5-step process:
 ### Getting Started on a New Machine
 
 The retrospective needs completed beads epics to analyze. After a fresh install:
-1. Work through 3+ epics using the workflow-orchestrator
+1. Work through 3+ epics using /design + /build
 2. Run `/workflow-retrospective` for your first analysis
 3. The skill handles limited data gracefully - it notes data limitations and tells you when to re-run
 
-### Example Adjustments It Might Propose
-
-- Pattern mismatches >30% of errors? **Strengthen Phase 2** - require codebase-investigator for all tiers
-- Code review catches >50% of errors? **Earlier phases need strengthening** - errors should be caught sooner
-- Quick tier tasks taking >2 hours? **Recalibrate tier heuristics** - raise the bar for Quick
-
-All adjustments are **proposed, not auto-applied**. You review and approve before any workflow changes.
-
 ## Design Principles
 
-- **Verification never scales down** - Full suite + code review agent on every tier
-- **Brainstorming blocks on user answers** - AskUserQuestion tool required, no proceeding without answers
-- **Every epic has a Tests task** - Epic cannot close without it
-- **Hooks enforce, skills advise** - Deterministic gates, not suggestions
-- **Planning scales, verification doesn't** - Quick tasks get light planning but full verification
-- **Investigate before writing** - Hook blocks edits on files you haven't read
-- **Links, not copies** - Skills and hooks are linked (symlinks on macOS/Linux, hard links on Windows) so repo edits are instantly live
+- **Two skills, one workflow** — /design shapes work through questioning and specs; /build implements through TDD and verification. Clear separation of concerns.
+- **Specs are the source of truth** — Gherkin spec files in `specs/` define what to build; beads tracks sub-task progress
+- **Specs enable full rebuild** — For greenfield projects, specs capture enough detail to reconstruct the entire app
+- **Specs are living documents** — Updated during implementation as edge cases are discovered, not frozen after planning
+- **Spec-driven TDD** — Tests are generated FROM spec scenarios before implementation. No exceptions.
+- **Verification never scales down** — Full suite + code review agent + spec coverage check on every spec
+- **Questioning blocks on user answers** — AskUserQuestion tool required, no proceeding without answers
+- **Tasks created after investigation** — /build creates beads tasks with real codebase context, not guesswork
+- **Pause on spec drift** — Fundamental spec changes require /design, not silent fixes during /build
+- **Dependency-ordered execution** — /build processes specs in `@depends-on` topological order
+- **Hooks enforce, skills advise** — Deterministic gates, not suggestions
+- **Investigate before writing** — Hook blocks edits on files you haven't read
+- **Links, not copies** — Skills and hooks are linked so repo edits are instantly live
 
 ## Uninstall
 
