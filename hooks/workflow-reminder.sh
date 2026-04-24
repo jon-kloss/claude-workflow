@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Detect code-change requests and inject workflow-orchestrator reminder.
+# Detect code-change requests and inject /design + /build workflow reminder.
 # Uses simple keyword matching - fast and deterministic.
 # Runs on UserPromptSubmit.
 
@@ -48,7 +48,12 @@ if echo "$lower_text" | grep -qE '(can you (add|create|fix|build|implement|write
 fi
 
 if [ "$is_code_change" = true ]; then
-    echo '{"additionalContext": "\n[WORKFLOW] Use the workflow-orchestrator skill to classify this task (Quick/Standard/Complex) and follow the 5-phase workflow: Classify -> Plan (beads) -> Investigate -> Implement (TDD) -> Verify (full suite).\n"}'
+    # Check if approved specs already exist — suggest /build if so, /design if not
+    if [ -d "specs" ] && grep -rl '@status(approved)\|@status(implemented)' specs/ >/dev/null 2>&1; then
+        echo '{"additionalContext": "\n[WORKFLOW] Approved specs found in specs/. Use /build to implement them (investigate -> TDD -> verify). If you need to design new work, use /design first.\n"}'
+    else
+        echo '{"additionalContext": "\n[WORKFLOW] Use /design to shape this work: Socratic questioning -> Gherkin spec generation -> reality check -> beads setup. Then use /build to implement.\n"}'
+    fi
 else
     echo '{}'
 fi

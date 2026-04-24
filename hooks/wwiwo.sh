@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # "What Was I Working On?" — triggered by typing "wwiwo?" in the prompt.
-# Shows in-progress, ready, and recently closed beads work.
+# Shows in-progress, ready, and recently closed beads work + Gherkin spec statuses.
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
@@ -55,7 +55,66 @@ ${recent}
 "
 fi
 
-if [ -z "$in_progress" ] && [ -z "$ready" ] && [ -z "$recent" ]; then
+# Check Gherkin spec statuses
+spec_section=""
+if [ -d "specs" ]; then
+  approved=$(grep -rl '@status(approved)' specs/ 2>/dev/null | sort || true)
+  implemented=$(grep -rl '@status(implemented)' specs/ 2>/dev/null | sort || true)
+  draft=$(grep -rl '@status(draft)' specs/ 2>/dev/null | sort || true)
+  verified=$(grep -rl '@status(verified)' specs/ 2>/dev/null | sort || true)
+
+  if [ -n "$approved" ] || [ -n "$implemented" ] || [ -n "$draft" ] || [ -n "$verified" ]; then
+    spec_section="
+## Gherkin Specs
+"
+    if [ -n "$implemented" ]; then
+      spec_section+="**In Progress:**
+"
+      while IFS= read -r f; do
+        [ -n "$f" ] && spec_section+="- $f
+"
+      done <<< "$implemented"
+      spec_section+="
+"
+    fi
+    if [ -n "$approved" ]; then
+      spec_section+="**Approved (ready for /build):**
+"
+      while IFS= read -r f; do
+        [ -n "$f" ] && spec_section+="- $f
+"
+      done <<< "$approved"
+      spec_section+="
+"
+    fi
+    if [ -n "$draft" ]; then
+      spec_section+="**Draft (needs /design):**
+"
+      while IFS= read -r f; do
+        [ -n "$f" ] && spec_section+="- $f
+"
+      done <<< "$draft"
+      spec_section+="
+"
+    fi
+    if [ -n "$verified" ]; then
+      spec_section+="**Verified (complete):**
+"
+      while IFS= read -r f; do
+        [ -n "$f" ] && spec_section+="- $f
+"
+      done <<< "$verified"
+      spec_section+="
+"
+    fi
+  fi
+fi
+
+if [ -n "$spec_section" ]; then
+  msg+="$spec_section"
+fi
+
+if [ -z "$in_progress" ] && [ -z "$ready" ] && [ -z "$recent" ] && [ -z "$spec_section" ]; then
   msg+="
 No in-progress, ready, or recently closed work found in this project.
 "

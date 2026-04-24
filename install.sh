@@ -129,11 +129,17 @@ backup_and_link() {
 
 # 1. Install skills
 echo "[1/5] Installing skills..."
+mkdir -p "$CLAUDE_DIR/skills/design"
+mkdir -p "$CLAUDE_DIR/skills/build"
 mkdir -p "$CLAUDE_DIR/skills/workflow-orchestrator"
 mkdir -p "$CLAUDE_DIR/skills/workflow-retrospective"
+backup_and_link "$SCRIPT_DIR/skills/design/SKILL.md" "$CLAUDE_DIR/skills/design/SKILL.md"
+backup_and_link "$SCRIPT_DIR/skills/build/SKILL.md" "$CLAUDE_DIR/skills/build/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/workflow-orchestrator/SKILL.md" "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/workflow-retrospective/SKILL.md" "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
-echo "  - workflow-orchestrator linked"
+echo "  - /design linked"
+echo "  - /build linked"
+echo "  - workflow-orchestrator linked (deprecated — redirects to /design + /build)"
 echo "  - workflow-retrospective linked"
 
 # 2. Install hooks
@@ -148,6 +154,8 @@ echo "  - $hook_count hook scripts linked"
 
 # Write manifest of installed files (used by uninstall to identify our files)
 echo "# Workflow install manifest - do not edit" > "$MANIFEST_FILE"
+echo "$CLAUDE_DIR/skills/design/SKILL.md" >> "$MANIFEST_FILE"
+echo "$CLAUDE_DIR/skills/build/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md" >> "$MANIFEST_FILE"
 for hook in "$SCRIPT_DIR"/hooks/*.sh; do
@@ -217,6 +225,15 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/require-bead-description.sh"
+        }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/remind-integration-tests.sh"
         }
       ]
     }
@@ -328,7 +345,9 @@ echo ""
 echo "=== Installation Complete ==="
 echo ""
 echo "What was installed:"
-echo "  Skills:     ~/.claude/skills/workflow-orchestrator/SKILL.md ($LINK_TYPE)"
+echo "  Skills:     ~/.claude/skills/design/SKILL.md ($LINK_TYPE)"
+echo "              ~/.claude/skills/build/SKILL.md ($LINK_TYPE)"
+echo "              ~/.claude/skills/workflow-orchestrator/SKILL.md (deprecated redirect)"
 echo "              ~/.claude/skills/workflow-retrospective/SKILL.md ($LINK_TYPE)"
 echo "  Hooks:      ~/.claude/hooks/ ($hook_count scripts, $LINK_TYPE)"
 echo "  Config:     ~/.claude/settings.json (hooks added)"
@@ -339,5 +358,6 @@ echo "Run ./uninstall.sh to remove workflow and restore originals."
 echo ""
 echo "Next steps:"
 echo "  1. Restart Claude Code (or /clear) so hooks take effect"
-echo "  2. Start any task - the workflow-orchestrator skill will activate"
-echo "  3. After 3 completed epics, run /workflow-retrospective"
+echo "  2. Use /design to start new work (Socratic questioning + Gherkin specs)"
+echo "  3. Use /build to implement approved specs (TDD + verification)"
+echo "  4. After 3 completed epics, run /workflow-retrospective"
