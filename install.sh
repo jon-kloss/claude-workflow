@@ -131,14 +131,17 @@ backup_and_link() {
 echo "[1/5] Installing skills..."
 mkdir -p "$CLAUDE_DIR/skills/design"
 mkdir -p "$CLAUDE_DIR/skills/build"
+mkdir -p "$CLAUDE_DIR/skills/respec"
 mkdir -p "$CLAUDE_DIR/skills/workflow-orchestrator"
 mkdir -p "$CLAUDE_DIR/skills/workflow-retrospective"
 backup_and_link "$SCRIPT_DIR/skills/design/SKILL.md" "$CLAUDE_DIR/skills/design/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/build/SKILL.md" "$CLAUDE_DIR/skills/build/SKILL.md"
+backup_and_link "$SCRIPT_DIR/skills/respec/SKILL.md" "$CLAUDE_DIR/skills/respec/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/workflow-orchestrator/SKILL.md" "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/workflow-retrospective/SKILL.md" "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
 echo "  - /design linked"
 echo "  - /build linked"
+echo "  - /respec linked"
 echo "  - workflow-orchestrator linked (deprecated — redirects to /design + /build)"
 echo "  - workflow-retrospective linked"
 
@@ -255,6 +258,14 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/workflow-reminder.sh"
+        }
+      ]
+    },
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/detect-correction.sh"
         }
       ]
     },
