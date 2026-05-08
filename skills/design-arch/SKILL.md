@@ -61,7 +61,7 @@ Approved specs in specs/
 - When stakeholders need a visual summary of the design
 - User types `/design-arch` directly
 
-**Skip for:** Trivial changes (typo fixes, renames, config changes) where there is no meaningful architecture to document. If the decomposition map has only one simple-spec entry with no dependencies, architecture documentation is unnecessary.
+**Skip ONLY when ALL three conditions are true:** (1) exactly one spec entry, (2) no `@depends-on`/`@blocks` relationships, (3) the change is a typo fix, rename, or config change. If any condition is false, run the skill. See Skip Criteria in critical_rules for the precise definition.
 </when_to_use>
 
 <the_process>
@@ -329,7 +329,17 @@ Options:
 2. **Gate check before presenting** → `ls` to verify files exist on disk. Missing file = go back and generate it.
 3. **User confirmation via AskUserQuestion** → Do not exit without user confirmation. BLOCK until confirmed.
 4. **overview.html is self-contained** → Inline CSS, no external dependencies. Must open in any browser with no build step.
-5. **Architecture diagrams use draw.io format** → .drawio files that can be opened in draw.io or diagrams.net.
+5. **Architecture diagrams use draw.io format** → .drawio files that can be opened in draw.io or diagrams.net. Not Mermaid, not SVG, not ASCII art. draw.io XML specifically.
+6. **Update, don't skip, when artifacts already exist** → If `specs/arch.md` or diagrams already exist from a previous /design-arch run, UPDATE them — preserve unchanged sections, add/modify sections for new or changed specs. Existing artifacts are the starting point, not a reason to skip.
+
+## Skip Criteria (Precise Definition)
+
+Skip /design-arch ONLY when ALL of these are true:
+- The decomposition map has **exactly one** spec entry
+- That spec has **no** `@depends-on` or `@blocks` relationships
+- The change is a **typo fix, rename, or config change** (not a behavioral change, not a new feature, not a bug fix that touches architecture)
+
+If any condition is false, /design-arch runs. "Two small specs" is not trivial. "A bug fix with a dependency" is not trivial. When in doubt, run the skill — concise output for simple work is fine, skipping is not.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -339,6 +349,10 @@ Options:
 - "One diagram is enough" → One diagram is the minimum. If the system has non-trivial data flow or deployment, add diagrams.
 - "The user didn't ask for architecture docs" → /design auto-invokes this skill. It's part of the design process, not an optional extra.
 - "I'll just describe the architecture in text" → Text is arch.md. Diagrams are diagrams. The overview page is visual. All three serve different purposes.
+- "Mermaid/ASCII diagrams are better than .drawio" → No. The format is .drawio, not Mermaid, not SVG, not ASCII. draw.io is the standard because the user opens and edits diagrams in draw.io/diagrams.net. Mermaid is not a substitute. Diffability is not the goal — visual editability is.
+- "The existing arch.md would be overwritten" → Correct — that's the point. Architecture docs are living artifacts. Update them: preserve unchanged sections, modify what changed. An existing arch.md is the starting point for the update, not a reason to skip.
+- "No non-technical stakeholders need this" → You don't know who will read it. The overview page costs minutes to produce and may save hours later. Generate it. If nobody reads it, no harm done. If someone needs it and it doesn't exist, that's a problem.
+- "These are just bug fixes / small changes" → Check the skip criteria above. If the work has dependencies, multiple specs, or touches architecture, it's not trivial. Generate concise artifacts — but generate them.
 </critical_rules>
 
 <verification_checklist>
