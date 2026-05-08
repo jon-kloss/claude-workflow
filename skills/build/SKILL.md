@@ -248,7 +248,14 @@ For each spec in build order (auto-iterates):
 
 ### Step 3.1: Investigate
 
-Read the spec file for context. Then dispatch investigation agents:
+Read the spec file for context. **If the spec has a `## UI Design` section**, also read:
+- The component mockup in `specs/mockups/<feature-slug>/` (Storybook components) or `specs/mockups/<feature-slug>.html` (standalone HTML)
+- The architecture overview at `specs/arch.md` (if it exists)
+- The Impeccable shape brief and frontend-design aesthetic decisions referenced in the UI Design section
+
+**The mockup is the visual starting point for implementation** — not a reference to glance at. For UI-facing specs, the implementation should start FROM the mockup component code, wiring in real data and behavior. Do not implement UI from scratch when a mockup exists.
+
+Then dispatch investigation agents:
 
 ```
 Agent tool (subagent_type: hyperpowers:codebase-investigator):
@@ -258,6 +265,7 @@ test patterns, and existing code that does something similar.
 Spec context: [paste key details — feature description, scenarios, technical context]
 System spec context: [if specs/system.md exists, paste API conventions, data model]
 Dependency specs: [if @depends-on specs exist, paste their Technical Context — these are interfaces to integrate with]
+UI Design context: [if spec has ## UI Design section, paste it — typography, color palette, layout strategy, mockup path]
 Report file paths, line numbers, and patterns to follow."
 ```
 
@@ -314,10 +322,10 @@ SRE refinement must address: boundary conditions, error paths, concurrent/async 
 **Before writing ANY implementation code**, generate failing tests from the spec scenarios.
 
 **The cycle:**
-1. **READ** the spec file
+1. **READ** the spec file. If a `## UI Design` section exists, also read the mockup.
 2. **RED** — For each `### Scenario:`, write a failing test. For each `### Scenario Outline:` + `#### Examples`, write one test per row. All tests MUST fail.
-3. **GREEN** — Write minimal implementation to make tests pass. One scenario at a time.
-4. **REFACTOR** — Clean up while keeping tests green.
+3. **GREEN** — Write minimal implementation to make tests pass. One scenario at a time. **For UI-facing specs: start from the mockup component code** — copy it as the base, then wire in real data/logic/state to make tests pass. Do NOT implement UI from scratch when a mockup exists.
+4. **REFACTOR** — Clean up while keeping tests green. **For UI-facing specs: verify the component still matches the mockup's visual design** — typography, color palette, layout, spacing, and aesthetic decisions from the `## UI Design` section must be preserved. Passing tests with ugly UI is not GREEN.
 5. **REPEAT** — Next scenario.
 
 For specs with few scenarios (1-3), use TDD directly:
@@ -426,7 +434,46 @@ Additionally check:
 - Stubs exposed as functional = CRITICAL
 - Variables assigned but unused = IMPORTANT
 
-#### Step 3.3d: Spec Scenario Coverage Check (Manual)
+#### Step 3.3d: Visual Fidelity Check (UI-facing specs only)
+
+For specs with a `## UI Design` section, verify the implementation matches the design:
+
+1. **Read the mockup** — open `specs/mockups/<feature-slug>/` or `specs/mockups/<feature-slug>.html`
+2. **Start the dev server** — view the implemented component in a browser
+3. **Compare against design decisions** from the spec's `## UI Design` section:
+   - Typography: correct fonts, sizes, hierarchy?
+   - Color palette: correct colors, not browser defaults?
+   - Layout/spacing: matches mockup spatial composition?
+   - CSS custom properties: resolving correctly (not undefined/fallback)?
+   - Key states: default, empty, error — all styled, not just functional?
+   - Aesthetic direction: matches the Impeccable shape brief tone?
+4. **Check for "raw HTML" symptoms:**
+   - Unstyled form elements (browser defaults)
+   - Missing hover/focus states
+   - No responsive behavior
+   - Generic fonts (system defaults instead of chosen typeface)
+   - CSS variables referenced but not defined
+   - Flat, lifeless layout with no visual hierarchy
+
+```bash
+bd comments add [epic-id] "VISUAL FIDELITY CHECK: specs/<feature-slug>.md
+
+Mockup: specs/mockups/<feature-slug>/
+Typography: [PASS/FAIL — details]
+Color palette: [PASS/FAIL — details]
+Layout/spacing: [PASS/FAIL — details]
+CSS tokens resolving: [PASS/FAIL — details]
+Key states styled: [PASS/FAIL — details]
+Overall aesthetic match: [PASS/FAIL — details]
+
+Verdict: PASS | FAIL"
+```
+
+Visual fidelity failure is **CRITICAL** — tests passing with ugly UI means the mockup was ignored. Fix before proceeding.
+
+**Skip this step for:** Backend-only specs, API-only specs, CLI specs — any spec without a `## UI Design` section.
+
+#### Step 3.3e: Spec Scenario Coverage Check (Manual)
 
 After code review returns, manually verify:
 1. Read the spec file
@@ -655,6 +702,8 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 12. **Continuous verifier for multi-scenario specs** -> Spawn when first task starts. Reviews 5 dimensions per task. CRITICAL blocks closure.
 13. **New spec scenarios get failing tests FIRST** -> If you add a scenario during implementation, write its failing test before implementing it.
 14. **Never update status while verification is in flight** -> Do NOT update `@status` or close beads tasks while verification agents are still running. Verification results MUST be received and passed BEFORE any status change or closure. "While waiting for verification" is never a valid reason to update status — that is the one thing that depends on the results.
+15. **UI-facing specs: start from mockup, not from scratch** -> If `specs/mockups/<feature-slug>/` or `.html` exists, the mockup component IS the starting point for implementation. Copy it, wire in real data. Do not implement UI from scratch and ignore the mockup. Tests passing with ugly/unstyled UI is a CRITICAL failure.
+16. **Visual fidelity is part of verification** -> For UI-facing specs, the visual fidelity check (Step 3.3d) is mandatory. Typography, color, layout, and CSS tokens must match the `## UI Design` section. "It works" is not enough — it must also look right.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -673,6 +722,10 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 - "I'll update the spec later" -> Update NOW when you discover edge cases. "Later" means never.
 - "This dependency isn't verified yet but I can start anyway" -> NO. Dependency order exists for a reason. Build on verified foundations.
 - "The spec is fundamentally wrong but I can work around it" -> NO. Stop and direct to /respec (or /design if new specs needed). Working around a bad spec produces bad code.
+- "The mockup is just a reference, I'll implement my own way" -> NO. The mockup IS the starting point. Copy it, wire in real data. It was designed with Impeccable + frontend-design for a reason.
+- "The UI works, styling can come later" -> NO. "Works but ugly" is a CRITICAL failure. The design phase produced specific typography, color, and layout decisions — implement them now, not later.
+- "CSS variables aren't resolving but the layout is correct" -> STOP. Unresolved CSS tokens mean the design system isn't wired up. Fix the token definitions before proceeding.
+- "Tests pass so the component is done" -> Tests verify behavior. Visual fidelity verifies appearance. Both must pass for UI-facing specs.
 </critical_rules>
 
 <verification_checklist>
@@ -680,10 +733,12 @@ Before claiming /build is complete for a spec:
 
 **Investigation:**
 - [ ] Spec file read before investigation
+- [ ] `## UI Design` section read (if present) — mockup path, typography, color, layout decisions noted
+- [ ] Component mockup read from `specs/mockups/` (if UI-facing spec) — this is the implementation starting point
 - [ ] @depends-on specs read for interface context
 - [ ] @parallel-risk specs identified and flagged in build order announcement
 - [ ] specs/system.md read (if exists) for conventions
-- [ ] Investigation agents dispatched
+- [ ] Investigation agents dispatched (with UI Design context for UI-facing specs)
 - [ ] Findings logged as bd comments with file paths and conventions
 - [ ] Beads implementation task created with investigation context (file paths, patterns, integration points)
 - [ ] SRE refinement run on task (must find at least 1 domain-specific edge case)
@@ -692,6 +747,8 @@ Before claiming /build is complete for a spec:
 - [ ] Failing tests generated FROM spec scenarios before implementation code
 - [ ] Each Scenario has a test; each Scenario Outline row has a parameterized test
 - [ ] Tests failed first (RED), then implementation passed them (GREEN)
+- [ ] UI-facing specs: implementation started FROM mockup component code (not from scratch) — or N/A (no UI)
+- [ ] UI-facing specs: typography, color, layout, CSS tokens match `## UI Design` section — or N/A (no UI)
 - [ ] Spec updated as living doc (new scenarios, corrected Technical Context)
 - [ ] New spec scenarios got failing tests BEFORE implementation
 - [ ] Spec @status updated to @status(implemented)
@@ -707,6 +764,7 @@ Before claiming /build is complete for a spec:
 - [ ] Spec scenario coverage check completed (every scenario implemented + tested)
 - [ ] Integration point checklist included (cross-module specs)
 - [ ] Dead code scan completed
+- [ ] Visual fidelity check passed for UI-facing specs (Step 3.3d) — or N/A (no UI)
 - [ ] Every failure logged as structured bd comment
 - [ ] Spec @status updated to @status(verified)
 - [ ] Beads task closed
