@@ -1,10 +1,10 @@
 ---
 name: build
-description: Use after /design to implement approved specs - validates specs exist, builds dependency graph, auto-iterates through specs in @depends-on order with codebase analysis, spec-driven TDD, full verification, and spec status updates. Pauses for /design if spec drift detected.
+description: Use after /design to implement approved specs - validates specs exist, builds dependency graph, auto-iterates through specs in @depends-on order with codebase analysis, spec-driven TDD, full verification, and spec status updates. Pauses for /respec if spec drift detected.
 ---
 
 <skill_overview>
-Build skill that consumes `@status(approved)` Gherkin specs produced by `/design` and implements them in dependency order. For each spec: investigates codebase, runs spec-driven TDD (RED/GREEN/REFACTOR), verifies with full suite + code review + spec coverage, and updates `@status(verified)`. Auto-iterates through all specs. Pauses and directs to `/design` if a spec is fundamentally wrong.
+Build skill that consumes `@status(approved)` Gherkin specs produced by `/design` and implements them in dependency order. For each spec: investigates codebase, runs spec-driven TDD (RED/GREEN/REFACTOR), verifies with full suite + code review + spec coverage, and updates `@status(verified)`. Auto-iterates through all specs. Pauses and directs to `/respec` if a spec needs modification, or `/design` if the work needs entirely new specs.
 </skill_overview>
 
 <rigidity_level>
@@ -12,7 +12,7 @@ MIXED:
 - **RIGID**: Entry validation — specs must exist with associated beads tasks. No specs = no build.
 - **RIGID**: Spec-driven TDD — failing tests from scenarios BEFORE implementation. Every spec, no exceptions.
 - **RIGID**: Verification never scales down — full suite + code review + spec coverage on every spec.
-- **RIGID**: Pause on spec drift — fundamental spec changes require /design, not silent fixes.
+- **RIGID**: Pause on spec drift — fundamental spec changes require /respec (modify existing spec) or /design (new specs), not silent fixes.
 - **FLEXIBLE**: Investigation depth scales with spec complexity.
 - **FLEXIBLE**: Per-task review checkpoints via executing-plans for multi-scenario specs.
 </rigidity_level>
@@ -45,7 +45,7 @@ MIXED:
 6. Investigation findings logged as bd comments on epic
 7. Every verification failure logged as structured bd comment
 8. Continuous verifier agent gates task closure (multi-scenario specs)
-9. Pause and direct to /design if spec is fundamentally wrong
+9. Pause and direct to /respec if spec needs changes, or /design if new specs are needed
 10. VERIFICATION comment logged on epic before closing
 </quick_reference>
 
@@ -117,9 +117,9 @@ Specs are living documents. Update during implementation when:
 
 **What NOT to change:**
 - Do not remove scenarios — mark with `@deprecated` and explain why
-- Do not change the feature's core purpose (As/I want/So that) — that requires /design
+- Do not change the feature's core purpose (As/I want/So that) — that requires /respec or /design
 
-**CRITICAL: If the spec needs FUNDAMENTAL changes** (wrong approach, missing feature, incorrect data model), **STOP and tell user to run /design.** Do not silently rewrite the spec during implementation.
+**CRITICAL: If the spec needs FUNDAMENTAL changes** (wrong approach, missing feature, incorrect data model, contract changes), **STOP and tell user to run `/respec`** to modify the existing spec (traces blast radius, propagates to dependencies, regresses statuses). Use `/design` only if entirely new specs are needed. Do not silently rewrite the spec during implementation.
 </gherkin_spec_reference>
 
 <when_to_use>
@@ -266,7 +266,7 @@ For specs involving external APIs/libraries/unfamiliar patterns, also dispatch i
 #### Log investigation findings
 
 ```bash
-bd comment [epic-id] "INVESTIGATION FINDING for specs/<feature-slug>.md:
+bd comments add [epic-id] "INVESTIGATION FINDING for specs/<feature-slug>.md:
 
 Patterns discovered:
 - [Pattern at file:line — what it does]
@@ -385,7 +385,7 @@ Dispatch these three agents in parallel:
 Agent tool (subagent_type: hyperpowers:test-runner):
 "Run the full test suite. Report only failures and summary."
 ```
-If tests fail: log as bd comment (category: `test-failure`), fix before proceeding.
+If tests fail: log as bd comments add (category: `test-failure`), fix before proceeding.
 
 **Step 3.3b: Test Effectiveness**
 ```
@@ -394,7 +394,7 @@ Agent tool (subagent_type: hyperpowers:test-effectiveness-analyst):
 Check for: tautological tests, coverage gaming, weak assertions,
 missing corner cases. Report CRITICAL / IMPORTANT / MINOR."
 ```
-If CRITICAL: log as bd comment (category: `test-quality`), fix before proceeding.
+If CRITICAL: log as bd comments add (category: `test-quality`), fix before proceeding.
 
 **Test Quality Gate:** 3+ tautological tests = CRITICAL. Weak assertions (check existence not correctness) = IMPORTANT.
 
@@ -435,7 +435,7 @@ After code review returns, manually verify:
    - At least one test exercises the scenario
 
 ```bash
-bd comment [epic-id] "SPEC COVERAGE CHECK: specs/<feature-slug>.md
+bd comments add [epic-id] "SPEC COVERAGE CHECK: specs/<feature-slug>.md
 
 Total scenarios: [N]
 Implemented: [N]
@@ -452,7 +452,7 @@ Unimplemented scenario = CRITICAL (`spec-coverage`). Untested scenario = IMPORTA
 
 Log every failure:
 ```bash
-bd comment [epic-id] "VERIFICATION FAILURE: [category] - [description]
+bd comments add [epic-id] "VERIFICATION FAILURE: [category] - [description]
 
 Source: [which step caught it]
 Category: [test-failure | test-quality | code-review | spec-coverage | criteria-gap | integration]
@@ -470,7 +470,7 @@ After verification passes:
 2. Close the beads task for this spec
 3. Log verification result:
    ```bash
-   bd comment [epic-id] "VERIFICATION: specs/<feature-slug>.md PASSED — [N] scenarios implemented and tested"
+   bd comments add [epic-id] "VERIFICATION: specs/<feature-slug>.md PASSED — [N] scenarios implemented and tested"
    ```
 
 ### Step 3.5: Auto-Iterate
@@ -498,7 +498,7 @@ bd close [tests-task-id]
 
 ### Log Final Verification Comment
 ```bash
-bd comment [epic-id] "VERIFICATION Phase 4: PASSED — all specs verified
+bd comments add [epic-id] "VERIFICATION Phase 4: PASSED — all specs verified
 Specs verified: [list]
 Total scenarios: [N]
 All tests passing."
@@ -598,6 +598,46 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 
 </examples>
 
+<incident_logging>
+## Workflow Incident Logging
+
+When the user corrects your approach during /build, the `detect-correction.sh` hook will fire and prompt you to offer incident logging. Follow its instructions:
+
+1. **Address the correction first** — fix whatever you did wrong
+2. **Ask to log** — use AskUserQuestion: "Should I log this as a workflow incident for the next retro?"
+3. **If confirmed**, log a structured comment on the active epic:
+
+```bash
+bd comments add [epic-id] "WORKFLOW INCIDENT: [short description]
+
+Category: [skill-gap | missing-rule | wrong-default | edge-case | process-violation]
+Skill: [design | build | retrospective | hook-name | none]
+What happened: [what you did wrong]
+What should have happened: [correct behavior]
+User correction: [what the user said]
+Proposed fix: [optional — if the fix is obvious, note it]"
+```
+
+4. **If dismissed**, continue normally — not every correction is a workflow incident
+
+### Incident Categories
+
+| Category | When to Use |
+|---|---|
+| skill-gap | No guidance existed for this situation |
+| missing-rule | A rule should exist but doesn't |
+| wrong-default | An existing behavior/default is wrong |
+| edge-case | Existing rules don't cover this scenario |
+| process-violation | You violated an existing rule |
+
+### No Active Epic
+
+If no epic is active, create or reuse a dedicated `workflow-incidents` issue:
+```bash
+bd create --title="Workflow Incidents" --type=task --description="Collects workflow incidents when no epic is active. Retrospective reads these."
+```
+</incident_logging>
+
 <critical_rules>
 ## Rules That Have No Exceptions
 
@@ -606,11 +646,11 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 3. **Always spec-driven TDD** -> Tests generated FROM spec scenarios before implementation. RED → GREEN → REFACTOR. Every spec. No exceptions.
 4. **Never scale down verification** -> Full suite + code review + spec coverage. Simple specs get same verification as complex ones.
 5. **Tests gate task is sacred** -> NEVER close during implementation. Only close after ALL verification passes.
-6. **Log every verification failure** -> Structured bd comment with category, severity, source, action.
+6. **Log every verification failure** -> Structured bd comment (via `bd comments add`) with category, severity, source, action.
 7. **Log a VERIFICATION comment before closing** -> Even when all passes: "VERIFICATION: PASSED — no issues found."
 8. **Dependency order is mandatory** -> Verify prerequisites are `@status(verified)` before starting dependents.
 9. **Parallel-risk is a warning, not a blocker** -> `@parallel-risk` specs have no `@depends-on` relationship. They are not sequenced relative to each other. /build warns about file overlap but does not add sequencing.
-10. **Pause on fundamental spec drift** -> Wrong approach, missing feature, incorrect data model = STOP, direct to /design. Do NOT silently rewrite specs.
+10. **Pause on fundamental spec drift** -> Wrong approach, missing feature, incorrect data model, contract changes = STOP, direct to /respec (modify existing spec) or /design (new specs needed). Do NOT silently rewrite specs.
 11. **Always use subagents** -> Investigation, code review, test running, test analysis = subagents. Never do manually what an agent can do.
 12. **Continuous verifier for multi-scenario specs** -> Spawn when first task starts. Reviews 5 dimensions per task. CRITICAL blocks closure.
 13. **New spec scenarios get failing tests FIRST** -> If you add a scenario during implementation, write its failing test before implementing it.
@@ -632,7 +672,7 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 - "The spec only has 1 scenario" -> Still gets 1 failing test before implementation.
 - "I'll update the spec later" -> Update NOW when you discover edge cases. "Later" means never.
 - "This dependency isn't verified yet but I can start anyway" -> NO. Dependency order exists for a reason. Build on verified foundations.
-- "The spec is fundamentally wrong but I can work around it" -> NO. Stop and direct to /design. Working around a bad spec produces bad code.
+- "The spec is fundamentally wrong but I can work around it" -> NO. Stop and direct to /respec (or /design if new specs needed). Working around a bad spec produces bad code.
 </critical_rules>
 
 <verification_checklist>
@@ -697,14 +737,21 @@ Before claiming /build is complete for a spec:
 | test-runner agent | Verification step |
 | test-effectiveness-analyst agent | Verification step |
 
-**This skill consumes (produced by /design):**
+**This skill directs to:**
+
+| Skill | When |
+|---|---|
+| /respec | Spec needs modification (wrong behavior, contract change, missing scenarios) |
+| /design | No specs exist, or entirely new specs needed |
+
+**This skill consumes (produced by /design or /respec):**
 - `specs/*.md` files with `@status(approved)`
 - Beads epic with per-spec tasks
 - Task docs with spec references (if brainstorming was used)
 
 **This skill is triggered by:**
 - User typing `/build`
-- After /design completes
+- After /design or /respec completes
 </integration>
 
 <edge_cases>
@@ -732,7 +779,7 @@ Skip the blocked spec, try the next unblocked one. If all remaining are blocked:
 
 ## Spec is fundamentally wrong during implementation
 STOP implementation. Do NOT silently rewrite:
-"The spec `specs/<name>.md` needs fundamental changes: [describe what's wrong]. Run `/design` to revise the spec before continuing."
+"The spec `specs/<name>.md` needs fundamental changes: [describe what's wrong]. Run `/respec` to modify the spec (traces dependencies, propagates changes, regresses statuses). If entirely new specs are needed, run `/design` instead."
 
 ## Verification fails repeatedly
 1. First failure: fix and re-verify
