@@ -471,15 +471,45 @@ After the Impeccable shape brief is confirmed, apply the `frontend-design` skill
 
 The frontend-design decisions should be consistent with the Impeccable shape brief's design direction (color strategy, theme, anchor references).
 
-#### C. Draw.io Mockup
+#### C. Component Mockup (MANDATORY for UI-facing specs)
 
-Produce a `.drawio` mockup file saved as `specs/<feature-slug>.drawio` alongside the spec file. The mockup should show:
-- Page/screen layout and spatial composition
-- Key UI components and their arrangement
-- Navigation flow (if multi-page)
-- Responsive breakpoints (if applicable)
-- Annotated notes on typography choices, color palette, and motion intent
-- Key states (at minimum: default and one edge case like empty state)
+**BLOCKING REQUIREMENT**: Every UI-facing spec MUST have a corresponding component mockup before the spec can be approved. A UI-facing spec without a mockup is incomplete — it CANNOT proceed to `@status(approved)`.
+
+The mockup format depends on the project's framework:
+
+**Option 1: React/Vue/Svelte projects — Component + Storybook story (preferred)**
+
+Generate a mockup component and Storybook story in `specs/mockups/<feature-slug>/`:
+
+```
+specs/mockups/<feature-slug>/
+  <ComponentName>.tsx       # Component with mock data, semantic HTML, styled
+  <ComponentName>.stories.tsx  # Storybook CSF stories for all key states
+  README.md                 # Brief notes on design decisions, references shape brief
+```
+
+The component mockup should include:
+- Semantic HTML structure with the actual layout
+- Styled with the project's CSS approach (Tailwind, CSS modules, etc.) using the frontend-design aesthetic decisions
+- Mock/hardcoded data that shows realistic content
+- Storybook stories for all key states: default, empty, loading, error, edge cases
+
+The user views by running `npm run storybook` (or the project's Storybook command).
+
+**Option 2: Non-framework projects — Standalone HTML/CSS mockup**
+
+Generate a self-contained HTML file at `specs/mockups/<feature-slug>.html`:
+- Single file with inline CSS and minimal inline JS
+- Opens directly in any browser — no build step, no dependencies
+- Shows the layout with realistic mock content
+- Uses comments to annotate design decisions (typography, color palette, spacing rationale)
+- Includes multiple sections or tabs for key states (default, empty, error)
+
+**Gate check**: Before proceeding to Step D (Present and Confirm), verify the mockup exists:
+```bash
+ls specs/mockups/<feature-slug>/ 2>/dev/null || ls specs/mockups/<feature-slug>.html 2>/dev/null
+```
+If neither exists, you have not completed this step. Do not proceed.
 
 #### D. Present and Confirm
 
@@ -500,7 +530,9 @@ Present the combined UI design to the user via AskUserQuestion:
 - Color palette: [strategy + colors]
 - Motion: [approach]
 
-**Mockup**: specs/<feature-slug>.drawio — open in draw.io to see the layout
+**Mockup**: [path to mockup]
+- For Storybook: run `npm run storybook` to view the component with all states
+- For HTML: open `specs/mockups/<feature-slug>.html` in your browser
 
 Does this UI direction work, or should I adjust?"
 ```
@@ -512,7 +544,7 @@ Does this UI direction work, or should I adjust?"
 Add a `## UI Design` section to the Gherkin spec with:
 - Impeccable shape brief summary (design direction, layout strategy, key states, interaction model)
 - Frontend-design aesthetic decisions (typography, color, motion, spatial composition)
-- Reference to the draw.io mockup file: `Mockup: specs/<feature-slug>.drawio`
+- Reference to the component mockup: `Mockup: specs/mockups/<feature-slug>/` or `Mockup: specs/mockups/<feature-slug>.html`
 - Content requirements and UX copy decisions
 
 **Skip this step for:** Backend-only changes, CLI tools, API-only work, config/infra changes, or any work with no user-facing visual component.
@@ -560,6 +592,7 @@ Mentally compare the generated specs against the user's original request:
 - Are the `@depends-on` relationships correct?
 - Are `@parallel-risk` tags consistent? (mutual references, no phantom slugs)
 - For greenfield: does the system spec + feature specs cover the entire application?
+- **For UI-facing specs**: does a component mockup exist for each one? Run `ls specs/mockups/` to verify. If any UI-facing spec is missing its mockup, STOP — go back to Step 2.85C and generate it before continuing.
 
 ### Part 2: User Confirmation
 
@@ -590,7 +623,18 @@ Options:
 - "No, needs changes" → Ask clarifying questions about what's wrong, regenerate affected specs, re-check
 - User provides specific feedback → Incorporate, regenerate, re-check
 
-**BLOCK until user confirms.** Do not proceed to beads setup with unapproved specs.
+**BLOCK until user confirms.** Do not proceed to architecture documentation with unapproved specs.
+
+## Step 4.5: Architecture Documentation
+
+**Invoke `/design-arch`.** This is a separate skill that generates architecture documentation from the approved specs. It produces:
+- `specs/arch.md` — architecture document (component map, data flow, design decisions)
+- `specs/diagrams/*.drawio` — architecture diagrams (system, data flow, deployment)
+- `specs/overview.html` — visual design overview page for non-technical stakeholders
+
+The `/design-arch` skill handles its own gate checks and user confirmation. When it returns, architecture documentation is confirmed and complete.
+
+**Skip for:** Trivial changes (typo fixes, renames, config changes) where there is no meaningful architecture to document. If the decomposition map has only one simple-spec entry with no dependencies, skip this step.
 
 ## Step 5: Beads Setup
 
@@ -668,12 +712,15 @@ This ensures the /build skill (which uses executing-plans) naturally reads spec 
 
 /design is complete when:
 - All spec files exist in `specs/` with `@status(approved)`
+- Component mockups exist for all UI-facing specs (in `specs/mockups/`)
+- Architecture documentation generated and confirmed (`specs/arch.md`, `specs/diagrams/`, `specs/overview.html`) — or skipped for trivial changes
 - Beads epic created referencing spec files
 - Tests gate task created in epic
 - User has confirmed specs via reality check
+- User has confirmed architecture documentation
 - Task docs (if brainstorming was used) reference specs
 
-**Tell the user:** "Design complete. Specs approved. Run `/build` when ready to implement."
+**Tell the user:** "Design complete. Specs approved. Architecture documented. Run `/build` when ready to implement. Open `specs/overview.html` in your browser for a visual summary you can share with stakeholders."
 
 </the_process>
 
@@ -809,6 +856,8 @@ Proposed fix: [optional — if the fix is obvious, note it]"
 7. **Every epic has a Tests gate task** -> Prevents beads auto-close before verification.
 8. **Greenfield requires system spec** -> `specs/system.md` is mandatory for greenfield projects.
 9. **Dependency integrity** -> Every `@depends-on(x)` and `@blocks(x)` must reference an existing spec file. No circular dependencies.
+10. **UI-facing specs require component mockups** -> If a spec involves UI (pages, screens, components, visual interactions), a component mockup MUST exist in `specs/mockups/` before the spec is approved. No mockup = no approval. The Impeccable shape brief and frontend-design aesthetics must also be completed and user-confirmed.
+11. **Architecture documentation after approval** -> After specs are approved (for non-trivial work), invoke `/design-arch` to generate architecture docs. Do not proceed to Beads Setup until `/design-arch` completes and user confirms.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -825,6 +874,14 @@ Proposed fix: [optional — if the fix is obvious, note it]"
 - "I don't need a system spec for this project" -> If it's greenfield, `specs/system.md` is required.
 - "The spec is getting too long" -> Split into multiple specs with `@depends-on` relationships.
 - "The @depends-on tags aren't important" -> The dependency graph IS the build order for /build.
+- "The UI is simple enough to skip the mockup" -> Simple UIs still get mockups. A standalone HTML file for a simple screen takes 2 minutes. The user needs to see it.
+- "I'll describe the UI in the spec instead" -> Text descriptions do not replace visual mockups. The user cannot review a layout from prose.
+- "I can generate the mockup later / during build" -> Mockups are design artifacts, not implementation artifacts. They capture intent BEFORE code, like specs.
+- "The Impeccable shape brief is enough" -> The shape brief is UX thinking. The component mockup is the visual artifact. Both are required.
+- "This is technically a UI but it's mostly data/logic" -> If it renders in a browser/screen, it's UI-facing. Mockup required.
+- "The architecture is obvious from the specs" -> Specs define behavior. Architecture defines structure. They serve different audiences and purposes.
+- "The overview page is overkill" -> The overview page takes 5 minutes to generate and saves hours of explanation to stakeholders.
+- "I'll do the architecture docs during build" -> Architecture is a design artifact. Documenting it after implementation is documentation, not design.
 </critical_rules>
 
 <verification_checklist>
@@ -836,12 +893,15 @@ Before claiming /design is complete:
 - [ ] Feasibility validated via internet-researcher (when external APIs/libraries involved) — or skipped for internal-only changes
 - [ ] Decomposition heuristics applied (independence test, seam scan) — or skipped for trivially single-behavior work
 - [ ] Decomposition map produced before spec generation
-- [ ] UI/UX design completed for UI-facing specs: Impeccable shape brief confirmed, frontend-design aesthetics locked, draw.io mockup produced — or skipped (no UI component)
+- [ ] UI/UX design: Impeccable shape brief completed and user-confirmed for each UI-facing spec — or skipped (no UI component)
+- [ ] UI/UX design: frontend-design aesthetics locked in for each UI-facing spec — or skipped (no UI component)
+- [ ] UI/UX design: component mockup EXISTS ON DISK for each UI-facing spec (`specs/mockups/<feature-slug>/` or `specs/mockups/<feature-slug>.html`) — or skipped (no UI component). Verify with `ls specs/mockups/`
 - [ ] Gherkin spec file(s) generated in `specs/`
 - [ ] System spec generated for greenfield projects
 - [ ] All specs tagged with `@status(approved)` (after reality check)
 - [ ] Dependency integrity verified (all @depends-on/@blocks/@parallel-risk reference existing specs)
 - [ ] Reality check passed: agent pre-checked for gaps, showed dependency graph, offered re-decomposition, AND user confirmed via AskUserQuestion
+- [ ] `/design-arch` invoked and completed (arch.md + diagrams + overview.html confirmed by user) — or skipped (trivial single-spec change)
 - [ ] Beads epic created referencing spec files
 - [ ] Mandatory Tests gate task exists in epic
 - [ ] Task docs (if brainstorming used) reconciled with spec references
@@ -858,11 +918,14 @@ Before claiming /design is complete:
 | hyperpowers:internet-researcher | During questioning (inform better questions) + feasibility validation (Step 2.75) |
 | impeccable (shape) | UI/UX design — UX planning, interaction model, design brief (Step 2.85A) |
 | frontend-design | UI/UX design — visual aesthetics, typography, color, motion (Step 2.85B) |
+| /design-arch | Architecture documentation — arch.md, draw.io diagrams, overview.html (Step 4.5) |
 | hyperpowers:brainstorming | For complex work requiring approach comparison |
 | hyperpowers:sre-task-refinement | On non-trivial implementation tasks |
 
 **This skill produces (consumed by /build):**
 - `specs/*.md` files with `@status(approved)`
+- `specs/mockups/` — component mockups for UI-facing specs (Storybook components or HTML files)
+- Architecture docs via `/design-arch`: `specs/arch.md`, `specs/diagrams/*.drawio`, `specs/overview.html`
 - Beads epic with tasks referencing specs
 - Task docs with spec references (if brainstorming used)
 
