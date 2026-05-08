@@ -430,9 +430,96 @@ Report: confirmed capabilities, limitations, and anything that contradicts the c
 
 **Skip this step for:** Work that doesn't involve external dependencies, well-understood internal changes, typo fixes, config changes.
 
+## Step 2.85: UI/UX Design (when applicable)
+
+For work involving user interfaces, frontends, or visual design, use **both** the `impeccable` skill (UX/interaction planning via `/impeccable shape`) and the `frontend-design` skill (visual aesthetics) to plan the UI before writing specs. Additionally, produce a **draw.io mockup** so the user can visualize the layout.
+
+### When to trigger
+
+Any decomposition map entry that involves:
+- New pages, views, or screens
+- New UI components or widgets
+- Significant visual changes to existing interfaces
+- User-facing interactions (forms, dashboards, data visualization)
+
+### Process
+
+#### A. Impeccable: UX/Interaction Design (`/impeccable shape`)
+
+Run `/impeccable shape [feature]` for each UI-facing spec entry. This produces a **design brief** covering:
+- Feature summary and primary user action
+- Design direction (color strategy, theme scene sentence, anchor references)
+- Scope (fidelity, breadth, interactivity)
+- Layout strategy and visual hierarchy
+- Key states (default, empty, loading, error, success, edge cases)
+- Interaction model (click, hover, scroll behaviors, feedback, flow)
+- Content requirements (copy, labels, empty state messages, microcopy)
+
+**IMPORTANT**: Impeccable's shape command runs its own discovery interview via AskUserQuestion. This supplements (not replaces) the Socratic questioning from Step 2 — Step 2 covers the *what/why/constraints* of the feature; Impeccable shape covers the *UX/UI-specific* decisions (user state of mind, content ranges, visual direction, anti-goals).
+
+The shape brief must be **user-confirmed** before proceeding.
+
+#### B. Frontend-Design: Visual Aesthetics
+
+After the Impeccable shape brief is confirmed, apply the `frontend-design` skill's design thinking to lock in the visual aesthetic:
+- **Tone**: Bold aesthetic direction (brutally minimal, maximalist, retro-futuristic, luxury/refined, editorial, etc.)
+- **Typography**: Distinctive, characterful font choices — never generic (no Inter, Roboto, Arial)
+- **Color & Theme**: OKLCH-based palette, commit to a cohesive aesthetic via CSS variables
+- **Motion**: CSS-only or Motion library animations for high-impact moments
+- **Spatial Composition**: Unexpected layouts, asymmetry, generous negative space or controlled density
+- **Backgrounds & Visual Details**: Atmosphere and depth — gradient meshes, noise textures, geometric patterns
+
+The frontend-design decisions should be consistent with the Impeccable shape brief's design direction (color strategy, theme, anchor references).
+
+#### C. Draw.io Mockup
+
+Produce a `.drawio` mockup file saved as `specs/<feature-slug>.drawio` alongside the spec file. The mockup should show:
+- Page/screen layout and spatial composition
+- Key UI components and their arrangement
+- Navigation flow (if multi-page)
+- Responsive breakpoints (if applicable)
+- Annotated notes on typography choices, color palette, and motion intent
+- Key states (at minimum: default and one edge case like empty state)
+
+#### D. Present and Confirm
+
+Present the combined UI design to the user via AskUserQuestion:
+
+```
+"Here's the UI/UX design for [feature]:
+
+**UX Design** (from Impeccable shape brief):
+- Primary user action: [action]
+- Layout strategy: [approach]
+- Key states: [list]
+- Interaction model: [summary]
+
+**Visual Aesthetics** (from frontend-design):
+- Aesthetic direction: [tone chosen]
+- Typography: [font pairing]
+- Color palette: [strategy + colors]
+- Motion: [approach]
+
+**Mockup**: specs/<feature-slug>.drawio — open in draw.io to see the layout
+
+Does this UI direction work, or should I adjust?"
+```
+
+**BLOCK until user confirms.** If adjustments are needed, re-run the relevant part (shape brief, aesthetics, or mockup).
+
+#### E. Incorporate into Specs
+
+Add a `## UI Design` section to the Gherkin spec with:
+- Impeccable shape brief summary (design direction, layout strategy, key states, interaction model)
+- Frontend-design aesthetic decisions (typography, color, motion, spatial composition)
+- Reference to the draw.io mockup file: `Mockup: specs/<feature-slug>.drawio`
+- Content requirements and UX copy decisions
+
+**Skip this step for:** Backend-only changes, CLI tools, API-only work, config/infra changes, or any work with no user-facing visual component.
+
 ## Step 3: Generate Gherkin Spec Files
 
-After decomposition and feasibility validation, generate one spec file per entry in the decomposition map:
+After decomposition, feasibility validation, and UI/UX design (if applicable), generate one spec file per entry in the decomposition map:
 
 ```bash
 # 1. Ensure specs/ directory exists
@@ -687,6 +774,29 @@ Each with full Technical Context, Rules, Scenario Outlines with Examples tables.
 
 </examples>
 
+<incident_logging>
+## Workflow Incident Logging
+
+When the user corrects your approach during /design, the `detect-correction.sh` hook will fire and prompt you to offer incident logging. Follow its instructions:
+
+1. **Address the correction first** — fix whatever you did wrong
+2. **Ask to log** — use AskUserQuestion: "Should I log this as a workflow incident for the next retro?"
+3. **If confirmed**, log a structured comment on the active epic (or `workflow-incidents` issue):
+
+```bash
+bd comments add [epic-id] "WORKFLOW INCIDENT: [short description]
+
+Category: [skill-gap | missing-rule | wrong-default | edge-case | process-violation]
+Skill: [design | build | retrospective | hook-name | none]
+What happened: [what you did wrong]
+What should have happened: [correct behavior]
+User correction: [what the user said]
+Proposed fix: [optional — if the fix is obvious, note it]"
+```
+
+4. **If dismissed**, continue normally — not every correction is a workflow incident
+</incident_logging>
+
 <critical_rules>
 ## Rules That Have No Exceptions
 
@@ -726,6 +836,7 @@ Before claiming /design is complete:
 - [ ] Feasibility validated via internet-researcher (when external APIs/libraries involved) — or skipped for internal-only changes
 - [ ] Decomposition heuristics applied (independence test, seam scan) — or skipped for trivially single-behavior work
 - [ ] Decomposition map produced before spec generation
+- [ ] UI/UX design completed for UI-facing specs: Impeccable shape brief confirmed, frontend-design aesthetics locked, draw.io mockup produced — or skipped (no UI component)
 - [ ] Gherkin spec file(s) generated in `specs/`
 - [ ] System spec generated for greenfield projects
 - [ ] All specs tagged with `@status(approved)` (after reality check)
@@ -745,6 +856,8 @@ Before claiming /design is complete:
 |---|---|
 | AskUserQuestion | Socratic questioning + reality check confirmation |
 | hyperpowers:internet-researcher | During questioning (inform better questions) + feasibility validation (Step 2.75) |
+| impeccable (shape) | UI/UX design — UX planning, interaction model, design brief (Step 2.85A) |
+| frontend-design | UI/UX design — visual aesthetics, typography, color, motion (Step 2.85B) |
 | hyperpowers:brainstorming | For complex work requiring approach comparison |
 | hyperpowers:sre-task-refinement | On non-trivial implementation tasks |
 
