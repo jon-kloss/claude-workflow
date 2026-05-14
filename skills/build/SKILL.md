@@ -54,7 +54,8 @@ MIXED:
 3. Failing tests generated FROM spec scenarios before implementation (TDD)
 4. Full verification suite + code review agent + spec coverage check
 5. API integration check: every UI button/form/nav wired to real API calls — not stubs (UI specs with API endpoints)
-6. Spec @status updated after verification passes
+6. Layer awareness: full-stack specs require ALL layers (API + UI + wiring) before @status(verified)
+7. Spec @status updated after verification passes
 7. Investigation findings logged as bd comments on epic
 8. Every verification failure logged as structured bd comment
 9. Continuous verifier agent gates task closure (multi-scenario specs)
@@ -267,6 +268,30 @@ For each spec in build order (auto-iterates):
 
 ### Step 3.1: Investigate
 
+#### Layer Detection (MANDATORY)
+
+Read the spec file and determine which implementation layers it requires:
+
+| Signal in Spec | Layer | What Must Be Built |
+|---|---|---|
+| API endpoints in Technical Context (`POST /api/...`) | **API** | Route handlers, middleware, DB queries, API tests |
+| UI screens, buttons, forms, navigation in scenarios | **UI** | Components, screens, navigation, component tests |
+| `## UI Design` section or mockup in `specs/mockups/` | **UI** | Start from mockup code, wire to real data |
+| Both API endpoints AND UI scenarios | **Full-stack** | BOTH layers, wired together. Neither alone is complete. |
+
+**Log the detected layers:**
+```bash
+bd comments add [epic-id] "LAYER DETECTION: specs/<feature-slug>.md
+
+Layers required: [API | UI | Full-stack (API + UI)]
+API signals: [endpoints listed in Technical Context — or N/A]
+UI signals: [screens/buttons/forms in scenarios, mockup exists — or N/A]
+
+Build plan: [API-first then UI | UI-only | API-only]"
+```
+
+**CRITICAL**: For full-stack specs, `@status(verified)` requires BOTH layers implemented, tested, and wired together. Building only the API layer and marking verified is a **process violation** — the spec scenarios describe user-visible behavior that requires UI implementation. This was the root cause of the trainr incident where 15 full-stack specs were marked verified with zero mobile UI code.
+
 Read the spec file for context. **If the spec has a `## UI Design` section**, also read:
 - `PRODUCT.md` — brand personality, register (brand vs product), anti-references, design principles
 - `DESIGN.md` — color tokens (OKLCH), typography scale, spacing system, component patterns
@@ -343,13 +368,30 @@ SRE refinement must address: boundary conditions, error paths, concurrent/async 
 
 **Before writing ANY implementation code**, generate failing tests from the spec scenarios.
 
+#### Layer-Aware Test Generation
+
+For **full-stack specs** (API + UI), tests must cover BOTH layers. Do not generate tests for only one layer.
+
+| Spec Scenario | API Test | UI Test | Integration Test |
+|---|---|---|---|
+| "Client taps Start Workout" | `POST /api/v1/workout-logs` returns 201 | Component renders, button triggers action | Button calls real API endpoint (not stub) |
+| "Trainer sees client list" | `GET /api/v1/trainer/clients` returns list | Component renders client cards | Component fetches from real API on mount |
+| "Client logs a set" | `PATCH /api/v1/workout-logs/:id` accepts set data | Form captures reps/weight, dispatches | Form submission calls API, UI updates from response |
+
+**Build order for full-stack specs:**
+1. **API-first**: RED/GREEN/REFACTOR for API tests → API routes working
+2. **UI-second**: RED/GREEN/REFACTOR for UI tests → Components rendered, starting from mockup
+3. **Wire together**: RED/GREEN/REFACTOR for integration tests → UI calls real API
+
+All three must be GREEN before the spec can proceed to verification.
+
 **The cycle:**
 1. **READ** the spec file. If a `## UI Design` section exists, also read the mockup.
-2. **RED** — For each `### Scenario:`, write a failing test. For each `### Scenario Outline:` + `#### Examples`, write one test per row. All tests MUST fail.
+2. **RED** — For each `### Scenario:`, write failing tests for ALL detected layers (API, UI, integration). For each `### Scenario Outline:` + `#### Examples`, write one test per row per layer. All tests MUST fail.
 3. **GREEN** — Write minimal implementation to make tests pass. One scenario at a time. **For UI-facing specs: start from the mockup component code** — copy it as the base, then wire in real data/logic/state to make tests pass. Do NOT implement UI from scratch when a mockup exists.
 4. **REFACTOR** — Clean up while keeping tests green. **For UI-facing specs: verify the component still matches the mockup's visual design** — typography, color palette, layout, spacing, and aesthetic decisions from the `## UI Design` section must be preserved. Passing tests with ugly UI is not GREEN.
-5. **BROWSER ITERATION** (UI-facing specs only) — After each scenario group is GREEN, view the implementation in a browser across viewports:
-   - Desktop (1440px+), tablet (768px), mobile (375px)
+5. **BROWSER ITERATION** (UI-facing specs only) — After each scenario group is GREEN, view the implementation in a browser/simulator across viewports:
+   - Desktop (1440px+), tablet (768px), mobile (375px) — or device simulator for mobile apps
    - Compare against the mockup side-by-side
    - Check: do CSS tokens resolve? Are fonts loading? Does layout collapse gracefully?
    - Fix visual issues immediately — do not defer to "later"
@@ -597,22 +639,29 @@ Visual fidelity failure OR design quality failure is **CRITICAL** — tests pass
 
 **Skip this step for:** Backend-only specs, API-only specs, CLI specs — any spec without a `## UI Design` section.
 
-#### Step 3.3e: Spec Scenario Coverage Check (Manual)
+#### Step 3.3e: Spec Scenario Coverage Check (Manual + Layer-Aware)
 
-After code review returns, manually verify:
+After code review returns, manually verify **per layer**:
 1. Read the spec file
-2. For every `### Scenario:` and `### Scenario Outline:`:
-   - Implementation code exists for the Given/When/Then steps
-   - At least one test exercises the scenario
+2. Check the layer detection from Step 3.1 (API, UI, or Full-stack)
+3. For every `### Scenario:` and `### Scenario Outline:`:
+   - **API layer** (if detected): API route/handler exists for the scenario's action. At least one API test.
+   - **UI layer** (if detected): Component/screen exists that renders the scenario's UI. At least one component/UI test.
+   - **Integration** (if full-stack): UI code calls the real API endpoint. At least one integration/wiring test.
+
+**CRITICAL**: For full-stack specs, a scenario is NOT covered by API tests alone. "Client taps Start Workout" requires BOTH an API route AND a UI component with a button that calls it. API-only coverage of a full-stack scenario is a **CRITICAL** failure (`layer-gap`).
 
 ```bash
 bd comments add [epic-id] "SPEC COVERAGE CHECK: specs/<feature-slug>.md
 
+Layers detected: [API | UI | Full-stack]
+
 Total scenarios: [N]
-Implemented: [N]
-Tested: [N]
-Missing implementation: [list]
-Missing tests: [list]
+API layer — Implemented: [N] / Tested: [N]
+UI layer — Implemented: [N] / Tested: [N]  (or N/A if API-only)
+Integration — Wired: [N] / Tested: [N]     (or N/A if single-layer)
+Missing implementation: [list — specify which layer]
+Missing tests: [list — specify which layer]
 
 Verdict: PASS | FAIL"
 ```
@@ -999,6 +1048,7 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 19. **Read PRODUCT.md + DESIGN.md during UI implementation** -> The design system tokens and brand context are the source of truth for visual decisions. Read them during investigation (Step 3.1) and reference them during visual verification (Step 3.3d). Do not implement UI without loading the design system.
 20. **API integration check for UI-facing specs** -> Every interactive UI element (button, form, navigation) that implies backend communication must be wired to a real API call — not a TODO, stub, or local-state-only dispatch. Step 3.3f is mandatory for UI specs with API endpoints.
 21. **Playwright e2e tests before epic close** -> For multi-spec UI epics, Playwright e2e tests covering every CUJ from the specs must pass before Phase 4 can close the epic. This is the cross-spec integration gate. Unit tests verify features in isolation; e2e tests verify the assembled application.
+22. **Layer awareness for full-stack specs** -> When a spec describes both API endpoints AND UI screens, BOTH layers must be implemented and tested before `@status(verified)`. Building only the API and marking verified is a process violation. Layer detection is mandatory in Step 3.1; layer-aware coverage is mandatory in Step 3.3e.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -1034,12 +1084,18 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 - "E2e tests are overkill — unit tests cover everything" -> Unit tests verify each feature in isolation. E2e tests verify the assembled application. FitConnect's launch had every unit test green but no feature actually worked end-to-end. Playwright CUJ tests are MANDATORY for multi-spec UI epics.
 - "I'll write e2e tests after the epic closes" -> No. E2e tests are a Phase 4 gate. The epic cannot close without passing Playwright CUJ tests. "After" means never.
 - "The API isn't ready so I can't test integration" -> If the API is in this epic, it should be built first (spec dependencies). If it's external, mock the API at the network layer (MSW), not in the component. Either way, the integration must be verified.
+- "The API tests pass so the spec is implemented" -> If the spec describes UI scenarios ("client taps Start Workout", "trainer sees client list"), API tests alone are NOT implementation. The UI layer is missing. Check the layer detection from Step 3.1.
+- "I'll build the mobile UI in the next session" -> Then don't mark `@status(verified)`. Mark `@status(implemented)` at most, with a note that the UI layer is pending. Verified means ALL layers are done.
+- "The spec is full-stack but I can verify API separately" -> No. For full-stack specs, verification gates on ALL layers. Build API-first if you want, but don't close the loop until UI exists and is wired to the API. The trainr project marked 15 full-stack specs verified with zero mobile code.
+- "Mobile apps can't be Playwright-tested" -> Use Detox, Maestro, or Appium for mobile e2e. If no mobile e2e framework is available, the UI layer still needs component tests and manual verification in a simulator. "Can't e2e test" is never an excuse to skip UI implementation entirely.
 </critical_rules>
 
 <verification_checklist>
 Before claiming /build is complete for a spec:
 
 **Investigation:**
+- [ ] Layer detection completed: API, UI, or Full-stack (Step 3.1)
+- [ ] Layer detection logged as bd comment on epic
 - [ ] Spec file read before investigation
 - [ ] `## UI Design` section read (if present) — mockup path, typography, color, layout decisions noted
 - [ ] Component mockup read from `specs/mockups/` (if UI-facing spec) — this is the implementation starting point
@@ -1052,8 +1108,8 @@ Before claiming /build is complete for a spec:
 - [ ] SRE refinement run on task (must find at least 1 domain-specific edge case)
 
 **Implementation:**
-- [ ] Failing tests generated FROM spec scenarios before implementation code
-- [ ] Each Scenario has a test; each Scenario Outline row has a parameterized test
+- [ ] Failing tests generated FROM spec scenarios for ALL detected layers (API, UI, integration)
+- [ ] Each Scenario has tests per layer; each Scenario Outline row has parameterized tests per layer
 - [ ] Tests failed first (RED), then implementation passed them (GREEN)
 - [ ] UI-facing specs: implementation started FROM mockup component code (not from scratch) — or N/A (no UI)
 - [ ] UI-facing specs: typography, color, layout, CSS tokens match `## UI Design` section — or N/A (no UI)
@@ -1069,7 +1125,7 @@ Before claiming /build is complete for a spec:
 - [ ] Test quality gate applied (3+ tautological = CRITICAL)
 - [ ] Manual test spot-check completed and logged
 - [ ] Code review agent dispatched with spec file as reference
-- [ ] Spec scenario coverage check completed (every scenario implemented + tested)
+- [ ] Spec scenario coverage check completed — per layer (every scenario implemented + tested in ALL detected layers)
 - [ ] Integration point checklist included (cross-module specs)
 - [ ] Dead code scan completed
 - [ ] Browser iteration completed across viewports (desktop, tablet, mobile) during TDD — or N/A (no UI)
