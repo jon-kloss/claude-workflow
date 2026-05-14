@@ -18,10 +18,17 @@ MIXED:
 </rigidity_level>
 
 <quick_reference>
+## Usage
+
+```
+/build              # Interactive — pauses for user sign-off after each spec
+/build --auto       # Autonomous — skips user sign-off checkpoints, runs end-to-end
+```
+
 ## Build Flow
 
 ```
-/build
+/build [--auto]
   -> Entry validation: scan specs/ for @status(approved|implemented), check beads for open tasks
   -> Parse @depends-on/@parallel-risk graph, topological sort for build order
   -> Show dependency graph with parallel lanes, user confirms execution plan
@@ -30,9 +37,14 @@ MIXED:
      -> Investigate codebase for this spec's requirements
      -> Spec-driven TDD: RED (failing tests from scenarios) -> GREEN -> REFACTOR
      -> Verify: full test suite + code review + spec coverage + test effectiveness
+     -> API integration check: all UI buttons/forms wired to real API calls (not stubs)
+     -> USER SIGN-OFF: pause for user to confirm work matches expectations (unless --auto)
      -> Update spec @status(verified), close beads task
   -> Auto-iterate to next spec
-  -> Exit: all specs @status(verified), epic closed
+  -> Phase 4: Epic close
+     -> Playwright e2e tests for all CUJs (multi-spec UI epics)
+     -> Final verification
+     -> Close Tests gate task, close epic
 ```
 
 ## Hard Constraints (every spec, no exceptions)
@@ -41,12 +53,14 @@ MIXED:
 2. Codebase investigated before writing code
 3. Failing tests generated FROM spec scenarios before implementation (TDD)
 4. Full verification suite + code review agent + spec coverage check
-5. Spec @status updated after verification passes
-6. Investigation findings logged as bd comments on epic
-7. Every verification failure logged as structured bd comment
-8. Continuous verifier agent gates task closure (multi-scenario specs)
-9. Pause and direct to /respec if spec needs changes, or /design if new specs are needed
-10. VERIFICATION comment logged on epic before closing
+5. API integration check: every UI button/form/nav wired to real API calls — not stubs (UI specs with API endpoints)
+6. Spec @status updated after verification passes
+7. Investigation findings logged as bd comments on epic
+8. Every verification failure logged as structured bd comment
+9. Continuous verifier agent gates task closure (multi-scenario specs)
+10. Pause and direct to /respec if spec needs changes, or /design if new specs are needed
+11. VERIFICATION comment logged on epic before closing
+12. Playwright e2e tests for all CUJs before epic close (multi-spec UI epics)
 </quick_reference>
 
 <gherkin_spec_reference>
@@ -140,6 +154,11 @@ Specs are living documents. Update during implementation when:
 ## Phase 1: Entry Validation
 
 **Announce:** "I'm using the /build skill to implement approved specs."
+
+### Parse flags
+Check if `--auto` was passed as an argument to `/build`:
+- `--auto`: Skip user sign-off checkpoints after each spec (Step 3.4). All verification agents still run — this only skips the interactive pause.
+- Default (no flag): Pause after each spec for user to confirm the work matches expectations.
 
 ### Check for specs
 ```bash
@@ -249,9 +268,12 @@ For each spec in build order (auto-iterates):
 ### Step 3.1: Investigate
 
 Read the spec file for context. **If the spec has a `## UI Design` section**, also read:
+- `PRODUCT.md` — brand personality, register (brand vs product), anti-references, design principles
+- `DESIGN.md` — color tokens (OKLCH), typography scale, spacing system, component patterns
 - The component mockup in `specs/mockups/<feature-slug>/` (Storybook components) or `specs/mockups/<feature-slug>.html` (standalone HTML)
 - The architecture overview at `specs/arch.md` (if it exists)
-- The Impeccable shape brief and frontend-design aesthetic decisions referenced in the UI Design section
+- The mock fidelity inventory (what's captured in mockup vs. deferred to build)
+- The quality results from `/impeccable critique` and `/impeccable detect` (noted in the UI Design section)
 
 **The mockup is the visual starting point for implementation** — not a reference to glance at. For UI-facing specs, the implementation should start FROM the mockup component code, wiring in real data and behavior. Do not implement UI from scratch when a mockup exists.
 
@@ -326,7 +348,12 @@ SRE refinement must address: boundary conditions, error paths, concurrent/async 
 2. **RED** — For each `### Scenario:`, write a failing test. For each `### Scenario Outline:` + `#### Examples`, write one test per row. All tests MUST fail.
 3. **GREEN** — Write minimal implementation to make tests pass. One scenario at a time. **For UI-facing specs: start from the mockup component code** — copy it as the base, then wire in real data/logic/state to make tests pass. Do NOT implement UI from scratch when a mockup exists.
 4. **REFACTOR** — Clean up while keeping tests green. **For UI-facing specs: verify the component still matches the mockup's visual design** — typography, color palette, layout, spacing, and aesthetic decisions from the `## UI Design` section must be preserved. Passing tests with ugly UI is not GREEN.
-5. **REPEAT** — Next scenario.
+5. **BROWSER ITERATION** (UI-facing specs only) — After each scenario group is GREEN, view the implementation in a browser across viewports:
+   - Desktop (1440px+), tablet (768px), mobile (375px)
+   - Compare against the mockup side-by-side
+   - Check: do CSS tokens resolve? Are fonts loading? Does layout collapse gracefully?
+   - Fix visual issues immediately — do not defer to "later"
+6. **REPEAT** — Next scenario.
 
 For specs with few scenarios (1-3), use TDD directly:
 ```
@@ -434,20 +461,23 @@ Additionally check:
 - Stubs exposed as functional = CRITICAL
 - Variables assigned but unused = IMPORTANT
 
-#### Step 3.3d: Visual Fidelity Check (UI-facing specs only)
+#### Step 3.3d: Visual Fidelity + Design Quality Check (UI-facing specs only)
 
-For specs with a `## UI Design` section, verify the implementation matches the design:
+For specs with a `## UI Design` section, run a comprehensive visual verification pipeline. **All six sub-steps (D1-D6) are required regardless of timeline.** Time pressure does not reduce the number of steps — each catches problems the others miss.
+
+**D1. Visual Fidelity Check**
 
 1. **Read the mockup** — open `specs/mockups/<feature-slug>/` or `specs/mockups/<feature-slug>.html`
-2. **Start the dev server** — view the implemented component in a browser
-3. **Compare against design decisions** from the spec's `## UI Design` section:
-   - Typography: correct fonts, sizes, hierarchy?
-   - Color palette: correct colors, not browser defaults?
+2. **Read PRODUCT.md and DESIGN.md** — load the design system tokens and brand context
+3. **Start the dev server** — view the implemented component in a browser
+4. **Compare against design decisions** from the spec's `## UI Design` section:
+   - Typography: correct fonts, sizes, hierarchy from DESIGN.md?
+   - Color palette: correct OKLCH tokens, not browser defaults?
    - Layout/spacing: matches mockup spatial composition?
    - CSS custom properties: resolving correctly (not undefined/fallback)?
    - Key states: default, empty, error — all styled, not just functional?
-   - Aesthetic direction: matches the Impeccable shape brief tone?
-4. **Check for "raw HTML" symptoms:**
+   - Aesthetic direction: matches the chosen visual direction and register?
+5. **Check for "raw HTML" symptoms:**
    - Unstyled form elements (browser defaults)
    - Missing hover/focus states
    - No responsive behavior
@@ -455,21 +485,115 @@ For specs with a `## UI Design` section, verify the implementation matches the d
    - CSS variables referenced but not defined
    - Flat, lifeless layout with no visual hierarchy
 
+**D2. Critique** (`/impeccable critique`) — evaluates against **design principles**
+
+Run a dual assessment on the implemented component:
+- **LLM design review**: visual hierarchy, readability, alignment with PRODUCT.md brand personality and design principles
+- **27 deterministic detection rules**: AI slop signals, overused patterns, accessibility violations, design system drift
+- **Nielsen heuristic scoring**: rate against the 10 usability heuristics
+- **Persona test**: Would target users from PRODUCT.md be satisfied?
+
+Read PRODUCT.md before running critique — the brand personality and anti-references define what "good" means for this project.
+
+**D3. Audit** (`/impeccable audit`) — Technical quality
+
+Run technical quality checks on the implementation:
+- Accessibility: contrast ratios, focus indicators, screen reader support, touch targets
+- Performance: image sizes, animation cost, render complexity, bundle impact
+- Responsive behavior: breakpoints, overflow, device-specific interactions
+
+Accessibility violations are **CRITICAL** — fix before proceeding.
+
+**D4. Harden** (`/impeccable harden`) — Production readiness
+
+Verify the implementation handles non-happy-path states:
+- Error states: API failures show user-friendly messages, not blank screens
+- Empty states: zero-data views guide users toward first action
+- Edge cases: long text, maximum items, slow connections, offline
+- Loading states: skeleton screens or spinners, not frozen UI
+
+Missing error/empty states are **IMPORTANT** — fix before proceeding.
+
+**D5. Enhancement (if needed)**
+
+If quality checks found the implementation is bland, generic, losing fidelity, or has other design weaknesses:
+
+| Weakness | Command | Action |
+|----------|---------|--------|
+| Lost personality from mockup | `/impeccable bolder` | Amplify back to mockup's level |
+| Needs extraordinary impact | `/impeccable overdrive` | Push past conventional limits (brand register) |
+| Colors flattened | `/impeccable colorize` | Restore OKLCH palette depth |
+| Typography degraded | `/impeccable typeset` | Fix type scale, hierarchy, rhythm |
+| Feels static/dead | `/impeccable animate` | Add functional motion from mock fidelity inventory |
+| Spacing/rhythm off | `/impeccable layout` | Restore grid, alignment, negative space |
+| Too loud/aggressive | `/impeccable quieter` | Tone down to appropriate level |
+| Too complex | `/impeccable distill` | Strip to essence (product register) |
+
+After enhancement, re-run critique to verify the fix. Maximum 2 enhancement-critique cycles.
+
+**D6. Clarify** (`/impeccable clarify`) — UX copy pass
+
+Review all user-facing text in the implementation:
+- Button labels: action-oriented ("Save changes" not "Submit")
+- Error messages: helpful and specific ("Email already registered" not "Error 409")
+- Empty states: guide toward action ("Add your first workout" not "No data")
+- Microcopy: tooltips, placeholders, confirmation dialogs
+
+**D7. Adapt** (`/impeccable adapt`) — Responsive verification
+
+Verify the implementation works across devices:
+- Mobile (375px): layout collapses gracefully, touch targets adequate
+- Tablet (768px): uses space effectively, not just stretched mobile
+- Desktop (1440px+): no awkward whitespace, content appropriately constrained
+
+**D8. Polish** (`/impeccable polish`) — Final design system alignment
+
+Final quality pass — checks DESIGN.md token alignment (read DESIGN.md before running):
+- Spacing consistency (all values from DESIGN.md scale)
+- Typography hierarchy (no orphan sizes, consistent line-height)
+- Color usage (no off-palette colors, proper contrast)
+- Interaction states (hover, focus, active, disabled — all styled)
+- Motion (entrances, transitions, feedback — appropriate to register)
+
+**D9. Optimize** (`/impeccable optimize`) — UI performance
+
+Diagnose and fix performance issues in the implementation:
+- Rendering: unnecessary re-renders, heavy components, virtualization for lists
+- Animations: GPU-accelerated vs. layout-thrashing, reduced motion support
+- Assets: image optimization, lazy loading, code splitting
+
+Performance issues are **IMPORTANT** for mobile apps, **MINOR** for admin dashboards.
+
+**D10. Log Results**
+
 ```bash
-bd comments add [epic-id] "VISUAL FIDELITY CHECK: specs/<feature-slug>.md
+bd comments add [epic-id] "VISUAL FIDELITY + DESIGN QUALITY CHECK: specs/<feature-slug>.md
 
 Mockup: specs/mockups/<feature-slug>/
-Typography: [PASS/FAIL — details]
-Color palette: [PASS/FAIL — details]
-Layout/spacing: [PASS/FAIL — details]
-CSS tokens resolving: [PASS/FAIL — details]
-Key states styled: [PASS/FAIL — details]
-Overall aesthetic match: [PASS/FAIL — details]
+Register: [brand/product]
+
+Visual Fidelity:
+  Typography: [PASS/FAIL — details]
+  Color palette: [PASS/FAIL — details]
+  Layout/spacing: [PASS/FAIL — details]
+  CSS tokens resolving: [PASS/FAIL — details]
+  Key states styled: [PASS/FAIL — details]
+  Overall aesthetic match: [PASS/FAIL — details]
+
+Design Quality:
+  Critique: [PASS/FAIL — score, issues found]
+  Audit: [PASS/FAIL — a11y, performance, responsive]
+  Harden: [PASS/FAIL — error/empty/edge states]
+  Clarify: [PASS/FAIL — UX copy quality]
+  Adapt: [PASS/FAIL — responsive across viewports]
+  Enhancement applied: [none / commands used]
+  Polish: [PASS/FAIL — design system alignment]
+  Optimize: [PASS/FAIL — performance]
 
 Verdict: PASS | FAIL"
 ```
 
-Visual fidelity failure is **CRITICAL** — tests passing with ugly UI means the mockup was ignored. Fix before proceeding.
+Visual fidelity failure OR design quality failure is **CRITICAL** — tests passing with ugly or generic UI means the design phase was wasted. Fix before proceeding.
 
 **Skip this step for:** Backend-only specs, API-only specs, CLI specs — any spec without a `## UI Design` section.
 
@@ -495,6 +619,44 @@ Verdict: PASS | FAIL"
 
 Unimplemented scenario = CRITICAL (`spec-coverage`). Untested scenario = IMPORTANT.
 
+#### Step 3.3f: API Integration Check (UI-facing specs with backend)
+
+**For specs where UI scenarios imply backend persistence or API calls**, verify every interactive element is wired to the real API — not just local state, stubs, or TODO functions.
+
+**Process:**
+
+1. **Read the spec's Technical Context** — identify all API endpoints listed
+2. **Read the spec scenarios** — identify every user action that implies backend communication:
+   - Buttons that create/update/delete data (POST, PATCH, DELETE)
+   - Forms that submit data
+   - Navigation that loads data (GET)
+   - State changes that must persist across sessions
+3. **For each action, verify in the implementation code:**
+   - An actual API call is made (fetch, axios, Supabase client, etc.) — not a TODO, stub, console.log, or local-state-only dispatch
+   - The API call uses the correct endpoint from Technical Context
+   - Error handling exists for the API call (loading state, error state)
+   - Success updates the UI with the response (not just optimistic local state)
+
+4. **Log results:**
+
+```bash
+bd comments add [epic-id] "API INTEGRATION CHECK: specs/<feature-slug>.md
+
+Interactive elements checked:
+- [Button: 'Start Workout'] → POST /api/v1/workout-logs — WIRED | STUB | MISSING
+- [Button: 'Log Set'] → PATCH /api/v1/workout-logs/:id — WIRED | STUB | MISSING
+- [Button: 'Complete Workout'] → PATCH /api/v1/workout-logs/:id — WIRED | STUB | MISSING
+- [Navigation: 'History'] → GET /api/v1/workout-logs — WIRED | STUB | MISSING
+
+Verdict: PASS | FAIL"
+```
+
+**Severity:**
+- STUB or MISSING API call = **CRITICAL** (`api-integration`). A button that doesn't call the API is a broken feature, regardless of whether unit tests pass.
+- Wrong endpoint or missing error handling = **IMPORTANT**
+
+**Skip this step for:** Backend-only specs, specs with no API endpoints in Technical Context, purely static/informational UI.
+
 #### Verification Failure Handling
 
 Log every failure:
@@ -509,9 +671,44 @@ Action: [returning to fix | fixing inline | deferring]"
 
 Maximum 3 fix-verify cycles per spec before escalating to user.
 
-### Step 3.4: Complete This Spec
+### Step 3.4: User Sign-Off Checkpoint
 
-After verification passes:
+**Unless `--auto` flag was passed**, pause and present a summary to the user for final sign-off before marking the spec as verified.
+
+Use AskUserQuestion:
+
+```
+"Spec `specs/<feature-slug>.md` implementation complete. Here's what was built:
+
+**Scenarios implemented:** [N/N]
+**Tests:** [N passing, 0 failing]
+**Verification:** All agents returned PASS
+[If UI-facing:] **Visual fidelity:** PASS — matches mockup
+
+Key implementation decisions:
+- [Decision 1 — e.g., chose X pattern over Y because of codebase convention]
+- [Decision 2 — e.g., added edge case scenario for Z]
+
+Files changed:
+- [file1.ts — what changed]
+- [file2.test.ts — what changed]
+
+Does this match your expectations? (yes / no / concerns)"
+```
+
+**If user says no or raises concerns:**
+- Address the concerns (fix code, adjust approach)
+- Re-run verification if changes were made
+- Present updated summary and ask again
+- Maximum 3 sign-off cycles before escalating with full context
+
+**If user says yes:** Proceed to Step 3.5.
+
+**If `--auto` flag was passed:** Skip this step entirely and proceed directly to Step 3.5.
+
+### Step 3.5: Complete This Spec
+
+After verification passes (and user sign-off, unless `--auto`):
 
 1. Update spec status: `@status(implemented)` → `@status(verified)`
 2. Close the beads task for this spec
@@ -520,7 +717,7 @@ After verification passes:
    bd comments add [epic-id] "VERIFICATION: specs/<feature-slug>.md PASSED — [N] scenarios implemented and tested"
    ```
 
-### Step 3.5: Auto-Iterate
+### Step 3.6: Auto-Iterate
 
 Move to the next spec in build order. Return to Step 3.1.
 
@@ -532,34 +729,124 @@ Continue until all specs are processed.
 
 After all specs are `@status(verified)`:
 
-### Final Verification
+### Step 4.1: Playwright E2E Tests (Critical User Journeys)
+
+**MANDATORY for multi-spec epics with UI-facing specs.** This is the cross-spec integration gate that catches what per-spec verification misses.
+
+**Why this exists:** Per-spec verification tests each feature in isolation. Playwright e2e tests walk the actual user journey end-to-end through the real running application — navigation, data flow, API calls, and cross-feature integration all exercised together.
+
+**Process:**
+
+1. **Collect CUJs** — Read the `## Critical User Journeys` section from every spec in the epic. Build a master CUJ list.
+
+2. **Set up Playwright** (if not already configured):
+   ```bash
+   # Check if Playwright is installed
+   npx playwright --version 2>/dev/null || npx playwright install
+   ```
+   If no Playwright config exists, create a minimal `playwright.config.ts` for the project.
+
+3. **Generate e2e test files** — One test file per CUJ, placed in `e2e/` or `tests/e2e/`:
+
+   ```typescript
+   // e2e/log-a-workout.spec.ts
+   // CUJ: Log a workout
+   // Journey: Open app → Login → Navigate to workouts → Start workout → Log sets → Complete → View history
+
+   import { test, expect } from '@playwright/test';
+
+   test('CUJ: Log a workout end-to-end', async ({ page }) => {
+     // Step 1: Login (from auth spec)
+     await page.goto('/login');
+     await page.fill('[data-testid="email"]', 'client@test.com');
+     await page.fill('[data-testid="password"]', 'testpassword');
+     await page.click('[data-testid="login-button"]');
+     await expect(page).toHaveURL('/dashboard');
+
+     // Step 2: Navigate to workouts (from navigation/dashboard spec)
+     await page.click('[data-testid="nav-workouts"]');
+     await expect(page).toHaveURL('/workouts');
+
+     // Step 3: Start workout (from workout-tracking spec)
+     await page.click('[data-testid="start-workout"]');
+     await expect(page.locator('[data-testid="workout-timer"]')).toBeVisible();
+
+     // Step 4: Log a set (from workout-tracking spec)
+     await page.fill('[data-testid="reps-input"]', '8');
+     await page.fill('[data-testid="weight-input"]', '185');
+     await page.click('[data-testid="log-set"]');
+     await expect(page.locator('[data-testid="set-list"]')).toContainText('8 × 185');
+
+     // Step 5: Complete workout (from workout-tracking spec)
+     await page.click('[data-testid="complete-workout"]');
+     await expect(page.locator('[data-testid="workout-complete-confirmation"]')).toBeVisible();
+
+     // Step 6: Verify in history (from workout-tracking spec)
+     await page.click('[data-testid="nav-history"]');
+     await expect(page.locator('[data-testid="workout-history-list"]')).toContainText('today');
+   });
+   ```
+
+4. **Run e2e tests against the dev server:**
+   ```bash
+   npx playwright test
+   ```
+
+5. **Log results:**
+   ```bash
+   bd comments add [epic-id] "E2E PLAYWRIGHT TESTS: CUJ Coverage
+
+   CUJs tested:
+   - Log a workout: PASS | FAIL — [details]
+   - Trainer reviews client: PASS | FAIL — [details]
+   - New user onboarding: PASS | FAIL — [details]
+
+   Total CUJs: [N]
+   Passing: [N]
+   Failing: [N]
+
+   Verdict: PASS | FAIL"
+   ```
+
+**Severity:** Any failing CUJ = **CRITICAL**. The whole point of CUJs is that they represent what real users actually do. A failing CUJ means the app is broken for the user, even if every unit test passes.
+
+**What e2e tests catch that unit tests miss:**
+- Buttons wired to TODO/stub functions (caught because the journey doesn't progress)
+- Navigation that doesn't work (caught because page URL doesn't change)
+- Data that doesn't persist (caught because history page is empty)
+- Cross-feature integration failures (caught because features don't connect)
+
+**Skip for:** Backend-only epics, CLI-only epics, single-spec epics with no UI.
+
+### Step 4.2: Final Verification
 ```
 Use Skill tool: hyperpowers:verification-before-completion
 ```
 
-### Close Tests Gate Task
+### Step 4.3: Close Tests Gate Task
 ```bash
 bd show [tests-task-id]  # Verify all criteria met
 bd close [tests-task-id]
 ```
 
-### Log Final Verification Comment
+### Step 4.4: Log Final Verification Comment
 ```bash
 bd comments add [epic-id] "VERIFICATION Phase 4: PASSED — all specs verified
 Specs verified: [list]
 Total scenarios: [N]
-All tests passing."
+All unit tests passing.
+Playwright e2e: [N] CUJs tested, all passing. (or: N/A — backend-only / CLI-only / single-spec with no UI)"
 ```
 
-### Close Epic
+### Step 4.5: Close Epic
 ```bash
 bd close [epic-id]
 ```
 
-### Update README (when applicable)
+### Step 4.6: Update README (when applicable)
 If the epic added/changed features, API, UI, dependencies, or usage patterns — update README.
 
-### Update Memory
+### Step 4.7: Update Memory
 Save anything learned that would be useful in future sessions.
 
 ### Present Integration Options
@@ -607,10 +894,11 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
   - REFACTOR: Clean up
   - Discover edge case: radius=0. Add scenario to spec, write failing test, implement.
 - Continuous verifier reviews each task's diff
-- Verify: Full suite + code review (with spec) + spec coverage check (5/5 scenarios)
+- Verify: Full suite + code review (with spec) + spec coverage check (5/5 scenarios) + API integration check (N/A — backend-only spec)
+- User sign-off: present summary, user confirms
 - Update: `@status(verified)`, close beads task
 
-**Phase 4:** Close Tests task, close epic, offer PR.
+**Phase 4:** Playwright e2e (N/A — single-spec). Close Tests task, close epic, offer PR.
 </correction>
 </example>
 
@@ -628,7 +916,8 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 - Investigate: Read spec + system.md. Dispatch codebase-investigator + internet-researcher.
 - TDD: RED for all registration scenarios → GREEN → REFACTOR
 - Continuous verifier per task
-- Verify: Full suite + code review + spec coverage
+- Verify: Full suite + code review + spec coverage + API integration check (all form submissions wired)
+- User sign-off: present summary, user confirms
 - Update: `@status(verified)`, close beads task
 
 **Phase 3 — Spec 2 (user-authentication):**
@@ -636,10 +925,11 @@ Use Skill tool: hyperpowers:finishing-a-development-branch
 - Investigate: Read spec + system.md + user-registration.md (now implemented — understand User model, registration API)
 - TDD: RED for auth scenarios (including Scenario Outline rate limiting — 3 parameterized tests) → GREEN → REFACTOR
 - Continuous verifier per task
-- Verify: Full suite + code review + spec coverage
+- Verify: Full suite + code review + spec coverage + API integration check (login/logout wired)
+- User sign-off: present summary, user confirms
 - Update: `@status(verified)`, close beads task
 
-**Phase 4:** Close Tests task, close epic, memory update, offer PR.
+**Phase 4:** Playwright e2e — CUJs: New user onboarding (PASS), Returning user session (PASS). Close Tests task, close epic, memory update, offer PR.
 </correction>
 </example>
 
@@ -704,6 +994,11 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 14. **Never update status while verification is in flight** -> Do NOT update `@status` or close beads tasks while verification agents are still running. Verification results MUST be received and passed BEFORE any status change or closure. "While waiting for verification" is never a valid reason to update status — that is the one thing that depends on the results.
 15. **UI-facing specs: start from mockup, not from scratch** -> If `specs/mockups/<feature-slug>/` or `.html` exists, the mockup component IS the starting point for implementation. Copy it, wire in real data. Do not implement UI from scratch and ignore the mockup. Tests passing with ugly/unstyled UI is a CRITICAL failure.
 16. **Visual fidelity is part of verification** -> For UI-facing specs, the visual fidelity check (Step 3.3d) is mandatory. Typography, color, layout, and CSS tokens must match the `## UI Design` section. "It works" is not enough — it must also look right.
+17. **Browser iteration during TDD for UI specs** -> After each scenario group passes (GREEN), view the implementation in a browser across viewports (desktop, tablet, mobile). Compare against the mockup. Fix visual issues immediately — do not batch them for "later."
+18. **Critique + detect + polish quality pipeline for UI specs** -> After visual fidelity check, run `/impeccable critique` (design review + 27 anti-pattern rules), `/impeccable detect` (deterministic scanner on source), and `/impeccable polish` (final quality pass). All three are mandatory for UI-facing specs. Enhancement commands (`/bolder`, `/colorize`, `/typeset`, etc.) when critique finds blandness.
+19. **Read PRODUCT.md + DESIGN.md during UI implementation** -> The design system tokens and brand context are the source of truth for visual decisions. Read them during investigation (Step 3.1) and reference them during visual verification (Step 3.3d). Do not implement UI without loading the design system.
+20. **API integration check for UI-facing specs** -> Every interactive UI element (button, form, navigation) that implies backend communication must be wired to a real API call — not a TODO, stub, or local-state-only dispatch. Step 3.3f is mandatory for UI specs with API endpoints.
+21. **Playwright e2e tests before epic close** -> For multi-spec UI epics, Playwright e2e tests covering every CUJ from the specs must pass before Phase 4 can close the epic. This is the cross-spec integration gate. Unit tests verify features in isolation; e2e tests verify the assembled application.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -726,6 +1021,19 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 - "The UI works, styling can come later" -> NO. "Works but ugly" is a CRITICAL failure. The design phase produced specific typography, color, and layout decisions — implement them now, not later.
 - "CSS variables aren't resolving but the layout is correct" -> STOP. Unresolved CSS tokens mean the design system isn't wired up. Fix the token definitions before proceeding.
 - "Tests pass so the component is done" -> Tests verify behavior. Visual fidelity verifies appearance. Both must pass for UI-facing specs.
+- "Browser iteration across viewports is overkill" -> Mobile breakpoints catch 80% of visual bugs. If you don't check tablet/mobile, the user will — and they'll send you back. 30 seconds per viewport prevents hours of rework.
+- "I'll run critique/detect/polish in one batch at the end" -> Each catches different problems. Critique after each major change; detect on source files; polish as final pass. Batching at the end means fixing issues that compound on each other.
+- "The design looks fine without running critique" -> Your aesthetic judgment has blind spots. Critique's 27 deterministic rules catch patterns humans normalize (generic cards, template shadows, default spacing). Run it — it takes seconds.
+- "PRODUCT.md/DESIGN.md aren't needed during build" -> The design tokens in DESIGN.md are the source of truth for colors, typography, and spacing. Building UI without reading them means guessing at values that are already defined. Read them.
+- "Enhancement commands are for design, not build" -> If critique finds the implementation lost personality from the mockup, enhancement commands (`/bolder`, `/colorize`, `/typeset`) restore it. The mockup was the target — if implementation drifted, fix it.
+- "Polish is redundant with the visual fidelity check" -> Visual fidelity checks mockup fidelity. Polish checks design system alignment — spacing consistency, typography hierarchy, interaction states, motion, responsive behavior. Different dimensions.
+- "User sign-off slows things down" -> Sign-off catches misalignment BEFORE it compounds across dependent specs. Fixing one spec is cheaper than unwinding three. Use `--auto` only when you're confident the specs are well-defined and no ambiguity exists.
+- "I'll get sign-off at the end for all specs" -> No. Sign-off is per-spec, not per-epic. Each spec checkpoint catches drift early. The epic close (Phase 4) has its own final verification — that is not a substitute for per-spec sign-off.
+- "API integration is a separate concern from the UI spec" -> No. If the spec scenario says "client starts a workout" and the button calls a TODO function, the scenario is NOT implemented. UI specs that imply backend persistence are not done until the API calls are real.
+- "Unit tests pass so the buttons work" -> Unit tests that don't assert API calls were made are testing the wrong thing. Green tests on stub implementations prove nothing. Step 3.3f catches exactly this.
+- "E2e tests are overkill — unit tests cover everything" -> Unit tests verify each feature in isolation. E2e tests verify the assembled application. FitConnect's launch had every unit test green but no feature actually worked end-to-end. Playwright CUJ tests are MANDATORY for multi-spec UI epics.
+- "I'll write e2e tests after the epic closes" -> No. E2e tests are a Phase 4 gate. The epic cannot close without passing Playwright CUJ tests. "After" means never.
+- "The API isn't ready so I can't test integration" -> If the API is in this epic, it should be built first (spec dependencies). If it's external, mock the API at the network layer (MSW), not in the component. Either way, the integration must be verified.
 </critical_rules>
 
 <verification_checklist>
@@ -764,14 +1072,23 @@ Before claiming /build is complete for a spec:
 - [ ] Spec scenario coverage check completed (every scenario implemented + tested)
 - [ ] Integration point checklist included (cross-module specs)
 - [ ] Dead code scan completed
-- [ ] Visual fidelity check passed for UI-facing specs (Step 3.3d) — or N/A (no UI)
+- [ ] Browser iteration completed across viewports (desktop, tablet, mobile) during TDD — or N/A (no UI)
+- [ ] Visual fidelity check passed (mockup fidelity, CSS tokens, key states) — or N/A (no UI)
+- [ ] `/impeccable critique` quality gate passed — or N/A (no UI)
+- [ ] `/impeccable detect` anti-pattern scan passed — or N/A (no UI)
+- [ ] Enhancement commands applied if critique found blandness — or N/A (no UI / critique passed clean)
+- [ ] `/impeccable polish` final quality pass completed — or N/A (no UI)
 - [ ] Every failure logged as structured bd comment
+- [ ] API integration check passed: all interactive UI elements wired to real API calls (Step 3.3f) — or N/A (backend-only / no API)
+- [ ] User sign-off obtained (Step 3.4) — or N/A (--auto flag)
 - [ ] Spec @status updated to @status(verified)
 - [ ] Beads task closed
 
 **Epic Close:**
 - [ ] All specs @status(verified)
-- [ ] VERIFICATION comment logged on epic
+- [ ] Playwright e2e tests written for all CUJs from specs (Step 4.1) — or N/A (backend-only / CLI-only / single-spec with no UI)
+- [ ] Playwright e2e tests all passing
+- [ ] VERIFICATION comment logged on epic (including e2e results)
 - [ ] Tests gate task closed
 - [ ] Epic closed
 - [ ] README updated (if applicable)
@@ -794,6 +1111,15 @@ Before claiming /build is complete for a spec:
 | code-reviewer agent | Continuous verifier + final verification |
 | test-runner agent | Verification step |
 | test-effectiveness-analyst agent | Verification step |
+| impeccable (critique) | UI verification — design quality review (Step 3.3d D2) |
+| impeccable (audit) | UI verification — a11y, performance, responsive checks (Step 3.3d D3) |
+| impeccable (harden) | UI verification — error/empty/edge states (Step 3.3d D4) |
+| impeccable (clarify) | UI verification — UX copy, labels, messages (Step 3.3d D6) |
+| impeccable (adapt) | UI verification — responsive across viewports (Step 3.3d D7) |
+| impeccable (polish) | UI verification — final design system alignment (Step 3.3d D8) |
+| impeccable (optimize) | UI verification — performance diagnostics (Step 3.3d D9) |
+| impeccable (bolder/overdrive/colorize/typeset/delight/animate/layout/quieter/distill) | UI verification — targeted enhancement (Step 3.3d D5) |
+| Playwright | E2E CUJ testing — cross-spec integration gate before epic close (Step 4.1) |
 
 **This skill directs to:**
 

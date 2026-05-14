@@ -157,7 +157,7 @@ Correct the misspelling 'recieve' to 'receive' across the project.
 - And no other text is modified
 ```
 
-**Standard** — Feature + As/I want/So that + Technical Context + Rules + Background + Scenarios.
+**Standard** — Feature + As/I want/So that + Critical User Journeys + Technical Context + Rules + Background + Scenarios.
 
 ```markdown
 @status(draft)
@@ -168,6 +168,15 @@ Correct the misspelling 'recieve' to 'receive' across the project.
 As an API consumer
 I want to query breweries by location
 So that I can find nearby breweries for a given coordinate
+
+## Critical User Journeys
+
+This feature participates in the following end-to-end journeys:
+
+| CUJ | Steps in This Feature | Full Journey |
+|-----|----------------------|--------------|
+| Find a local brewery | Search by location → View results | Open app → Allow location → Search nearby → View brewery details → Get directions |
+| Plan a brewery visit | Search → Filter by distance | Search nearby → Filter → View details → Save to favorites → Share with friend |
 
 ## Technical Context
 
@@ -220,6 +229,16 @@ So that I can find nearby breweries for a given coordinate
 As a registered user
 I want to log in securely
 So that I can access my account
+
+## Critical User Journeys
+
+This feature participates in the following end-to-end journeys:
+
+| CUJ | Steps in This Feature | Full Journey |
+|-----|----------------------|--------------|
+| New user onboarding | Register → Select role → Login | Landing → Register → Verify email → Login → Select role → Dashboard |
+| Returning user session | Login → Token refresh | Open app → Login → Use features → Token auto-refresh → Continue working |
+| Account recovery | Forgot password → Reset | Login screen → Forgot password → Email link → Reset → Login |
 
 ## Technical Context
 
@@ -360,16 +379,63 @@ Enforcement rules:
 4. **Do NOT proceed until answers are received** — If you asked a question, you must receive and incorporate the answer before moving forward. "Making reasonable defaults for ambiguous parts" is not acceptable.
 5. **Multiple rounds are expected for complex work** — If the work involves new features, integrations, or architectural decisions, one round of questions is probably insufficient.
 6. **Research informs and validates — it never replaces asking** — If you learn the project uses passport.js, that informs what to ask, it doesn't eliminate the need to ask. If research shows an API doesn't support webhooks, that becomes a question ("The Stripe API doesn't support X — how should we handle this?"), not a silent design decision.
+7. **Drill down relentlessly** — Every answer the user gives should spawn follow-up questions that dig deeper. "React Native" → "Expo or bare RN? What minimum OS versions? Which navigation library?" Surface-level answers produce surface-level specs. Push until you have enough detail to write code.
+8. **Never accept vague answers** — If the user says "standard auth" or "normal CRUD," that is NOT an answer. Push: "Standard auth meaning email/password only? Social login? MFA? Password reset flow? Session or token-based?" Vagueness is where bugs hide.
 
 Questions to stabilize:
 - **What** — What is being built/changed/fixed?
 - **Why** — What problem does this solve?
 - **Where** — Which parts of the system are affected?
+- **User Journeys** — What end-to-end journeys does this feature participate in? What does the user do before arriving here? What do they do after? (e.g., "User logs in → navigates to workouts → starts workout → logs sets → completes → views history") (skip for Simple specs and non-user-facing work)
 - **Constraints** — What must NOT change? What are the boundaries?
 - **Dependencies** — Does this depend on other features? Do other features depend on this?
 - **Edge cases** — What happens with empty/invalid/unexpected input?
 
 For simple changes (typo, rename, config), 0-1 questions may suffice — the request itself may be fully specified. Don't ask questions for the sake of asking.
+
+### Greenfield Questioning Protocol
+
+**For greenfield projects (no existing codebase, building from scratch), questioning intensity increases dramatically.** A greenfield project cannot be fully spec'd from a single round of questions. The user's initial description is a starting point, not a specification.
+
+**Minimum 3 rounds of questions are required.** Each round drills deeper based on the previous answers.
+
+**Round 1 — Scope & Architecture** (broad strokes):
+- Platform, tech stack, deployment target
+- User roles and access model
+- Core feature list (what's MVP vs. later?)
+- Data ownership and privacy model
+- Third-party integrations
+
+**Round 2 — Feature Deep-Dive** (for each major feature area from Round 1):
+- Data model: What fields? What types? What's required vs. optional?
+- User interactions: What does the user click/tap/type? What do they see in response?
+- Permissions: Who can see/edit/delete what? What about shared data?
+- Error states: What happens when it fails? What does the user see?
+- Edge cases: Empty states, max limits, concurrent access
+
+**Round 3 — Integration & Flows** (connecting the pieces):
+- CUJs: Walk through every major user journey end-to-end, step by step
+- Cross-feature dependencies: How does feature A hand off to feature B?
+- Notification model: When does the app reach out to the user?
+- Onboarding: What does a brand-new user experience?
+- Settings & configuration: What can users control?
+
+**Completeness Gate:** Before proceeding to decomposition, verify you have answers covering ALL of these categories. If any category has gaps, ask another round. Do NOT proceed with assumptions.
+
+| Category | Covered? |
+|----------|----------|
+| Platform & tech stack | |
+| User roles & permissions | |
+| Data model per feature | |
+| API contracts (endpoints, request/response shapes) | |
+| User journeys (end-to-end flows) | |
+| Error handling & edge cases | |
+| Third-party integrations | |
+| Onboarding & first-run experience | |
+| Notification model | |
+| Settings & user preferences | |
+| Monetization / billing (if applicable) | |
+| Offline behavior (if applicable) | |
 
 ## Step 2.5: Decompose
 
@@ -432,7 +498,11 @@ Report: confirmed capabilities, limitations, and anything that contradicts the c
 
 ## Step 2.85: UI/UX Design (when applicable)
 
-For work involving user interfaces, frontends, or visual design, use **both** the `impeccable` skill (UX/interaction planning via `/impeccable shape`) and the `frontend-design` skill (visual aesthetics) to plan the UI before writing specs. Additionally, produce a **draw.io mockup** so the user can visualize the layout.
+**Invoke `/design-ui`.** This is a separate skill that handles the full UI/UX design pipeline. It produces:
+- `PRODUCT.md` + `DESIGN.md` (if missing — via `/impeccable teach`)
+- Component mockups in `specs/mockups/` for all UI-facing specs
+- `## UI Design` sections ready to incorporate into specs
+- Quality-checked designs (critique + detect + enhancement)
 
 ### When to trigger
 
@@ -442,112 +512,11 @@ Any decomposition map entry that involves:
 - Significant visual changes to existing interfaces
 - User-facing interactions (forms, dashboards, data visualization)
 
-### Process
+**BLOCKING REQUIREMENT**: If ANY entry in the decomposition map is UI-facing, `/design-ui` MUST be invoked before proceeding to Step 3 (spec generation). A UI-facing spec without a mockup CANNOT be approved.
 
-#### A. Impeccable: UX/Interaction Design (`/impeccable shape`)
+The `/design-ui` skill handles its own gate checks, batching strategy, quality gates, and user confirmation. When it returns, all UI-facing specs have mockups and UI Design content.
 
-Run `/impeccable shape [feature]` for each UI-facing spec entry. This produces a **design brief** covering:
-- Feature summary and primary user action
-- Design direction (color strategy, theme scene sentence, anchor references)
-- Scope (fidelity, breadth, interactivity)
-- Layout strategy and visual hierarchy
-- Key states (default, empty, loading, error, success, edge cases)
-- Interaction model (click, hover, scroll behaviors, feedback, flow)
-- Content requirements (copy, labels, empty state messages, microcopy)
-
-**IMPORTANT**: Impeccable's shape command runs its own discovery interview via AskUserQuestion. This supplements (not replaces) the Socratic questioning from Step 2 — Step 2 covers the *what/why/constraints* of the feature; Impeccable shape covers the *UX/UI-specific* decisions (user state of mind, content ranges, visual direction, anti-goals).
-
-The shape brief must be **user-confirmed** before proceeding.
-
-#### B. Frontend-Design: Visual Aesthetics
-
-After the Impeccable shape brief is confirmed, apply the `frontend-design` skill's design thinking to lock in the visual aesthetic:
-- **Tone**: Bold aesthetic direction (brutally minimal, maximalist, retro-futuristic, luxury/refined, editorial, etc.)
-- **Typography**: Distinctive, characterful font choices — never generic (no Inter, Roboto, Arial)
-- **Color & Theme**: OKLCH-based palette, commit to a cohesive aesthetic via CSS variables
-- **Motion**: CSS-only or Motion library animations for high-impact moments
-- **Spatial Composition**: Unexpected layouts, asymmetry, generous negative space or controlled density
-- **Backgrounds & Visual Details**: Atmosphere and depth — gradient meshes, noise textures, geometric patterns
-
-The frontend-design decisions should be consistent with the Impeccable shape brief's design direction (color strategy, theme, anchor references).
-
-#### C. Component Mockup (MANDATORY for UI-facing specs)
-
-**BLOCKING REQUIREMENT**: Every UI-facing spec MUST have a corresponding component mockup before the spec can be approved. A UI-facing spec without a mockup is incomplete — it CANNOT proceed to `@status(approved)`.
-
-The mockup format depends on the project's framework:
-
-**Option 1: React/Vue/Svelte projects — Component + Storybook story (preferred)**
-
-Generate a mockup component and Storybook story in `specs/mockups/<feature-slug>/`:
-
-```
-specs/mockups/<feature-slug>/
-  <ComponentName>.tsx       # Component with mock data, semantic HTML, styled
-  <ComponentName>.stories.tsx  # Storybook CSF stories for all key states
-  README.md                 # Brief notes on design decisions, references shape brief
-```
-
-The component mockup should include:
-- Semantic HTML structure with the actual layout
-- Styled with the project's CSS approach (Tailwind, CSS modules, etc.) using the frontend-design aesthetic decisions
-- Mock/hardcoded data that shows realistic content
-- Storybook stories for all key states: default, empty, loading, error, edge cases
-
-The user views by running `npm run storybook` (or the project's Storybook command).
-
-**Option 2: Non-framework projects — Standalone HTML/CSS mockup**
-
-Generate a self-contained HTML file at `specs/mockups/<feature-slug>.html`:
-- Single file with inline CSS and minimal inline JS
-- Opens directly in any browser — no build step, no dependencies
-- Shows the layout with realistic mock content
-- Uses comments to annotate design decisions (typography, color palette, spacing rationale)
-- Includes multiple sections or tabs for key states (default, empty, error)
-
-**Gate check**: Before proceeding to Step D (Present and Confirm), verify the mockup exists:
-```bash
-ls specs/mockups/<feature-slug>/ 2>/dev/null || ls specs/mockups/<feature-slug>.html 2>/dev/null
-```
-If neither exists, you have not completed this step. Do not proceed.
-
-#### D. Present and Confirm
-
-Present the combined UI design to the user via AskUserQuestion:
-
-```
-"Here's the UI/UX design for [feature]:
-
-**UX Design** (from Impeccable shape brief):
-- Primary user action: [action]
-- Layout strategy: [approach]
-- Key states: [list]
-- Interaction model: [summary]
-
-**Visual Aesthetics** (from frontend-design):
-- Aesthetic direction: [tone chosen]
-- Typography: [font pairing]
-- Color palette: [strategy + colors]
-- Motion: [approach]
-
-**Mockup**: [path to mockup]
-- For Storybook: run `npm run storybook` to view the component with all states
-- For HTML: open `specs/mockups/<feature-slug>.html` in your browser
-
-Does this UI direction work, or should I adjust?"
-```
-
-**BLOCK until user confirms.** If adjustments are needed, re-run the relevant part (shape brief, aesthetics, or mockup).
-
-#### E. Incorporate into Specs
-
-Add a `## UI Design` section to the Gherkin spec with:
-- Impeccable shape brief summary (design direction, layout strategy, key states, interaction model)
-- Frontend-design aesthetic decisions (typography, color, motion, spatial composition)
-- Reference to the component mockup: `Mockup: specs/mockups/<feature-slug>/` or `Mockup: specs/mockups/<feature-slug>.html`
-- Content requirements and UX copy decisions
-
-**Skip this step for:** Backend-only changes, CLI tools, API-only work, config/infra changes, or any work with no user-facing visual component.
+**Skip for:** Decomposition maps with zero UI-facing entries (backend-only, CLI, API-only, infra).
 
 ## Step 3: Generate Gherkin Spec Files
 
@@ -576,6 +545,7 @@ mkdir -p specs
 **Spec generation rules:**
 - One spec file per feature
 - `@status(draft)` on all new specs
+- `## Critical User Journeys` section required on all user-facing Standard and Complex specs — lists which end-to-end journeys this feature participates in, the steps within this feature, and the full journey path. Exempt: Simple specs (typo fixes, renames) and non-user-facing work (pure API-only with no UI consumer in this epic, CLI tools, cron jobs, infra).
 - Technical Context section with API contracts, data structures, integration points (for non-trivial features)
 - Scenarios cover happy path, error cases, and edge cases discovered during questioning
 - For greenfield: the complete set of specs must be sufficient to rebuild the entire application
@@ -593,6 +563,42 @@ Mentally compare the generated specs against the user's original request:
 - Are `@parallel-risk` tags consistent? (mutual references, no phantom slugs)
 - For greenfield: does the system spec + feature specs cover the entire application?
 - **For UI-facing specs**: does a component mockup exist for each one? Run `ls specs/mockups/` to verify. If any UI-facing spec is missing its mockup, STOP — go back to Step 2.85C and generate it before continuing.
+
+### Part 1.5: CUJ Coverage Analysis (MANDATORY for multi-spec designs)
+
+Trace every Critical User Journey across ALL specs to find gaps. This is the systematic tool for catching missing specs that logical reasoning misses.
+
+**Process:**
+
+1. **Collect CUJs** — Read the `## Critical User Journeys` section from every spec. For each CUJ, combine the "Full Journey" column with the spec slug to build a master CUJ table:
+
+```
+| CUJ | Steps in This Feature | Specs Covering Each Step |
+|-----|----------------------|--------------------------|
+| New user onboarding | Landing → Register → Verify → Login → Role select → Dashboard | auth.md, user-profiles.md, ??? (dashboard has no spec!) |
+| Log a workout | Open app → Navigate → Start workout → Log sets → Complete → History | auth.md, workout-tracking.md (navigation has no spec!) |
+```
+
+2. **Trace each journey end-to-end** — For every step in every CUJ, verify:
+   - A spec exists that covers this step
+   - The spec has scenarios for the user action at this step
+   - The spec's Technical Context includes the API endpoint or navigation target needed
+
+3. **Flag gaps** — Any CUJ step with no covering spec is a MISSING SPEC. Present these gaps to the user:
+   ```
+   "CUJ gap analysis found missing coverage:
+   
+   Journey: 'Log a workout'
+   Missing: No spec covers navigation from dashboard to workout screen
+   Missing: No spec covers the workout selection screen (user picks which workout to start)
+   
+   Journey: 'Trainer reviews client'
+   Missing: No spec covers the client detail view (trainer drills into one client)"
+   ```
+
+4. **Generate missing specs** — For each gap, generate a new spec (with its own `## Critical User Journeys` section per the spec generation rules) and re-run the CUJ trace. Repeat until all journeys are fully covered.
+
+**Skip for:** Single-spec designs, non-user-facing work (CLI tools, API-only, infra).
 
 ### Part 2: User Confirmation
 
@@ -712,7 +718,7 @@ This ensures the /build skill (which uses executing-plans) naturally reads spec 
 
 /design is complete when:
 - All spec files exist in `specs/` with `@status(approved)`
-- Component mockups exist for all UI-facing specs (in `specs/mockups/`)
+- `/design-ui` completed: mockups exist for all UI-facing specs (in `specs/mockups/`), PRODUCT.md + DESIGN.md exist — or skipped (no UI-facing specs)
 - Architecture documentation generated and confirmed (`specs/arch.md`, `specs/diagrams/`, `specs/overview.html`) — or skipped for trivial changes
 - Beads epic created referencing spec files
 - Tests gate task created in epic
@@ -856,8 +862,12 @@ Proposed fix: [optional — if the fix is obvious, note it]"
 7. **Every epic has a Tests gate task** -> Prevents beads auto-close before verification.
 8. **Greenfield requires system spec** -> `specs/system.md` is mandatory for greenfield projects.
 9. **Dependency integrity** -> Every `@depends-on(x)` and `@blocks(x)` must reference an existing spec file. No circular dependencies.
-10. **UI-facing specs require component mockups** -> If a spec involves UI (pages, screens, components, visual interactions), a component mockup MUST exist in `specs/mockups/` before the spec is approved. No mockup = no approval. The Impeccable shape brief and frontend-design aesthetics must also be completed and user-confirmed.
+10. **Invoke /design-ui for UI-facing work** -> If ANY decomposition map entry is UI-facing, invoke `/design-ui` before generating specs. This is a named skill invocation — not optional, not deferrable. `/design-ui` handles PRODUCT.md, DESIGN.md, craft pipeline, mockups, and quality gates. A UI-facing spec without a mockup CANNOT be approved.
 11. **Architecture documentation after approval** -> After specs are approved (for non-trivial work), invoke `/design-arch` to generate architecture docs. Do not proceed to Beads Setup until `/design-arch` completes and user confirms.
+14. **CUJs required on user-facing Standard and Complex specs** -> Every user-facing non-trivial spec must have a `## Critical User Journeys` section listing which end-to-end journeys the feature participates in. This is how /design systematically catches missing specs and how /build generates Playwright e2e tests (Step 4.1).
+15. **CUJ coverage analysis for multi-spec user-facing designs** -> After generating specs (when there are multiple user-facing specs), trace every CUJ end-to-end across all specs. Any journey step without a covering spec is a MISSING SPEC. Generate it before proceeding to reality check.
+16. **Greenfield requires minimum 3 questioning rounds** -> A greenfield project description is a starting point, not a specification. Scope & Architecture → Feature Deep-Dive → Integration & Flows. All completeness gate categories must be covered before generating specs.
+17. **Drill down relentlessly** -> Every answer spawns follow-up questions. "Standard auth" is not an answer. "React Native" is not an answer. Push until you have enough detail to write code. Vague answers produce vague specs that produce broken implementations.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -874,12 +884,22 @@ Proposed fix: [optional — if the fix is obvious, note it]"
 - "I don't need a system spec for this project" -> If it's greenfield, `specs/system.md` is required.
 - "The spec is getting too long" -> Split into multiple specs with `@depends-on` relationships.
 - "The @depends-on tags aren't important" -> The dependency graph IS the build order for /build.
-- "The UI is simple enough to skip the mockup" -> Simple UIs still get mockups. A standalone HTML file for a simple screen takes 2 minutes. The user needs to see it.
-- "I'll describe the UI in the spec instead" -> Text descriptions do not replace visual mockups. The user cannot review a layout from prose.
-- "I can generate the mockup later / during build" -> Mockups are design artifacts, not implementation artifacts. They capture intent BEFORE code, like specs.
-- "The Impeccable shape brief is enough" -> The shape brief is UX thinking. The component mockup is the visual artifact. Both are required.
-- "This is technically a UI but it's mostly data/logic" -> If it renders in a browser/screen, it's UI-facing. Mockup required.
+- "The UI is simple enough to skip /design-ui" -> Simple UIs still get mockups. `/design-ui` handles batching efficiently. No UI-facing spec is approved without a mockup.
+- "I'll do the UI design later / during build" -> Mockups are design artifacts. They capture intent BEFORE code. The trainr project shipped 15 specs with no mockups — every screen had to be redesigned.
+- "I can just describe the UI in the spec" -> Text descriptions do not replace visual mockups. Users cannot review a layout from prose. Invoke `/design-ui`.
+- "PRODUCT.md/DESIGN.md aren't needed" -> Every project with UI needs them. 5 minutes of `/impeccable teach` prevents hours of bland redesign.
+- "I'll invoke /design-ui after generating specs" -> No. `/design-ui` runs BEFORE spec generation (Step 2.85). Its output feeds into the specs. Generating specs first means backfilling design into already-written specs.
 - "The architecture is obvious from the specs" -> Specs define behavior. Architecture defines structure. They serve different audiences and purposes.
+- "CUJs are obvious from the feature description" -> CUJs trace the FULL journey across multiple specs. A feature description only covers one spec's scope. CUJ analysis is how you find missing specs.
+- "We have enough specs, the user described 4 features" -> CUJ tracing might reveal 3 missing specs that connect those features. "Enough specs" is determined by CUJ coverage, not by counting features.
+- "CUJ analysis is overkill for this project" -> The FitConnect launch had buttons that did nothing because no one traced the full user journey. 5 minutes of CUJ analysis prevents hours of rework.
+- "I'll trace the journeys mentally" -> Write them down. Mental tracing misses non-obvious steps (navigation, loading states, error recovery). The CUJ table is the tool.
+- "The user's description is detailed enough for greenfield" -> No greenfield description is ever detailed enough. The user describes the VISION, not the SPECIFICATION. 3+ rounds of drilling converts vision into spec-ready detail.
+- "One round of questions is sufficient" -> For a typo fix, yes. For greenfield, one round produces specs with 30% of the needed detail. Round 2 catches data model gaps. Round 3 catches integration gaps. All three are required.
+- "I don't want to annoy the user with too many questions" -> Users are far more annoyed by broken implementations than by thorough questioning. 10 minutes of questions prevents 10 hours of rework.
+- "I can infer the answer from context" -> You probably can't. "Standard auth" could mean email/password, social login, SSO, MFA, magic links, or passkeys. Each produces a radically different spec. Ask.
+- "The user will tell me if I'm missing something" -> Users don't know what they don't know. That's YOUR job. Push on error states, edge cases, permissions, and cross-feature flows — the user won't volunteer these.
+- "I have enough to start generating specs" -> Check the completeness gate. If any category has gaps, you don't have enough. Generating specs with gaps means generating wrong specs.
 - "The overview page is overkill" -> The overview page takes 5 minutes to generate and saves hours of explanation to stakeholders.
 - "I'll do the architecture docs during build" -> Architecture is a design artifact. Documenting it after implementation is documentation, not design.
 </critical_rules>
@@ -889,17 +909,20 @@ Before claiming /design is complete:
 
 - [ ] All critical questions asked via AskUserQuestion (not text)
 - [ ] User answered all critical questions before proceeding
+- [ ] Greenfield: minimum 3 questioning rounds completed (Scope → Deep-Dive → Integration) — or N/A (not greenfield)
+- [ ] Greenfield: completeness gate passed (all categories covered) — or N/A (not greenfield)
+- [ ] Drill-down applied: vague answers received follow-up questions, not assumptions
 - [ ] No codebase investigation agents dispatched during design (internet research is allowed)
 - [ ] Feasibility validated via internet-researcher (when external APIs/libraries involved) — or skipped for internal-only changes
 - [ ] Decomposition heuristics applied (independence test, seam scan) — or skipped for trivially single-behavior work
 - [ ] Decomposition map produced before spec generation
-- [ ] UI/UX design: Impeccable shape brief completed and user-confirmed for each UI-facing spec — or skipped (no UI component)
-- [ ] UI/UX design: frontend-design aesthetics locked in for each UI-facing spec — or skipped (no UI component)
-- [ ] UI/UX design: component mockup EXISTS ON DISK for each UI-facing spec (`specs/mockups/<feature-slug>/` or `specs/mockups/<feature-slug>.html`) — or skipped (no UI component). Verify with `ls specs/mockups/`
+- [ ] `/design-ui` invoked and completed for all UI-facing specs (mockups exist, quality gates passed, user confirmed) — or skipped (no UI-facing entries in decomposition map)
 - [ ] Gherkin spec file(s) generated in `specs/`
+- [ ] `## Critical User Journeys` section present on all user-facing Standard/Complex specs — or skipped (Simple spec / non-user-facing)
 - [ ] System spec generated for greenfield projects
 - [ ] All specs tagged with `@status(approved)` (after reality check)
 - [ ] Dependency integrity verified (all @depends-on/@blocks/@parallel-risk reference existing specs)
+- [ ] CUJ coverage analysis completed: every journey step has a covering spec — or skipped (single-spec / non-user-facing)
 - [ ] Reality check passed: agent pre-checked for gaps, showed dependency graph, offered re-decomposition, AND user confirmed via AskUserQuestion
 - [ ] `/design-arch` invoked and completed (arch.md + diagrams + overview.html confirmed by user) — or skipped (trivial single-spec change)
 - [ ] Beads epic created referencing spec files
@@ -916,15 +939,15 @@ Before claiming /design is complete:
 |---|---|
 | AskUserQuestion | Socratic questioning + reality check confirmation |
 | hyperpowers:internet-researcher | During questioning (inform better questions) + feasibility validation (Step 2.75) |
-| impeccable (shape) | UI/UX design — UX planning, interaction model, design brief (Step 2.85A) |
-| frontend-design | UI/UX design — visual aesthetics, typography, color, motion (Step 2.85B) |
+| /design-ui | UI/UX design — PRODUCT.md, DESIGN.md, craft pipeline, mockups, quality gates (Step 2.85) |
 | /design-arch | Architecture documentation — arch.md, draw.io diagrams, overview.html (Step 4.5) |
 | hyperpowers:brainstorming | For complex work requiring approach comparison |
 | hyperpowers:sre-task-refinement | On non-trivial implementation tasks |
 
 **This skill produces (consumed by /build):**
 - `specs/*.md` files with `@status(approved)`
-- `specs/mockups/` — component mockups for UI-facing specs (Storybook components or HTML files)
+- `specs/mockups/` — component mockups for UI-facing specs (via `/design-ui`)
+- `PRODUCT.md` + `DESIGN.md` — design system files (via `/design-ui`)
 - Architecture docs via `/design-arch`: `specs/arch.md`, `specs/diagrams/*.drawio`, `specs/overview.html`
 - Beads epic with tasks referencing specs
 - Task docs with spec references (if brainstorming used)

@@ -7,14 +7,23 @@ An enforced, spec-driven developer workflow for Claude Code with skills for Socr
 Every task flows through a pipeline of skills:
 
 ### /design — Shape the Work
-1. **Socratic Questioning** — Ask focused questions via AskUserQuestion (blocks until answered). Internet research (`internet-researcher`) allowed to inform questions and validate feasibility.
-2. **Decompose** — Apply independence test and seam analysis to break work into well-sized specs. Produces a decomposition map with `@depends-on` and `@parallel-risk` relationships.
-3. **Validate Feasibility** — For external APIs/libraries, dispatch `internet-researcher` to verify technical claims before writing specs.
-4. **UI/UX Design** (when applicable) — Full Impeccable craft pipeline + frontend-design aesthetics. Produces component mockups in `specs/mockups/`. Requires `PRODUCT.md` + `DESIGN.md` (created via `/impeccable teach`).
-5. **Spec Generation** — Generate Gherkin-style Markdown spec files in `specs/`, one per entry in the decomposition map.
-6. **Reality Check** — Agent pre-checks specs for gaps, shows dependency graph with parallel lanes, user confirms (can request re-decomposition).
-7. **Architecture Docs** — Auto-invokes `/design-arch` to generate `specs/arch.md`, draw.io diagrams, and `specs/overview.html`.
-8. **Beads Setup** — Create epic + Tests gate task referencing spec files.
+1. **Socratic Questioning** — Ask focused questions via AskUserQuestion (blocks until answered). Drills down relentlessly — vague answers like "standard auth" or "basic CRUD" are rejected and followed up. Internet research (`internet-researcher`) allowed to inform questions and validate feasibility.
+2. **Greenfield Questioning Protocol** — For greenfield projects, minimum 3 rounds of questioning: Scope & Architecture → Feature Deep-Dive → Integration & Flows. A completeness gate verifies coverage across 12 categories before proceeding.
+3. **Decompose** — Apply independence test and seam analysis to break work into well-sized specs. Produces a decomposition map with `@depends-on` and `@parallel-risk` relationships.
+4. **Validate Feasibility** — For external APIs/libraries, dispatch `internet-researcher` to verify technical claims before writing specs.
+5. **UI/UX Design** (when applicable) — Full Impeccable craft pipeline + frontend-design aesthetics. Produces component mockups in `specs/mockups/`. Requires `PRODUCT.md` + `DESIGN.md` (created via `/impeccable teach`).
+6. **Spec Generation** — Generate Gherkin-style Markdown spec files in `specs/`, one per entry in the decomposition map. User-facing specs include a `## Critical User Journeys` section linking the feature to end-to-end user flows.
+7. **Reality Check** — Agent pre-checks specs for gaps, shows dependency graph with parallel lanes, user confirms (can request re-decomposition).
+8. **CUJ Coverage Analysis** — Traces every Critical User Journey across all specs. Any journey step without a covering spec is a missing spec. Generates missing specs until all journeys are fully covered.
+9. **Architecture Docs** — Auto-invokes `/design-arch` to generate `specs/arch.md`, draw.io diagrams, and `specs/overview.html`.
+10. **Beads Setup** — Create epic + Tests gate task referencing spec files.
+
+### /design-ui — UI/UX Design Pipeline
+Auto-invoked by `/design` for UI-facing work. Also callable independently (e.g., after `/respec`).
+
+1. **Design System Setup** (once per project) — Gate-checks PRODUCT.md + DESIGN.md (creates via `/impeccable teach` if missing). Classifies register (brand vs product). Presents 2-3 visual direction probes, user chooses. Locks in typography, color, motion via frontend-design.
+2. **Per-Screen Design** (batched by cluster) — Groups related specs into feature clusters (e.g., "Workout Flow", "Nutrition", "Settings"). Per cluster: shape interview → component mockups → critique + detect quality gates → enhancement if needed → user confirms.
+3. **Incorporate** — Adds `## UI Design` sections to all UI-facing specs. Verifies all mockups exist on disk.
 
 ### /design-arch — Architecture Documentation
 1. **Input** — Reads approved Gherkin specs from `specs/`
@@ -22,15 +31,23 @@ Every task flows through a pipeline of skills:
 3. **Confirm** — User reviews and confirms architecture documentation
 
 ### /build — Implement the Specs
-1. **Entry Validation** — Verify specs exist with `@status(approved)`, check beads for open work
+```
+/build              # Interactive — pauses for user sign-off after each spec
+/build --auto       # Autonomous — skips user sign-off, runs end-to-end
+```
+
+1. **Entry Validation** — Verify specs exist with `@status(approved)`, check beads for open work. Parse `--auto` flag.
 2. **Dependency Graph** — Parse `@depends-on` and `@parallel-risk` tags, topological sort for build order. Show graph with parallel lanes, user confirms execution plan.
-3. **Visual Fidelity** — For UI-facing specs, starts from mockup code in `specs/mockups/` and verifies implementation matches design decisions.
-4. **Per-Spec Iteration** (auto-iterates all specs in order):
+3. **Per-Spec Iteration** (auto-iterates all specs in order):
    - **Investigate** — Codebase analysis, create informed beads task with real file paths
-   - **TDD** — RED: failing tests from spec scenarios. GREEN: implement. REFACTOR.
+   - **TDD** — RED: failing tests from spec scenarios. GREEN: implement. REFACTOR. For UI-facing specs, starts from mockup code in `specs/mockups/`.
    - **Verify** — Full test suite + code review + spec coverage + test effectiveness (NEVER scales down). Status updates blocked until verification agents return and pass.
+   - **Visual Fidelity** — For UI-facing specs, verifies implementation matches mockup design decisions. Full Impeccable quality pipeline (critique + detect + polish).
+   - **API Integration Check** — For UI specs with backend, verifies every button/form/nav is wired to real API calls — not TODOs, stubs, or local-state-only dispatches. CRITICAL if any element is unwired.
+   - **User Sign-Off** — Presents summary of implementation, asks user to confirm work matches expectations (unless `--auto`).
    - **Update** — `@status(verified)`, close beads task
-4. **Close** — Close epic, update README, save learnings
+4. **Playwright E2E Tests** — For multi-spec UI epics, generates Playwright tests from Critical User Journeys in specs. Walks the full user path through the running app. Catches cross-spec integration failures that per-spec unit tests miss.
+5. **Close** — Close epic, update README, save learnings
 
 ### /respec — Modify Existing Specs
 1. **Find Spec** — Locate spec from beads issue context
@@ -53,7 +70,8 @@ Every task flows through a pipeline of skills:
 ├── uninstall.sh                        # Restores originals and removes symlinks
 ├── AGENTS.md                           # Agent instructions (beads onboarding, shell safety)
 ├── skills/
-│   ├── design/SKILL.md                 # /design — Socratic questioning + UI/UX design + spec generation
+│   ├── design/SKILL.md                 # /design — Socratic questioning + spec generation
+│   ├── design-ui/SKILL.md              # /design-ui — UI/UX pipeline: PRODUCT.md, mockups, quality gates
 │   ├── design-arch/SKILL.md            # /design-arch — Architecture docs, diagrams, overview.html
 │   ├── build/SKILL.md                  # /build — Spec-driven TDD + visual fidelity + verification
 │   ├── respec/SKILL.md                 # /respec — Modify specs with blast radius tracing
@@ -120,14 +138,15 @@ the same drive).
 
 After installation, restart Claude Code (or `/clear`). Then:
 
-1. **`/design`** — Start new work. Socratic questioning shapes the design, UI/UX mockups are produced (when applicable), Gherkin specs are generated, architecture docs are created, beads epic is set up.
-2. **`/design-arch`** — Generate architecture documentation independently (also auto-invoked by `/design`).
-3. **`/build`** — Implement approved specs. Auto-iterates through specs in dependency order: investigate, TDD, verify. UI-facing specs start from mockup code and verify visual fidelity.
-4. **`/respec`** — Modify existing specs when requirements change or bugs surface. Traces blast radius and propagates changes.
-5. **Auto-resume** — On session start, you'll see in-progress beads work AND spec statuses
-6. **Type `wwiwo?`** — Shows beads tasks + spec statuses at any time
-7. **After 3+ completed epics** — Run `/workflow-retrospective` to analyze effectiveness
-8. **Run benchmarks** — Use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
+1. **`/design`** — Start new work. Relentless Socratic questioning shapes the design (minimum 3 rounds for greenfield), invokes `/design-ui` for UI-facing work, Gherkin specs with Critical User Journeys are generated, CUJ coverage analysis catches missing specs, architecture docs are created, beads epic is set up.
+2. **`/design-ui`** — UI/UX design pipeline. Auto-invoked by `/design` for UI-facing specs, also callable independently. Creates PRODUCT.md + DESIGN.md, generates mockups in `specs/mockups/`, runs quality gates.
+3. **`/design-arch`** — Generate architecture documentation independently (also auto-invoked by `/design`).
+4. **`/build`** — Implement approved specs. Auto-iterates through specs in dependency order: investigate, TDD, verify, API integration check, user sign-off. Playwright e2e tests verify CUJs before epic close. Use `--auto` for autonomous runs without sign-off pauses.
+5. **`/respec`** — Modify existing specs when requirements change or bugs surface. Traces blast radius and propagates changes.
+6. **Auto-resume** — On session start, you'll see in-progress beads work AND spec statuses
+7. **Type `wwiwo?`** — Shows beads tasks + spec statuses at any time
+8. **After 3+ completed epics** — Run `/workflow-retrospective` to analyze effectiveness
+9. **Run benchmarks** — Use `benchmarks/AB-TESTING-PROTOCOL.md` for quantitative comparison
 
 ## Gherkin Spec Files
 
@@ -146,6 +165,12 @@ Specs use Markdown Gherkin: `#` headings for keywords, `- ` bullet lists for ste
 As an API consumer
 I want to query breweries by location
 So that I can find nearby breweries for a given coordinate
+
+## Critical User Journeys
+
+| CUJ | Steps in This Feature | Full Journey |
+|-----|----------------------|--------------|
+| Find a local brewery | Search by location → View results | Open app → Allow location → Search nearby → View details → Get directions |
 
 ## Technical Context
 
@@ -288,12 +313,17 @@ The retrospective needs completed beads epics to analyze. After a fresh install:
 - **Specs are the source of truth** — Gherkin spec files in `specs/` define what to build; beads tracks sub-task progress
 - **Specs enable full rebuild** — For greenfield projects, specs capture enough detail to reconstruct the entire app
 - **Specs are living documents** — Updated during implementation as edge cases are discovered, not frozen after planning
-- **UI design is a first-class artifact** — Component mockups in `specs/mockups/` are produced during design (not build). The full Impeccable craft pipeline ensures distinctive, non-generic UI. /build verifies visual fidelity against mockups.
+- **UI design is a named skill, not a sub-step** — `/design-ui` is an explicit skill invocation (like `/design-arch`), not a decimal sub-step agents can skip. It produces PRODUCT.md, DESIGN.md, and component mockups in `specs/mockups/` before specs are generated. /build verifies visual fidelity against mockups.
 - **Decompose at natural seams** — Work is split into multiple specs using the independence test: if you can test it without the other thing existing, it's a separate spec. No arbitrary thresholds.
 - **Parallelism is first-class** — Independent specs can be built in parallel. `@parallel-risk` flags file overlap without blocking. /build shows the dependency graph and asks before dispatching.
 - **Research informs, never replaces asking** — Internet research during /design makes questions sharper and validates feasibility, but findings become questions to the user, not silent assumptions.
+- **Relentless questioning** — Vague answers are rejected. "Standard auth" spawns follow-ups about social login, MFA, token storage. Greenfield projects require minimum 3 rounds with a 12-category completeness gate.
+- **Critical User Journeys connect features** — Every user-facing spec documents which end-to-end journeys it participates in. CUJ tracing catches missing specs that feature-level thinking misses. CUJs also drive Playwright e2e tests.
 - **Spec-driven TDD** — Tests are generated FROM spec scenarios before implementation. No exceptions.
-- **Verification never scales down** — Full suite + code review agent + spec coverage check on every spec
+- **Verification never scales down** — Full suite + code review agent + spec coverage check + API integration check on every spec
+- **API integration is not optional** — Every UI button/form that implies backend persistence must be wired to a real API call. Stubs, TODOs, and local-state-only dispatches are CRITICAL failures.
+- **E2E tests before epic close** — Playwright tests walk Critical User Journeys through the running app. Catches cross-spec integration failures that per-spec unit tests miss.
+- **User sign-off per spec** — After verification passes, user confirms work matches expectations before status update. `--auto` flag skips for autonomous runs.
 - **Verification gates completion** — Status updates and task closures are blocked until verification agents return results and pass. No "updating while waiting."
 - **Questioning blocks on user answers** — AskUserQuestion tool required, no proceeding without answers
 - **Tasks created after investigation** — /build creates beads tasks with real codebase context, not guesswork
