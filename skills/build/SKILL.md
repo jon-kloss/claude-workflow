@@ -37,6 +37,7 @@ MIXED:
      -> Investigate codebase for this spec's requirements
      -> Spec-driven TDD: RED (failing tests from scenarios) -> GREEN -> REFACTOR
      -> API Wiring Checkpoint: replace all mock/hardcoded data with real API calls (full-stack)
+     -> Dead UI Scan: every button/form/toggle has a real handler (no empty/placeholder)
      -> Verify: full test suite + code review + spec coverage + test effectiveness
      -> API integration check: verify wiring is correct (not stubs)
      -> USER SIGN-OFF: pause for user to confirm work matches expectations (unless --auto)
@@ -374,11 +375,22 @@ SRE refinement must address: boundary conditions, error paths, concurrent/async 
 
 For **full-stack specs** (API + UI), tests must cover BOTH layers. Do not generate tests for only one layer.
 
-| Spec Scenario | API Test | UI Test | Integration Test |
+| Spec Scenario | API Test | UI Test (render + **behavior**) | Integration Test |
 |---|---|---|---|
-| "Client taps Start Workout" | `POST /api/v1/workout-logs` returns 201 | Component renders, button triggers action | Button calls real API endpoint (not stub) |
-| "Trainer sees client list" | `GET /api/v1/trainer/clients` returns list | Component renders client cards | Component fetches from real API on mount |
-| "Client logs a set" | `PATCH /api/v1/workout-logs/:id` accepts set data | Form captures reps/weight, dispatches | Form submission calls API, UI updates from response |
+| "Client taps Start Workout" | `POST /api/v1/workout-logs` returns 201 | Button renders AND `fireEvent.press` triggers handler, state updates | Button calls real API endpoint (not stub) |
+| "Trainer sees client list" | `GET /api/v1/trainer/clients` returns list | List renders AND shows real data, pull-to-refresh triggers reload | Component fetches from real API on mount |
+| "Client logs a set" | `PATCH /api/v1/workout-logs/:id` accepts set data | Form renders AND `fireEvent.changeText` + submit dispatches, UI updates | Form submission calls API, UI updates from response |
+
+**CRITICAL — UI tests must assert BEHAVIOR, not just rendering.** A test that only checks `expect(button).toBeTruthy()` is a render test, not a UI test. Every interactive element needs a behavior assertion:
+
+| Element | Render-only (INSUFFICIENT) | Behavior assertion (REQUIRED) |
+|---|---|---|
+| Button | `expect(getByText('Start')).toBeTruthy()` | `fireEvent.press(button)` → state change / handler called / navigation triggered |
+| Form | `expect(getByPlaceholder('Weight')).toBeTruthy()` | `fireEvent.changeText(input, '185')` + submit → values dispatched |
+| Toggle | `expect(toggle).toBeTruthy()` | `fireEvent(toggle, 'valueChange', true)` → state updates |
+| List item | `expect(getByText('Bench Press')).toBeTruthy()` | `fireEvent.press(item)` → navigates to detail / expands / selects |
+| Tab / Nav | `expect(tab).toBeTruthy()` | `fireEvent.press(tab)` → correct screen displayed |
+| Delete / Remove | `expect(deleteBtn).toBeTruthy()` | `fireEvent.press(deleteBtn)` → item removed from list, confirmation shown |
 
 **Build order for full-stack specs:**
 1. **API-first**: RED/GREEN/REFACTOR for API tests → API routes working
@@ -506,6 +518,59 @@ Verdict: PASS | FAIL"
 - Wrong API client pattern (ad-hoc fetch instead of project's service layer) = **IMPORTANT**. Refactor to use the established pattern.
 
 **This step produces evidence that Step 3.3f (API Integration Check) will verify independently.** Step 3.2.5 is "do the wiring." Step 3.3f is "verify the wiring was done correctly." Both are required — 3.2.5 prevents skipping the work, 3.3f prevents sloppy work.
+
+### Step 3.2.6: Dead UI Scan (All UI-facing specs)
+
+**BLOCKING GATE.** After wiring (3.2.5) and before verification (3.3), scan ALL implementation files for interactive elements that have no handler. This catches the pattern where mockup code is carried into implementation without adding functionality.
+
+**Search the implementation source files for:**
+
+```
+# Buttons/pressables with no handler
+- <Button> or <Pressable> or <TouchableOpacity> without onPress
+- <button> without onClick
+- handler functions that are empty: `onPress={() => {}}` or `onPress={undefined}`
+- handler functions that only log: `onPress={() => console.log('pressed')}`
+
+# Forms with no submission
+- <form> without onSubmit
+- Submit buttons that don't trigger form submission
+- Input fields with no onChange/onChangeText
+
+# Navigation elements with no navigation
+- Tab items without navigation handler
+- Links without href or onPress
+- "See more" / "View all" text that isn't tappable
+
+# Interactive elements with placeholder behavior
+- Alert('TODO') or Alert('Coming soon')
+- console.log() as the only action
+- Comments like // TODO: implement or // placeholder
+```
+
+**Log results:**
+
+```bash
+bd comments add [epic-id] "DEAD UI SCAN: specs/<feature-slug>.md
+
+Interactive elements scanned: [N]
+Functional (has real handler): [N]
+Dead (no handler / empty handler / console.log only): [N]
+
+Dead elements found:
+- [file:line] <Button 'Save'> — no onPress handler
+- [file:line] <Pressable 'Delete'> — onPress={() => {}}
+- [file:line] <TextInput 'Search'> — no onChangeText
+
+Verdict: PASS | FAIL"
+```
+
+**Severity:**
+- Any interactive element with no handler = **CRITICAL** (`dead-ui`). Cannot proceed.
+- Any handler that only logs/alerts = **CRITICAL** (`placeholder-handler`). Cannot proceed.
+- Decorative elements without handlers are fine (icons, labels, dividers).
+
+**Skip for:** API-only specs, backend-only specs.
 
 ### Step 3.3: Verify
 
@@ -1107,6 +1172,8 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 22. **Layer awareness for full-stack specs** -> When a spec describes both API endpoints AND UI screens, BOTH layers must be implemented and tested before `@status(verified)`. Building only the API and marking verified is a process violation. Layer detection is mandatory in Step 3.1; layer-aware coverage is mandatory in Step 3.3e.
 23. **API wiring checkpoint before verification** -> For full-stack specs, Step 3.2.5 is a BLOCKING gate. Every UI component must be wired to the real data layer (no hardcoded/mock data remaining) before verification (Step 3.3) can begin. This is "do the wiring" — Step 3.3f is "verify the wiring." Both required.
 24. **Follow the project's API client pattern** -> Components must use the API client pattern defined in the system spec or arch.md (centralized service layer, Supabase client, etc.). No ad-hoc fetch calls that bypass the established architecture.
+25. **UI tests must assert behavior, not just rendering** -> A test that only checks "button exists" is not a UI test. Every interactive element (button, form, toggle, nav) needs a behavior assertion: press triggers handler, submit dispatches data, toggle updates state. Render-only tests are insufficient for GREEN.
+26. **Dead UI scan before verification** -> Step 3.2.6 scans for buttons with no handlers, forms with no submission, empty onPress callbacks, and console.log placeholders. Any dead interactive element is CRITICAL. Mockup code carried into implementation without functionality is a broken feature.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -1149,6 +1216,10 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 - "I'll wire the API calls after the UI is rendering" -> That IS Step 3.2.5. You cannot skip it. After GREEN (renders correctly), BEFORE verification (Step 3.3), you MUST wire every component. This is not optional polish — it's a blocking gate.
 - "The component works with mock data for now" -> Mock data is for the RED/GREEN TDD cycle. Step 3.2.5 replaces ALL mock data with real data layer calls. Components with hardcoded data cannot proceed to verification.
 - "I'll use ad-hoc fetch calls since they're simpler" -> No. Read the system spec / arch.md for the project's API client pattern. All components use it. Consistency is not optional — it's how the project stays maintainable.
+- "The button renders, so the component works" -> Rendering is not working. A button that renders but does nothing on press is a dead element. UI tests MUST assert behavior: `fireEvent.press(button)` → state change / handler called. Render-only tests are insufficient for GREEN.
+- "I'll add the handlers later" -> No. Handlers are part of implementation, not polish. Step 3.2.6 (Dead UI Scan) will block you if any interactive element has no handler. Add them during GREEN, not "later."
+- "The onPress is empty because I'm waiting for the API" -> Use Step 3.2's build order: API-first, then UI, then wire. By the time you build the UI component, the API already exists. There is no reason for empty handlers.
+- "Console.log is fine for now" -> `console.log` is a placeholder, not a handler. Step 3.2.6 catches these explicitly. Replace with real functionality.
 </critical_rules>
 
 <verification_checklist>
@@ -1179,6 +1250,7 @@ Before claiming /build is complete for a spec:
 - [ ] Spec @status updated to @status(implemented)
 - [ ] Continuous verifier spawned for multi-scenario specs
 - [ ] API Wiring Checkpoint passed (Step 3.2.5): all components wired, no hardcoded data, correct API pattern — or N/A (single-layer spec)
+- [ ] Dead UI Scan passed (Step 3.2.6): no buttons/forms/toggles without handlers — or N/A (no UI)
 - [ ] Verifier findings logged on tasks; CRITICAL findings fixed before closing
 
 **Verification:**
