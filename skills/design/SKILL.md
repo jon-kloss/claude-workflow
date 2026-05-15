@@ -255,6 +255,17 @@ This feature participates in the following end-to-end journeys:
 | token | JWT | Access token, 1h TTL |
 | refreshToken | UUID | Stored in DB, 30d TTL |
 
+## Interaction Map
+
+Every UI element that triggers backend communication or state change:
+
+| UI Element | User Action | API Endpoint | Method | Expected Result |
+|-----------|-------------|-------------|--------|----------------|
+| Login form | submit email + password | /api/auth/login | POST | Returns token, navigates to dashboard |
+| Google Sign-In btn | press | /api/auth/social | POST | Initiates OAuth, returns token |
+| Forgot Password link | press | /api/auth/forgot-password | POST | Sends reset email, shows confirmation |
+| Logout btn | press | /api/auth/logout | POST | Clears session, navigates to login |
+
 ## Background
 
 - Given the authentication service is running
@@ -546,6 +557,7 @@ mkdir -p specs
 - One spec file per feature
 - `@status(draft)` on all new specs
 - `## Critical User Journeys` section required on all user-facing Standard and Complex specs — lists which end-to-end journeys this feature participates in, the steps within this feature, and the full journey path. Exempt: Simple specs (typo fixes, renames) and non-user-facing work (pure API-only with no UI consumer in this epic, CLI tools, cron jobs, infra).
+- `## Interaction Map` section required on all full-stack specs (specs with BOTH API endpoints AND UI elements) — maps every interactive UI element (button, form, toggle, nav) to its API endpoint, HTTP method, and expected result. This table becomes the wiring checklist for /build Steps 3.2.5 and 3.2.6. Exempt: API-only specs, UI-only specs with no backend, Simple specs.
 - Technical Context section with API contracts, data structures, integration points (for non-trivial features)
 - Scenarios cover happy path, error cases, and edge cases discovered during questioning
 - For greenfield: the complete set of specs must be sufficient to rebuild the entire application
@@ -917,6 +929,7 @@ Before claiming /design is complete:
 - [ ] Decomposition heuristics applied (independence test, seam scan) — or skipped for trivially single-behavior work
 - [ ] Decomposition map produced before spec generation
 - [ ] `/design-ui` invoked and completed for all UI-facing specs (mockups exist, quality gates passed, user confirmed) — or skipped (no UI-facing entries in decomposition map)
+- [ ] `## Interaction Map` section present on all full-stack specs (both API endpoints and UI elements) — or skipped (API-only / UI-only / Simple spec)
 - [ ] Gherkin spec file(s) generated in `specs/`
 - [ ] `## Critical User Journeys` section present on all user-facing Standard/Complex specs — or skipped (Simple spec / non-user-facing)
 - [ ] System spec generated for greenfield projects

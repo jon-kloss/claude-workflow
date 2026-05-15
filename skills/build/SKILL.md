@@ -473,9 +473,9 @@ Update spec status: `@status(approved)` → `@status(implemented)` when implemen
 
 **Process:**
 
-1. **Read the spec's Technical Context** — list every API endpoint
+1. **Read the spec's `## Interaction Map`** — this is the wiring checklist. Every row is an interactive element that must be connected. If no Interaction Map exists, build one from the Technical Context endpoints + spec scenarios (and note in the spec as a living document update).
 2. **Read the system spec / arch.md** — find the project's API client pattern (e.g., centralized `api.ts`, Supabase client, WatermelonDB models, tRPC client). Components MUST use this pattern — no ad-hoc fetch calls that bypass the established architecture.
-3. **For EACH UI component with interactive elements:**
+3. **For EACH row in the Interaction Map:**
    - **Create or import** the API service function following the project's pattern
    - **Replace ALL hardcoded/mock data** with real data layer calls (API, database, or local-first store)
    - **Add loading states** — skeleton screens or spinners while data loads
@@ -522,6 +522,8 @@ Verdict: PASS | FAIL"
 ### Step 3.2.6: Dead UI Scan (All UI-facing specs)
 
 **BLOCKING GATE.** After wiring (3.2.5) and before verification (3.3), scan ALL implementation files for interactive elements that have no handler. This catches the pattern where mockup code is carried into implementation without adding functionality.
+
+**Cross-reference with the spec's `## Interaction Map`** — every UI element listed in the map must exist in the implementation WITH a functional handler. Any Interaction Map row with no corresponding handler is CRITICAL.
 
 **Search the implementation source files for:**
 

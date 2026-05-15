@@ -119,6 +119,21 @@ Generate `specs/arch.md` with a structured overview:
 | Decision | Rationale | Alternatives Considered |
 |----------|-----------|------------------------|
 | [choice] | [why] | [what else was evaluated] |
+
+## Interaction Contract (Full-stack projects)
+
+Global mapping of ALL UI interactions to their backend endpoints, aggregated from per-spec `## Interaction Map` sections. This is the master wiring contract — /build uses it to verify cross-spec integration.
+
+| Spec | UI Element | User Action | API Endpoint | Method | Expected Result |
+|------|-----------|-------------|-------------|--------|----------------|
+| auth.md | Login form | submit | /api/auth/login | POST | Returns token, navigates to dashboard |
+| auth.md | Logout btn | press | /api/auth/logout | POST | Clears session, navigates to login |
+| workout-tracking.md | Start Workout btn | press | /api/v1/workout-logs | POST | Creates log, opens active workout |
+| workout-tracking.md | Log Set form | submit | /api/v1/workout-logs/:id | PATCH | Adds set, clears form |
+| nutrition-tracking.md | Food Search input | type | /api/v1/nutrition/food/search | GET | Shows matching foods |
+| ... | ... | ... | ... | ... | ... |
+
+**This table is auto-generated from the per-spec Interaction Maps.** If a spec has interactive UI elements but no Interaction Map section, flag it as incomplete.
 ```
 
 **Scaling rules:**
