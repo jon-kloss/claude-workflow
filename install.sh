@@ -223,6 +223,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/block-unread-edits.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/require-design-ui.sh"
         }
       ]
     },
