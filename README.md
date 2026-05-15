@@ -234,6 +234,7 @@ For greenfield projects, the complete set of specs in `specs/` must be sufficien
 | `beads-auto-resume.sh` | SessionStart | Checks for in-progress beads work + Gherkin spec statuses |
 | `clear-session-reads.sh` | SessionStart | Resets file read tracking so each session starts fresh |
 | `block-unread-edits.sh` | PreToolUse (Edit/Write) | Blocks edits on files that haven't been read first |
+| `require-design-ui.sh` | PreToolUse (Edit/Write) | Blocks `@status(approved)` on UI-facing specs missing PRODUCT.md, DESIGN.md, or mockups. Use `@backend-only` tag to skip. |
 | `require-bead-description.sh` | PreToolUse (Bash) | Enforces `--description` flag on `bd create` commands |
 | `track-reads.sh` | PostToolUse (Read/Grep/Glob) | Tracks which files have been read (used by block-unread-edits) |
 | `remind-integration-tests.sh` | PostToolUse (Agent) | Reminds to write integration tests after code review agents return |
