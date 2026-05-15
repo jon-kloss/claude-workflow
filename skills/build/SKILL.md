@@ -36,8 +36,9 @@ MIXED:
      -> Validate prerequisites @status(verified)
      -> Investigate codebase for this spec's requirements
      -> Spec-driven TDD: RED (failing tests from scenarios) -> GREEN -> REFACTOR
+     -> API Wiring Checkpoint: replace all mock/hardcoded data with real API calls (full-stack)
      -> Verify: full test suite + code review + spec coverage + test effectiveness
-     -> API integration check: all UI buttons/forms wired to real API calls (not stubs)
+     -> API integration check: verify wiring is correct (not stubs)
      -> USER SIGN-OFF: pause for user to confirm work matches expectations (unless --auto)
      -> Update spec @status(verified), close beads task
   -> Auto-iterate to next spec
@@ -55,7 +56,8 @@ MIXED:
 4. Full verification suite + code review agent + spec coverage check
 5. API integration check: every UI button/form/nav wired to real API calls — not stubs (UI specs with API endpoints)
 6. Layer awareness: full-stack specs require ALL layers (API + UI + wiring) before @status(verified)
-7. Spec @status updated after verification passes
+7. API wiring checkpoint (Step 3.2.5): full-stack UI must be wired to real data layer before verification
+8. Spec @status updated after verification passes
 7. Investigation findings logged as bd comments on epic
 8. Every verification failure logged as structured bd comment
 9. Continuous verifier agent gates task closure (multi-scenario specs)
@@ -450,6 +452,60 @@ VERIFIER: PASS | PASS_WITH_NOTES | FAIL
 During implementation, update the spec when new edge cases or technical corrections are discovered. For any NEW scenario added to the spec, write a failing test BEFORE implementing it.
 
 Update spec status: `@status(approved)` → `@status(implemented)` when implementation begins.
+
+### Step 3.2.5: API Wiring Checkpoint (Full-stack specs)
+
+**BLOCKING GATE for full-stack specs.** After UI components pass GREEN (they render correctly), BEFORE verification can begin, every component must be wired to the real data layer. Components with hardcoded/mock data CANNOT proceed to Step 3.3.
+
+**Skip for:** API-only specs, specs with no UI layer, specs where layer detection (Step 3.1) found a single layer.
+
+**Process:**
+
+1. **Read the spec's Technical Context** — list every API endpoint
+2. **Read the system spec / arch.md** — find the project's API client pattern (e.g., centralized `api.ts`, Supabase client, WatermelonDB models, tRPC client). Components MUST use this pattern — no ad-hoc fetch calls that bypass the established architecture.
+3. **For EACH UI component with interactive elements:**
+   - **Create or import** the API service function following the project's pattern
+   - **Replace ALL hardcoded/mock data** with real data layer calls (API, database, or local-first store)
+   - **Add loading states** — skeleton screens or spinners while data loads
+   - **Add error states** — user-friendly messages when API calls fail
+   - **Add empty states** — guidance when no data exists yet
+   - **Wire response data** back to component state — UI updates from real responses, not optimistic local state alone
+4. **Run the app** (browser, simulator, or dev server) and verify each interactive action hits the real data layer. Tap every button. Submit every form. Navigate every tab. Confirm data persists across sessions.
+5. **Scan for remaining hardcoded data** — search the implementation files for:
+   - Hardcoded arrays/objects that should come from the API (`const workouts = [...]`)
+   - Mock data that was never replaced (`// TODO: replace with API call`)
+   - `console.log` or `alert()` instead of real actions
+   - Local state dispatches with no corresponding API call
+6. **Log wiring evidence:**
+
+```bash
+bd comments add [epic-id] "WIRING CHECKPOINT: specs/<feature-slug>.md
+
+API client pattern: [pattern from system spec — e.g., 'mobile/src/services/api.ts']
+Components wired:
+- [Component: WorkoutScreen] → 3 endpoints wired
+  - StartWorkout button → POST /api/v1/workout-logs — WIRED
+  - LogSet form → PATCH /api/v1/workout-logs/:id — WIRED
+  - History tab mount → GET /api/v1/workout-logs — WIRED
+- [Component: NutritionScreen] → 2 endpoints wired
+  - FoodSearch input → GET /api/v1/nutrition/food/search — WIRED
+  - LogEntry form → POST /api/v1/nutrition/entries — WIRED
+
+Hardcoded data remaining: NONE | [list of files with hardcoded data]
+Loading states: [all present | missing in: list]
+Error states: [all present | missing in: list]
+Empty states: [all present | missing in: list]
+
+Verdict: PASS | FAIL"
+```
+
+**Severity:**
+- Any UNWIRED interactive element = **CRITICAL** (`wiring-gap`). Cannot proceed.
+- Any remaining hardcoded mock data = **CRITICAL** (`hardcoded-data`). Cannot proceed.
+- Missing loading/error/empty states = **IMPORTANT**. Fix before proceeding unless explicitly deferred in spec.
+- Wrong API client pattern (ad-hoc fetch instead of project's service layer) = **IMPORTANT**. Refactor to use the established pattern.
+
+**This step produces evidence that Step 3.3f (API Integration Check) will verify independently.** Step 3.2.5 is "do the wiring." Step 3.3f is "verify the wiring was done correctly." Both are required — 3.2.5 prevents skipping the work, 3.3f prevents sloppy work.
 
 ### Step 3.3: Verify
 
@@ -1049,6 +1105,8 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 20. **API integration check for UI-facing specs** -> Every interactive UI element (button, form, navigation) that implies backend communication must be wired to a real API call — not a TODO, stub, or local-state-only dispatch. Step 3.3f is mandatory for UI specs with API endpoints.
 21. **Playwright e2e tests before epic close** -> For multi-spec UI epics, Playwright e2e tests covering every CUJ from the specs must pass before Phase 4 can close the epic. This is the cross-spec integration gate. Unit tests verify features in isolation; e2e tests verify the assembled application.
 22. **Layer awareness for full-stack specs** -> When a spec describes both API endpoints AND UI screens, BOTH layers must be implemented and tested before `@status(verified)`. Building only the API and marking verified is a process violation. Layer detection is mandatory in Step 3.1; layer-aware coverage is mandatory in Step 3.3e.
+23. **API wiring checkpoint before verification** -> For full-stack specs, Step 3.2.5 is a BLOCKING gate. Every UI component must be wired to the real data layer (no hardcoded/mock data remaining) before verification (Step 3.3) can begin. This is "do the wiring" — Step 3.3f is "verify the wiring." Both required.
+24. **Follow the project's API client pattern** -> Components must use the API client pattern defined in the system spec or arch.md (centralized service layer, Supabase client, etc.). No ad-hoc fetch calls that bypass the established architecture.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -1088,6 +1146,9 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 - "I'll build the mobile UI in the next session" -> Then don't mark `@status(verified)`. Mark `@status(implemented)` at most, with a note that the UI layer is pending. Verified means ALL layers are done.
 - "The spec is full-stack but I can verify API separately" -> No. For full-stack specs, verification gates on ALL layers. Build API-first if you want, but don't close the loop until UI exists and is wired to the API. The trainr project marked 15 full-stack specs verified with zero mobile code.
 - "Mobile apps can't be Playwright-tested" -> Use Detox, Maestro, or Appium for mobile e2e. If no mobile e2e framework is available, the UI layer still needs component tests and manual verification in a simulator. "Can't e2e test" is never an excuse to skip UI implementation entirely.
+- "I'll wire the API calls after the UI is rendering" -> That IS Step 3.2.5. You cannot skip it. After GREEN (renders correctly), BEFORE verification (Step 3.3), you MUST wire every component. This is not optional polish — it's a blocking gate.
+- "The component works with mock data for now" -> Mock data is for the RED/GREEN TDD cycle. Step 3.2.5 replaces ALL mock data with real data layer calls. Components with hardcoded data cannot proceed to verification.
+- "I'll use ad-hoc fetch calls since they're simpler" -> No. Read the system spec / arch.md for the project's API client pattern. All components use it. Consistency is not optional — it's how the project stays maintainable.
 </critical_rules>
 
 <verification_checklist>
@@ -1117,6 +1178,7 @@ Before claiming /build is complete for a spec:
 - [ ] New spec scenarios got failing tests BEFORE implementation
 - [ ] Spec @status updated to @status(implemented)
 - [ ] Continuous verifier spawned for multi-scenario specs
+- [ ] API Wiring Checkpoint passed (Step 3.2.5): all components wired, no hardcoded data, correct API pattern — or N/A (single-layer spec)
 - [ ] Verifier findings logged on tasks; CRITICAL findings fixed before closing
 
 **Verification:**
