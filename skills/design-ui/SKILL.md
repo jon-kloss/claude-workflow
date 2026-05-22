@@ -11,7 +11,8 @@ UI/UX design skill that produces component mockups, design system files, and `##
 MIXED:
 - **RIGID**: PRODUCT.md + DESIGN.md must exist before any design work. No exceptions.
 - **RIGID**: Every UI-facing spec gets a component mockup. No mockup = spec cannot be approved.
-- **RIGID**: Quality gates (critique + detect) run on every mockup. No reduced mode.
+- **RIGID**: Every quality gate (`critique`, `audit`, `harden`, `clarify`, `adapt`) is an actual Skill tool invocation. Reasoning about what the skill would say is NOT a substitute. No "I ran it mentally," no "I applied the principles inline," no "I authored the mockup with tokens so the gates are unnecessary." If you did not type `Skill(impeccable, "<gate> <slug>")`, the gate did not run.
+- **RIGID**: Sub-skill counts are not negotiable. 4 specs × (critique+audit+harden+clarify+adapt) = 20 Skill calls minimum. Skipping any of them on the grounds of volume is the failure this skill exists to prevent.
 - **FLEXIBLE**: Batching strategy for multi-screen apps — group by feature cluster, not rigid per-spec.
 - **FLEXIBLE**: Visual direction probes can be app-wide or per-cluster depending on design diversity.
 </rigidity_level>
@@ -235,6 +236,16 @@ If neither exists, you have not completed this step.
 
 Run these quality checks in order. Each catches different problems.
 
+**HOW TO RUN A GATE — read this before C1.** A gate is a Skill tool invocation, not a thought experiment. For every gate below you MUST issue a `Skill` call with the named impeccable command, let it execute, and apply its output to the mockup. The following are all equivalent ways of skipping the gate, and all are forbidden:
+
+- "I'll author the mockup with DESIGN.md tokens directly and run the principles mentally."
+- "I know the 27 anti-patterns, so I'll skim the file instead of invoking critique."
+- "Invoking 24 sub-skills is excessive for this scope — I'll batch them inline."
+- "The mockup is short, so audit/harden/clarify/adapt aren't necessary."
+- "I'll note in the spec that the gates were applied conceptually."
+
+If you catch yourself reasoning along any of those lines, STOP and invoke the Skill. The output of the gate must be visible in your transcript. If it isn't, the gate did not run, regardless of what you wrote in the spec.
+
 **C1. Critique** (`/impeccable critique`) — Design quality
 - Design review: visual hierarchy, readability, DESIGN.md consistency, PRODUCT.md alignment
 - Anti-pattern detection: 27 deterministic rules for AI slop signals
@@ -357,8 +368,16 @@ For each UI-facing spec, add a `## UI Design` section with:
 - **Visual aesthetics**: typography (specific fonts), color (OKLCH tokens), motion, spatial composition
 - **Mockup reference**: `Mockup: specs/mockups/<feature-slug>/` or `.html`
 - **Mock fidelity inventory**: what's captured vs. deferred to build
-- **Quality results**: critique score, anti-pattern scan results
-- **Enhancement commands applied**: which `/impeccable` commands were used and why
+- **Quality gates run**: explicit list of the Skill invocations made for this spec, e.g.
+  ```
+  - Skill(impeccable, "critique <slug>") — findings: ...
+  - Skill(impeccable, "audit <slug>") — findings: ...
+  - Skill(impeccable, "harden <slug>") — findings: ...
+  - Skill(impeccable, "clarify <slug>") — findings: ...
+  - Skill(impeccable, "adapt <slug>") — findings: ...
+  ```
+  Every UI-facing spec must list all five (plus `onboard` if applicable). If a gate was skipped, the spec is not approvable — go run the gate. Do NOT write caveats like "ran the principles mentally" here; that is the documented failure mode and will be rejected.
+- **Enhancement commands applied**: which `/impeccable` commands were used and why (each a Skill invocation)
 - **Content requirements**: UX copy decisions, microcopy, empty state messages
 
 ### Step 3.2: Final Verification
@@ -390,6 +409,10 @@ Any missing mockup = STOP. Go back and create it.
 <example>
 <scenario>Greenfield fitness app — 14 UI-facing specs</scenario>
 
+<why_it_fails>
+Without /design-ui, the agent either (a) skips UI design entirely and ships 14 prose-only specs that /build implements as default Tailwind cards, or (b) runs /impeccable shape per spec without PRODUCT.md, DESIGN.md, visual probes, or quality gates — producing 14 individually-bland mockups with no shared system. Either way, the user sees the implementation and asks "why does this look like every other SaaS app?" Then 14 specs have to be redesigned. The fix isn't "design harder next time" — it's running the full pipeline once at the front: probes → frontend-design lockdown → per-cluster shape → mockups → critique+audit+harden+clarify+adapt → extract. Twelve sub-skill calls per cluster isn't optional; it's the difference between distinctive and forgettable.
+</why_it_fails>
+
 <correction>
 **Phase 1 — Design System (once):**
 - Gate: No PRODUCT.md or DESIGN.md → run `/impeccable teach`
@@ -416,6 +439,10 @@ Present each cluster, user confirms before next.
 
 <example>
 <scenario>Single new screen added via /respec</scenario>
+
+<why_it_fails>
+Without /design-ui, the agent figures: "one screen, design system already exists, I'll just write the spec with a prose description of the layout." No mockup, no quality gates, no extract pass. /build then implements the screen from prose, which never captures spacing, hierarchy, or interaction states accurately. The new screen ships looking inconsistent with the rest of the app — different padding, different button treatment, different empty-state copy style — because every per-screen design decision was made individually instead of derived from the shared system. Even "small" UI work routes through the full pipeline; the shortcut is that Phase 1 is already done, not that Phase 2 is skipped.
+</why_it_fails>
 
 <correction>
 **Phase 1 — Design System:**
@@ -459,6 +486,9 @@ Present each cluster, user confirms before next.
 - "Running critique/detect on every mockup is overkill" → Critique runs 27 rules in seconds. It catches patterns humans normalize. Run it.
 - "This is too many screens to mock up individually" → Batch by cluster, don't skip. 14 mockups across 6 clusters is 6 shape interviews, not 14.
 - "The user wants to move fast, I'll skip the quality gates" → Skipping gates now means redesigning later. Every step exists because its absence caused a documented failure (see: trainr incident).
+- "I authored the mockups with DESIGN.md tokens directly and ran the principles mentally rather than invoking 24 more sub-skill calls" → This is the exact failure mode this skill exists to prevent (see: 2026-05-21 incident). Token usage in the source file is not a substitute for invoking critique/audit/harden/clarify/adapt. An LLM reasoning about what a fresh-context skill would say is provably worse than letting the skill run — that's the whole reason the gates are separate invocations. Number of calls is not a reason to skip; if 24 calls is the right number, make 24 calls.
+- "I'll note in each spec that the gates were applied conceptually / I'll caveat the quality gates" → A caveat in the spec is not a substitute for the gate. The correct action is to run the gate, not to disclaim that you didn't.
+- "The user said they trust my judgment" → Trust is not permission to skip rigid steps. The rigid steps exist because judgment alone produces bland output. If the user explicitly types "skip the gates," ask whether they want the rigidity downgraded; do not assume.
 - "I'll do the design system setup per-screen" → No. PRODUCT.md, DESIGN.md, register, visual direction, and frontend-design aesthetics are app-level decisions. Running them per-screen wastes time and produces inconsistent designs.
 - "The visual direction probes are unnecessary — I already know the aesthetic" → Probes exist because designers and LLMs have blind spots. 3 directions in 2 minutes prevents "I didn't know I wanted that."
 </critical_rules>
@@ -477,24 +507,33 @@ Before claiming /design-ui is complete:
 **Per-Screen (Phase 2):**
 - [ ] All UI-facing specs identified from decomposition map
 - [ ] Specs grouped into feature clusters
-- [ ] Shape interview completed per cluster
+- [ ] Shape interview completed per cluster (`Skill(impeccable, "shape ...")` invocation in transcript)
 - [ ] Component mockup EXISTS ON DISK for every UI-facing spec (`ls specs/mockups/`)
 - [ ] Mock fidelity inventory created per mockup
-- [ ] Critique quality gate passed per mockup (design quality)
-- [ ] Audit quality gate passed per mockup (a11y, performance, responsive)
-- [ ] Harden pass completed per mockup (error states, empty states, edge cases)
-- [ ] Clarify pass completed per mockup (UX copy, labels, messages)
-- [ ] Adapt pass completed per mockup (responsive behavior across devices)
-- [ ] Onboard pass completed for onboarding specs (first-run flows, activation) — or N/A
-- [ ] Enhancement commands applied where quality gates found weaknesses
+- [ ] Critique gate **invoked via Skill tool** per mockup — transcript contains `Skill(impeccable, "critique <slug>")` and its output
+- [ ] Audit gate **invoked via Skill tool** per mockup — transcript contains `Skill(impeccable, "audit <slug>")` and its output
+- [ ] Harden gate **invoked via Skill tool** per mockup — transcript contains `Skill(impeccable, "harden <slug>")` and its output
+- [ ] Clarify gate **invoked via Skill tool** per mockup — transcript contains `Skill(impeccable, "clarify <slug>")` and its output
+- [ ] Adapt gate **invoked via Skill tool** per mockup — transcript contains `Skill(impeccable, "adapt <slug>")` and its output
+- [ ] Onboard gate invoked via Skill tool for onboarding specs — or N/A
+- [ ] Enhancement commands applied where quality gates found weaknesses (each one a Skill invocation, not a mental pass)
 - [ ] User confirmed each cluster
+
+**Self-honesty check (Phase 2, before claiming completion):**
+
+Answer each question literally — not "essentially yes" or "in spirit yes." If any answer is "no," the gate did not run.
+
+- Q1. For every mockup, did your transcript contain a separate `Skill` tool call for `critique`, `audit`, `harden`, `clarify`, and `adapt` (one call per gate per mockup)?
+- Q2. Did you read the actual textual output produced by each of those Skill calls, or did you stop at invoking them?
+- Q3. Did you author any sentence in a spec or summary that begins with "Caveat," "I ran the principles mentally," "I applied them inline," "I batched them," "rather than invoking N sub-skill calls," or any close paraphrase?
+  - If yes → the gates were skipped. Delete the caveat, run the gates, redo the UI Design sections.
 
 **Incorporation (Phase 3):**
 - [ ] `/impeccable extract` run to formalize design tokens in DESIGN.md — or skipped (no new tokens)
-- [ ] `## UI Design` section added to every UI-facing spec
+- [ ] `## UI Design` section added to every UI-facing spec, listing each gate Skill invocation that was made (gate name + slug, one line per call)
 - [ ] Final verification: all mockups exist on disk
 
-**Cannot check all boxes? Do not claim /design-ui is complete.**
+**Cannot check all boxes truthfully? Do not claim /design-ui is complete.** Do not paper over a skipped gate with a caveat — go back and invoke the gate.
 </verification_checklist>
 
 <integration>

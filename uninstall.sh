@@ -58,15 +58,22 @@ restore_or_remove() {
 # 1. Remove skills
 echo "[1/3] Removing skills..."
 restore_or_remove "$CLAUDE_DIR/skills/design/SKILL.md"
+restore_or_remove "$CLAUDE_DIR/skills/design-arch/SKILL.md"
+restore_or_remove "$CLAUDE_DIR/skills/design-ui/SKILL.md"
 restore_or_remove "$CLAUDE_DIR/skills/build/SKILL.md"
-restore_or_remove "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md"
+restore_or_remove "$CLAUDE_DIR/skills/respec/SKILL.md"
 restore_or_remove "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
 
 # Clean up empty skill directories
 rmdir "$CLAUDE_DIR/skills/design" 2>/dev/null || true
+rmdir "$CLAUDE_DIR/skills/design-arch" 2>/dev/null || true
+rmdir "$CLAUDE_DIR/skills/design-ui" 2>/dev/null || true
 rmdir "$CLAUDE_DIR/skills/build" 2>/dev/null || true
-rmdir "$CLAUDE_DIR/skills/workflow-orchestrator" 2>/dev/null || true
+rmdir "$CLAUDE_DIR/skills/respec" 2>/dev/null || true
 rmdir "$CLAUDE_DIR/skills/workflow-retrospective" 2>/dev/null || true
+# Legacy: workflow-orchestrator was removed; clean up if still installed from an older version
+restore_or_remove "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md" 2>/dev/null || true
+rmdir "$CLAUDE_DIR/skills/workflow-orchestrator" 2>/dev/null || true
 
 # 2. Remove hooks
 echo "[2/3] Removing hooks..."

@@ -92,7 +92,17 @@ if ! echo "$spec_content" | grep -qi "$UI_PATTERNS"; then
     exit 0
 fi
 
-# It's UI-facing — check for required design artifacts
+# It's UI-facing — check for forbidden "skipped gates" caveats first.
+# These exact phrases (and close paraphrases) indicate /design-ui ran but the
+# author skipped quality gates and tried to disclaim it in the spec.
+# See: 2026-05-21 incident, feedback_ui_design_workflow.md.
+FORBIDDEN_CAVEATS="ran the principles mentally\|rather than invoking.*sub-skill\|rather than invoking.*sub skill\|applied the principles inline\|caveat on quality gates\|gates were applied conceptually\|deferred gates for later\|skipped.*quality gates\|gates.*skipped for now"
+
+if echo "$spec_content" | grep -qi "$FORBIDDEN_CAVEATS"; then
+    echo "{\"error\": \"BLOCKED: This spec contains a 'skipped gates' caveat (e.g. 'ran the principles mentally', 'rather than invoking N sub-skill calls', 'gates applied conceptually').\\n\\nThis is the documented failure mode of /design-ui. The fix is NOT to caveat the skipped gates — it is to run them.\\n\\nFor each UI-facing spec, invoke the gates via the Skill tool:\\n  Skill(impeccable, \\\"critique <slug>\\\")\\n  Skill(impeccable, \\\"audit <slug>\\\")\\n  Skill(impeccable, \\\"harden <slug>\\\")\\n  Skill(impeccable, \\\"clarify <slug>\\\")\\n  Skill(impeccable, \\\"adapt <slug>\\\")\\n\\nThen remove the caveat from the spec.\"}"
+    exit 0
+fi
+
 # Find the project root (where specs/ lives)
 spec_dir=$(dirname "$file_path")
 project_root=$(dirname "$spec_dir")

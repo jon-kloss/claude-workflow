@@ -75,7 +75,6 @@ Auto-invoked by `/design` for UI-facing work. Also callable independently (e.g.,
 │   ├── design-arch/SKILL.md            # /design-arch — Architecture docs, diagrams, overview.html
 │   ├── build/SKILL.md                  # /build — Spec-driven TDD + visual fidelity + verification
 │   ├── respec/SKILL.md                 # /respec — Modify specs with blast radius tracing
-│   ├── workflow-orchestrator/SKILL.md  # Deprecated — redirects to /design + /build
 │   └── workflow-retrospective/SKILL.md # Incident triage + metrics analysis skill
 ├── hooks/
 │   ├── _common.sh                      # Shared utilities for hooks

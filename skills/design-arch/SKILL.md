@@ -279,6 +279,10 @@ Options:
 <example>
 <scenario>Simple feature — 2 specs, no external integrations</scenario>
 
+<why_it_fails>
+Without /design-arch, the agent looks at "2 small specs, no external services" and concludes no architecture doc is needed — the specs themselves are documentation. But two specs *with a dependency* already have structure to communicate: which one ships first, how they connect, what the public surface looks like. The stakeholder who funded the work has nothing visual to look at; the next contributor has to read both Gherkin files to understand fit. The skip criteria are narrow on purpose: one trivial spec with no deps. Two specs with a dep is not trivial — concise arch.md and one diagram is the right answer, not zero artifacts.
+</why_it_fails>
+
 <correction>
 **Step 1:** "I'm using /design-arch to generate architecture documentation."
 
@@ -298,6 +302,10 @@ Options:
 
 <example>
 <scenario>Greenfield app — system spec + 5 feature specs with dependencies</scenario>
+
+<why_it_fails>
+Without /design-arch, the agent generates one diagram (system architecture) and considers the job done. But greenfield with 5 dependent specs has a request lifecycle worth tracing, a deployment topology worth drawing, and a design-decisions section worth writing — because future contributors will hit "why did we choose JWT over sessions" within a week. The agent that says "one diagram is enough" is the same agent that, six months later, can't reconstruct why the data model has both `user_id` and `account_id`. Architecture docs are insurance against future ambiguity, and the premium is paid at the moment of design, not after the confusion sets in.
+</why_it_fails>
 
 <correction>
 **Step 1:** "I'm using /design-arch to generate architecture documentation."
@@ -321,6 +329,10 @@ Options:
 
 <example>
 <scenario>Independent invocation — architecture update after /respec</scenario>
+
+<why_it_fails>
+Without /design-arch's "update, don't skip" rule, the agent looks at the existing arch.md and decides the old document is "good enough" — the spec change is small, why rewrite the architecture? But the respec'd spec might have changed the auth flow, the data model, or a service boundary; the architecture document is now describing a system that no longer exists. Worse, the overview.html still shows the old build order to stakeholders. Arch docs that aren't kept in sync silently become wrong, and "wrong documentation" is worse than no documentation — readers trust it. The respec touched the system; the architecture description has to follow.
+</why_it_fails>
 
 <correction>
 **Step 1:** "I'm using /design-arch to update architecture documentation after spec changes."

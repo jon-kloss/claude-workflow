@@ -351,11 +351,9 @@ After the user accepts the updated specs:
 "Specs approved. Invoking /build to implement the changes."
 ```
 
-3. Invoke /build:
+3. Hand off to /build:
 
-```
-Use Skill tool: build
-```
+**REQUIRED SUB-SKILL:** Invoke the `build` skill via the Skill tool. /build will pick up the regressed specs at `@status(approved)` and resume from where /respec stopped.
 
 /build will:
 - Detect the `@status(approved)` specs (including ones regressed by /respec)
@@ -381,6 +379,10 @@ Use Skill tool: build
 
 <example>
 <scenario>Additive change — new scenario, no contract change</scenario>
+
+<why_it_fails>
+Without /respec, "just adding a scenario" looks like: edit the file, add the scenario, done. But the spec was at `@status(verified)` — meaning /build closed the beads task and the existing test suite says the feature is complete. Adding a scenario doesn't trigger a status regression, so the new scenario silently has no test, no implementation, and no beads tracking. The verified spec now contains behavior that doesn't exist in code, and nobody knows. Status regression is mandatory because *change to the spec = change to what "verified" means*; the workflow needs the spec to drop back to `@status(approved)` so /build picks it up again.
+</why_it_fails>
 
 <correction>
 **Step 1:** `bd show beads-042` — finds `specs/user-registration.md`.
@@ -414,6 +416,10 @@ Regress `@status(verified)` -> `@status(approved)`.
 <example>
 <scenario>Contract-breaking change — error response shape changes</scenario>
 
+<why_it_fails>
+Without blast-radius analysis, the agent edits `user-registration.md`'s Technical Context to use the new error shape and stops there. The change propagates exactly nowhere — but `user-authentication.md` and `payment-processing.md` both reference the old shape in their scenarios and Technical Context. Those specs stay `@status(verified)` against contracts that no longer exist, and their test suites still pass because they're asserting the old format that was never updated. Production code starts emitting the new shape from registration, the old shape from auth and payments, and consumers see a mixed bag. The blast radius IS the contract — silent edits to a contract-bearing spec are how systems silently fracture.
+</why_it_fails>
+
 <correction>
 **Step 1:** `bd show beads-042` — finds `specs/user-registration.md`.
 
@@ -440,6 +446,10 @@ User confirms scope.
 
 <example>
 <scenario>/build pauses due to fundamental spec drift</scenario>
+
+<why_it_fails>
+Without /respec, /build's natural instinct under pressure is to "just make it work" — rewrite the spec inline to match what the payment provider actually supports, then continue implementing. The spec now contains webhook scenarios but the design rationale, dependency tags, and downstream specs were never reconsidered. The user never approved the new approach. Anyone reading the spec later sees fully-formed webhook scenarios and assumes they were intentional from day one, with no record that the original sync assumption was wrong. /respec exists because contract-level changes need user approval and downstream propagation — silent in-build rewrites bypass both.
+</why_it_fails>
 
 <correction>
 /build discovers during implementation that `specs/payment-processing.md` assumes synchronous payment confirmation, but the payment provider only supports webhooks (async).

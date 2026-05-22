@@ -1,0 +1,317 @@
+# Gherkin Spec Reference
+
+Reference material for /design (which produces specs) and /build (which consumes them). Loaded on demand — not in the skill body.
+
+## Gherkin Spec Files
+
+Every design produces Gherkin-style Markdown spec files in the project's `specs/` directory. These specs are the **source of truth** for design intent — beads epics link to specs, they do not contain inline requirements.
+
+### Format
+
+Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists for steps, `@tags` at the top of the file.
+
+### Tags
+
+- `@status(draft|approved|implemented|verified)` — lifecycle tracking (required on every spec)
+- `@depends-on(feature-slug)` — this feature requires another feature to be implemented first
+- `@blocks(feature-slug)` — another feature depends on this one
+- `@parallel-risk(feature-slug)` — this spec modifies the same files as another independent spec. Both specs remain parallel (no `@depends-on` added). /build warns about potential merge conflicts and builds the smaller spec first.
+- Custom domain tags: `@auth`, `@api`, `@ui`, `@security`, etc. — categorization
+
+### Greenfield Rebuild Principle
+
+For greenfield projects, the complete set of specs in `specs/` must be **sufficient to rebuild the entire application from scratch**. An agent or developer reading only the specs should understand:
+- What the system is and why it exists (system spec)
+- The tech stack, data model, and architecture (system spec)
+- Every feature's behavior, edge cases, and integration points (feature specs)
+- The build order via `@depends-on` dependency chains
+
+This is achieved through two spec types:
+
+1. **System spec** (`specs/system.md`) — Required for greenfield and major architectural changes. Describes the application as a whole: purpose, tech stack, data model, deployment, and a feature map showing how all features relate.
+
+2. **Feature specs** (`specs/<feature-slug>.md`) — One per feature. Self-contained but linked via `@depends-on`/`@blocks` tags. Must include enough technical detail (data shapes, API contracts, integration points) that someone could implement the feature given only the spec and the system spec.
+
+### System Spec Template (Greenfield / Architectural Changes)
+
+```markdown
+@status(draft)
+@system
+
+# System: [Application Name]
+
+[What this application is and why it exists — 2-3 sentences]
+
+## Tech Stack
+
+- **Runtime**: [e.g., Node.js 20, Python 3.12]
+- **Framework**: [e.g., Express, FastAPI, Next.js]
+- **Database**: [e.g., PostgreSQL 16, SQLite]
+- **Auth**: [e.g., JWT, session-based, OAuth2]
+- **Deployment**: [e.g., Docker, Vercel, bare metal]
+- **Testing**: [e.g., Jest, pytest, Go test]
+
+## Data Model
+
+### [Entity Name]
+
+| Field | Type | Constraints |
+|-------|------|-------------|
+| id | UUID | primary key |
+| name | string | required, max 255 |
+| created_at | timestamp | default now() |
+
+### Relationships
+
+- [Entity A] has many [Entity B]
+- [Entity B] belongs to [Entity A]
+
+## Feature Map
+
+| Feature | Spec | Dependencies | Priority |
+|---------|------|--------------|----------|
+| User Registration | user-registration.md | (none) | P0 |
+| User Authentication | user-authentication.md | user-registration | P0 |
+
+## API Overview
+
+- Base URL: `/api/v1`
+- Auth: Bearer token in Authorization header
+- Response format: JSON with `{ data, error, meta }` envelope
+- Error format: `{ error: { code, message, details } }`
+
+## Non-Functional Requirements
+
+### Scenario: Response time under load
+
+- Given 100 concurrent users
+- When they make API requests
+- Then 95th percentile response time is under 200ms
+```
+
+### Feature Spec Templates
+
+**Simple** — Feature + 1-3 Scenarios. No Rules, no Background.
+
+```markdown
+@status(draft)
+
+# Feature: Fix typo in README
+
+Correct the misspelling 'recieve' to 'receive' across the project.
+
+## Scenario: All instances are corrected
+
+- Given the project contains the misspelling 'recieve'
+- When the fix is applied
+- Then all instances of 'recieve' are replaced with 'receive'
+- And no other text is modified
+```
+
+**Standard** — Feature + As/I want/So that + Critical User Journeys + Technical Context + Rules + Background + Scenarios.
+
+```markdown
+@status(draft)
+@api @breweries
+
+# Feature: Nearby Breweries Endpoint
+
+As an API consumer
+I want to query breweries by location
+So that I can find nearby breweries for a given coordinate
+
+## Critical User Journeys
+
+This feature participates in the following end-to-end journeys:
+
+| CUJ | Steps in This Feature | Full Journey |
+|-----|----------------------|--------------|
+| Find a local brewery | Search by location → View results | Open app → Allow location → Search nearby → View brewery details → Get directions |
+| Plan a brewery visit | Search → Filter by distance | Search nearby → Filter → View details → Save to favorites → Share with friend |
+
+## Technical Context
+
+- **Endpoint**: GET /api/breweries/nearby
+- **Parameters**: lat (float, required), lng (float, required), radius (integer, miles, default 10, max 100)
+- **Response**: Array of Brewery objects sorted by distance ascending
+
+### Response Shape
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | UUID | Brewery identifier |
+| name | string | Brewery name |
+| distance | float | Miles from query point |
+
+## Background
+
+- Given the brewery database is populated
+- And the API server is running
+
+## Rule: Valid coordinates return nearby results
+
+### Scenario: Successful nearby query
+
+- Given breweries exist within 10 miles of coordinates 40.7128, -74.0060
+- When I GET /api/breweries/nearby?lat=40.7128&lng=-74.0060&radius=10
+- Then I receive a 200 response
+- And the response contains breweries sorted by distance
+
+## Rule: Invalid input is rejected
+
+### Scenario: Missing required parameters
+
+- Given I omit the lat parameter
+- When I GET /api/breweries/nearby?lng=-74.0060&radius=10
+- Then I receive a 400 response
+- And the error message indicates lat is required
+```
+
+**Complex** — Multiple spec files with `@depends-on`/`@blocks`. Full Gherkin structure.
+
+```markdown
+@status(draft)
+@auth @security @mvp
+@depends-on(user-registration)
+@blocks(payment-processing)
+
+# Feature: User Authentication
+
+As a registered user
+I want to log in securely
+So that I can access my account
+
+## Critical User Journeys
+
+This feature participates in the following end-to-end journeys:
+
+| CUJ | Steps in This Feature | Full Journey |
+|-----|----------------------|--------------|
+| New user onboarding | Register → Select role → Login | Landing → Register → Verify email → Login → Select role → Dashboard |
+| Returning user session | Login → Token refresh | Open app → Login → Use features → Token auto-refresh → Continue working |
+| Account recovery | Forgot password → Reset | Login screen → Forgot password → Email link → Reset → Login |
+
+## Technical Context
+
+- **Endpoint**: POST /api/auth/login
+- **Request Body**: `{ email: string, password: string }`
+- **Response**: `{ token: string, expiresIn: number, user: UserSummary }`
+- **Token**: JWT signed with RS256, 1-hour expiry
+- **Dependencies**: User table from user-registration feature
+
+### Data Structures
+
+| Field | Type | Description |
+|-------|------|-------------|
+| token | JWT | Access token, 1h TTL |
+| refreshToken | UUID | Stored in DB, 30d TTL |
+
+## Interaction Map
+
+Every UI element that triggers backend communication or state change:
+
+| UI Element | User Action | API Endpoint | Method | Expected Result |
+|-----------|-------------|-------------|--------|----------------|
+| Login form | submit email + password | /api/auth/login | POST | Returns token, navigates to dashboard |
+| Google Sign-In btn | press | /api/auth/social | POST | Initiates OAuth, returns token |
+| Forgot Password link | press | /api/auth/forgot-password | POST | Sends reset email, shows confirmation |
+| Logout btn | press | /api/auth/logout | POST | Clears session, navigates to login |
+
+## Background
+
+- Given the authentication service is running
+- And the user database is available
+
+## Rule: Valid credentials grant access
+
+### Scenario: Successful login with email
+
+- Given a registered user with email "user@test.com"
+- When they submit valid credentials
+- Then they receive a session token
+
+## Rule: Invalid credentials are rejected
+
+### Scenario Outline: Rate limiting after failures
+
+- Given a registered user
+- When they fail to log in <attempts> times
+- Then their account is locked for <duration>
+
+#### Examples
+
+| attempts | duration   |
+|----------|------------|
+| 3        | 5 minutes  |
+| 5        | 30 minutes |
+| 10       | 24 hours   |
+```
+
+### Lifecycle
+
+Specs are **living documents**:
+1. **Draft** — Generated during /design. `@status(draft)`
+2. **Approved** — After user confirms design (reality check passes). `@status(approved)`
+3. **Implemented** — Updated during /build as edge cases are discovered. `@status(implemented)`
+4. **Verified** — After /build verification passes. `@status(verified)`
+
+### File Naming
+
+`specs/<feature-slug>.md` where `<feature-slug>` is kebab-case derived from the feature name.
+Examples: `specs/user-authentication.md`, `specs/nearby-breweries-endpoint.md`, `specs/fix-readme-typo.md`.
+
+### Directory Structure
+
+```
+project/
+  specs/
+    system.md                     # @system — greenfield only
+    user-registration.md
+    user-authentication.md        # @depends-on(user-registration)
+    payment-processing.md         # @depends-on(user-authentication)
+  src/
+  tests/
+```
+
+### Decomposition Heuristics
+
+When generating multiple specs, use these heuristics to decide what should be a separate spec vs. scenarios within one spec.
+
+#### The Independence Test
+
+A piece of work is independent from another if:
+1. You can write tests for it without the other piece existing
+2. It has its own inputs and outputs (even if they share a file)
+3. Removing it doesn't break the other piece's tests
+
+If all three hold, the pieces should be **separate specs**. If any fail, they belong in the **same spec** (as scenarios under different Rules).
+
+#### Seam Types
+
+Look for these natural boundaries when decomposing:
+
+| Seam | Example | Signal |
+|------|---------|--------|
+| Data boundary | API endpoint vs. CLI command — different input sources, same DB | Different entry points to the system |
+| Lifecycle boundary | User registration vs. user authentication — different user journeys | Different "when" triggers |
+| Consumer boundary | Admin dashboard vs. public API — different audiences | Different "who" uses it |
+| Layer boundary | Database schema vs. API routes vs. UI components | Can be built bottom-up independently |
+| Rule boundary | Validation rules vs. business logic vs. formatting | Different "what kind" of behavior |
+
+#### Parallel Risk: File Overlap
+
+When two independent specs will modify the same file:
+- Tag both specs with `@parallel-risk(other-spec-slug)`
+- They remain parallel (do NOT add `@depends-on`)
+- /build warns about potential merge conflicts and builds the smaller spec first
+
+## Mapping Spec Scenarios to Tests (for /build)
+
+| Spec Element | Test Element |
+|---|---|
+| `## Background` | Test setup / beforeEach / fixture |
+| `### Scenario: Name` | One test function: `test_name` or `it("Name", ...)` |
+| `### Scenario Outline: Name` + `#### Examples` table | One test per Examples row, parameterized |
+| `- Given [context]` | Test setup / arrange |
+| `- When [action]` | Test action / act |
+| `- Then [outcome]` | Test assertion / assert |
