@@ -128,7 +128,7 @@ backup_and_link() {
 }
 
 # 1. Install skills
-echo "[1/5] Installing skills..."
+echo "[1/6] Installing skills..."
 mkdir -p "$CLAUDE_DIR/skills/design"
 mkdir -p "$CLAUDE_DIR/skills/design-arch"
 mkdir -p "$CLAUDE_DIR/skills/design-ui"
@@ -148,8 +148,21 @@ echo "  - /build linked"
 echo "  - /respec linked"
 echo "  - workflow-retrospective linked"
 
-# 2. Install hooks
-echo "[2/5] Installing hooks..."
+# 2. Install agents
+echo "[2/6] Installing agents..."
+mkdir -p "$CLAUDE_DIR/agents"
+agent_count=0
+if [ -d "$SCRIPT_DIR/agents" ]; then
+    for agent in "$SCRIPT_DIR"/agents/*.md; do
+        [ -f "$agent" ] || continue
+        backup_and_link "$agent" "$CLAUDE_DIR/agents/$(basename "$agent")"
+        agent_count=$((agent_count + 1))
+    done
+fi
+echo "  - $agent_count agent files linked"
+
+# 3. Install hooks
+echo "[3/6] Installing hooks..."
 mkdir -p "$CLAUDE_DIR/hooks"
 hook_count=0
 for hook in "$SCRIPT_DIR"/hooks/*.sh; do
@@ -166,18 +179,24 @@ echo "$CLAUDE_DIR/skills/design-ui/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/build/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/respec/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md" >> "$MANIFEST_FILE"
+if [ -d "$SCRIPT_DIR/agents" ]; then
+    for agent in "$SCRIPT_DIR"/agents/*.md; do
+        [ -f "$agent" ] || continue
+        echo "$CLAUDE_DIR/agents/$(basename "$agent")" >> "$MANIFEST_FILE"
+    done
+fi
 for hook in "$SCRIPT_DIR"/hooks/*.sh; do
     echo "$CLAUDE_DIR/hooks/$(basename "$hook")" >> "$MANIFEST_FILE"
 done
 
-# 3. Create hook state directory
-echo "[3/5] Creating hook state directory..."
+# 4. Create hook state directory
+echo "[4/6] Creating hook state directory..."
 mkdir -p "$CLAUDE_DIR/hooks/state"
 touch "$CLAUDE_DIR/hooks/state/session-reads.txt"
 echo "  - State directory ready"
 
-# 4. Merge hooks into settings.json
-echo "[4/5] Configuring hooks in settings.json..."
+# 5. Merge hooks into settings.json
+echo "[5/6] Configuring hooks in settings.json..."
 
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 
@@ -341,9 +360,9 @@ with open(settings_path, 'w') as f:
 
 echo "  - Hooks configured"
 
-# 5. Optionally disable superpowers
+# 6. Optionally disable superpowers
 echo ""
-read -p "[5/5] Disable superpowers plugin? (Recommended - hyperpowers covers all features) [y/N]: " disable_sp
+read -p "[6/6] Disable superpowers plugin? (Recommended - hyperpowers covers all features) [y/N]: " disable_sp
 if [[ "$disable_sp" =~ ^[Yy]$ ]]; then
     "$PYTHON" -c "
 import json, sys
@@ -371,6 +390,7 @@ echo "              ~/.claude/skills/design-ui/SKILL.md ($LINK_TYPE)"
 echo "              ~/.claude/skills/build/SKILL.md ($LINK_TYPE)"
 echo "              ~/.claude/skills/respec/SKILL.md ($LINK_TYPE)"
 echo "              ~/.claude/skills/workflow-retrospective/SKILL.md ($LINK_TYPE)"
+echo "  Agents:     ~/.claude/agents/ ($agent_count files, $LINK_TYPE)"
 echo "  Hooks:      ~/.claude/hooks/ ($hook_count scripts, $LINK_TYPE)"
 echo "  Config:     ~/.claude/settings.json (hooks added)"
 echo "  Benchmarks: $(pwd)/benchmarks/ (6 benchmarks + A/B protocol)"

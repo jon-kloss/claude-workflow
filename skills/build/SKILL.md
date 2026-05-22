@@ -805,6 +805,70 @@ Verdict: PASS | FAIL"
 
 **Skip this step for:** Backend-only specs, specs with no API endpoints in Technical Context, purely static/informational UI.
 
+#### Step 3.3g: SRE + Intent Audit
+
+**Runs for every spec, regardless of layer.** The mechanical reviewers above check that every scenario has code and tests, dead code, integration points, and visual fidelity. This step checks something different: does the implementation actually deliver the spec's **intent**, and does it hold up under **SRE-grade rigor** (failure modes, observability, performance, operational readiness) in service of that intent?
+
+1. **Identify context to load:**
+   - Current spec file: `specs/<feature-slug>.md`
+   - Parent epic (the epic ID for this spec's beads task — e.g., `bd show <spec-task-id>` to find it)
+   - Every spec listed in this spec's `@depends-on` directive
+
+2. **Dispatch the auditor:**
+
+   ```
+   Agent tool (subagent_type: spec-sre-auditor):
+   "Audit the implementation of specs/<feature-slug>.md.
+
+   Spec to audit: specs/<feature-slug>.md
+   Parent epic: <epic-id>
+   Upstream specs (@depends-on): [<paths>]
+
+   Files changed for this spec:
+   <list from `git diff --name-only` scoped to this spec's commits>
+
+   Read the spec's Why/Outcome and scenarios first to internalize intent,
+   then read the parent epic and any upstream specs. Audit the implementation
+   against that intent with SRE rigor. Return findings in the exact format
+   from your system prompt, then a single Verdict line."
+   ```
+
+3. **Route findings by severity:**
+
+   - **CRITICAL** → log via `bd comments add` with category `sre-intent-audit` and severity CRITICAL. Feed into the existing fix-verify loop in "Verification Failure Handling" below (max 3 cycles). Spec cannot reach `@status(verified)` until cleared.
+   - **IMPORTANT** → create a follow-up beads task per finding:
+     ```bash
+     NEW_ID=$(bd create --title="<finding summary>" \
+       --description="From SRE+Intent audit of specs/<feature-slug>.md. Location: <file:line>. Finding: <details>. Why it matters: <spec-tie>. Recommendation: <fix>." \
+       --type=task --priority=2 | grep -oE 'workflow-[a-z0-9]+' | head -1)
+     bd dep add "$NEW_ID" <this-spec-task-id>
+     ```
+     Spec can proceed to Step 3.4 once CRITICAL/SPEC-DRIFT findings are clear.
+   - **SUGGESTION** → log via `bd comments add` only. No task created.
+   - **SPEC-DRIFT** → **STOP.** Do not flip status to verified. Surface the finding to the user and recommend running `/respec` against the affected spec(s). The auditor's `Recommendation` line becomes input to `/respec`. Do not enter the fix-verify loop — code fixes cannot resolve a spec-drift finding.
+
+4. **Log the audit:**
+
+   ```bash
+   bd comments add [epic-id] "SRE + INTENT AUDIT: specs/<feature-slug>.md
+
+   Intent source: Why/Outcome + scenarios + parent epic + upstream specs
+   Findings:
+     CRITICAL:   [N] — [brief list of locations]
+     IMPORTANT:  [N] — created follow-up tasks [ids]
+     SUGGESTION: [N]
+     SPEC-DRIFT: [N] — [affected specs, if any]
+
+   Verdict: PASS | FAIL (critical) | FAIL (spec-drift)"
+   ```
+
+**Severity escalation:**
+- `Verdict: FAIL (critical)` → enter fix-verify loop. Max 3 cycles.
+- `Verdict: FAIL (spec-drift)` → halt and surface to user; recommend `/respec`. Do not enter the fix loop.
+- `Verdict: PASS` → proceed to Step 3.4.
+
+**Do not skip this step.** It runs for every spec — backend, API, UI, CLI, full-stack — because intent fidelity applies to all layers.
+
 #### Verification Failure Handling
 
 Log every failure:
@@ -812,7 +876,7 @@ Log every failure:
 bd comments add [epic-id] "VERIFICATION FAILURE: [category] - [description]
 
 Source: [which step caught it]
-Category: [test-failure | test-quality | code-review | spec-coverage | criteria-gap | integration]
+Category: [test-failure | test-quality | code-review | spec-coverage | criteria-gap | integration | sre-intent-audit]
 Severity: [CRITICAL | IMPORTANT | MINOR]
 Action: [returning to fix | fixing inline | deferring]"
 ```
@@ -856,7 +920,7 @@ Does this match your expectations? (yes / no / concerns)"
 
 ### Step 3.5: Complete This Spec
 
-After verification passes (and user sign-off, unless `--auto`):
+After verification passes (including Step 3.3g SRE + Intent Audit with `Verdict: PASS`) and user sign-off (unless `--auto`):
 
 1. Update spec status: `@status(implemented)` → `@status(verified)`
 2. Close the beads task for this spec

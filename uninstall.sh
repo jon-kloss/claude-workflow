@@ -56,7 +56,7 @@ restore_or_remove() {
 }
 
 # 1. Remove skills
-echo "[1/3] Removing skills..."
+echo "[1/4] Removing skills..."
 restore_or_remove "$CLAUDE_DIR/skills/design/SKILL.md"
 restore_or_remove "$CLAUDE_DIR/skills/design-arch/SKILL.md"
 restore_or_remove "$CLAUDE_DIR/skills/design-ui/SKILL.md"
@@ -75,8 +75,15 @@ rmdir "$CLAUDE_DIR/skills/workflow-retrospective" 2>/dev/null || true
 restore_or_remove "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md" 2>/dev/null || true
 rmdir "$CLAUDE_DIR/skills/workflow-orchestrator" 2>/dev/null || true
 
-# 2. Remove hooks
-echo "[2/3] Removing hooks..."
+# 2. Remove agents
+echo "[2/4] Removing agents..."
+for agent in spec-sre-auditor.md; do
+    restore_or_remove "$CLAUDE_DIR/agents/$agent"
+done
+rmdir "$CLAUDE_DIR/agents" 2>/dev/null || true
+
+# 3. Remove hooks
+echo "[3/4] Removing hooks..."
 for hook in _common.sh beads-auto-resume.sh block-unread-edits.sh check-open-beads.sh \
             clear-session-reads.sh remind-integration-tests.sh require-bead-description.sh \
             track-reads.sh verifier-dispatch.sh verifier-return.sh \
@@ -84,8 +91,8 @@ for hook in _common.sh beads-auto-resume.sh block-unread-edits.sh check-open-bea
     restore_or_remove "$CLAUDE_DIR/hooks/$hook"
 done
 
-# 3. Remove our hook entries from settings.json (preserves user's own hooks)
-echo "[3/3] Removing workflow hooks from settings.json..."
+# 4. Remove our hook entries from settings.json (preserves user's own hooks)
+echo "[4/4] Removing workflow hooks from settings.json..."
 SETTINGS_FILE="$CLAUDE_DIR/settings.json"
 
 if [ -f "$SETTINGS_FILE" ]; then
