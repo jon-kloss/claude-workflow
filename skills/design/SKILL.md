@@ -205,30 +205,11 @@ sections. Produce your handoff at:
   specs/handoffs/step-2.85-<spec-slug>-uiux-designer.html (one per UI-bearing spec)"
 ```
 
-When the agent returns, verify:
-- Every UI-facing spec from the decomposition has a corresponding mockup file at `specs/mockups/<slug>/` or `specs/mockups/<slug>.html`.
-- Every UI-facing spec has a `## UI Design` section in its `.md` file listing the gate Skill invocations made.
-- The `claim-vs-call-audit.sh` hook will catch any false claims at `@status(verified)` time, but checking now saves a round-trip.
+When the agent returns, verify each UI-facing spec has both a mockup file at `specs/mockups/<slug>/` (or `.html`) AND a `## UI Design` section listing the gate Skill invocations. `claim-vs-call-audit.sh` catches false claims at `@status(verified)` time; checking now saves a round-trip.
 
-It handles the full UI/UX design pipeline and produces:
-- `PRODUCT.md` + `DESIGN.md` (if missing — via `/impeccable teach`)
-- Component mockups in `specs/mockups/` for all UI-facing specs
-- `## UI Design` sections ready to incorporate into specs
-- Quality-checked designs (critique + detect + enhancement)
+**BLOCKING REQUIREMENT.** If any decomposition entry is `@layer(ui|full-stack)`, the uiux-designer agent MUST run before Step 3.
 
-### When to trigger
-
-Any decomposition map entry that involves:
-- New pages, views, or screens
-- New UI components or widgets
-- Significant visual changes to existing interfaces
-- User-facing interactions (forms, dashboards, data visualization)
-
-**BLOCKING REQUIREMENT**: If ANY entry in the decomposition map is UI-facing, `/design-ui` MUST be invoked before proceeding to Step 3 (spec generation). A UI-facing spec without a mockup CANNOT be approved.
-
-The `/design-ui` skill handles its own gate checks, batching strategy, quality gates, and user confirmation. When it returns, all UI-facing specs have mockups and UI Design content.
-
-**Skip when:** No entry in the decomposition map is tagged `@layer(ui)` or `@layer(full-stack)`. Equivalent grep: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results. If any UI/full-stack spec exists in the decomp, `/design-ui` MUST run.
+**Skip when:** `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results.
 
 ## Step 3: Generate Gherkin Spec Files
 
@@ -265,82 +246,23 @@ mkdir -p specs
 
 ## Step 4: Reality Check
 
-Two-part verification that specs match the original request:
-
-### Part 1: Agent Pre-Check
-
-Mentally compare the generated specs against the user's original request:
-- Does every requirement from the original ask have at least one spec scenario?
-- Are there specs that address things the user didn't ask for? (scope creep)
-- Are the `@depends-on` relationships correct?
-- Are `@parallel-risk` tags consistent? (mutual references, no phantom slugs)
-- For greenfield: does the system spec + feature specs cover the entire application?
-- **For UI-facing specs**: does a component mockup exist for each one? Run `ls specs/mockups/` to verify. If any UI-facing spec is missing its mockup, STOP — go back to Step 2.85C and generate it before continuing.
-
-### Part 1.5: CUJ Coverage Analysis (MANDATORY for multi-spec designs)
-
-Trace every Critical User Journey across ALL specs to find gaps. This is the systematic tool for catching missing specs that logical reasoning misses.
-
-**Process:**
-
-1. **Collect CUJs** — Read the `## Critical User Journeys` section from every spec. For each CUJ, combine the "Full Journey" column with the spec slug to build a master CUJ table:
+**Dispatch the product-owner role agent for the sign-off check.** The PO agent compares generated specs against the original request, flags scope creep, traces CUJ coverage across all specs, and presents the result to the user via AskUserQuestion.
 
 ```
-| CUJ | Steps in This Feature | Specs Covering Each Step |
-|-----|----------------------|--------------------------|
-| New user onboarding | Landing → Register → Verify → Login → Role select → Dashboard | auth.md, user-profiles.md, ??? (dashboard has no spec!) |
-| Log a workout | Open app → Navigate → Start workout → Log sets → Complete → History | auth.md, workout-tracking.md (navigation has no spec!) |
+Agent tool (subagent_type: product-owner, run_in_background: false):
+"You are running the Step 4 reality check. Read the user's original ask (your Step 2 handoff has the
+resolved questions), every spec generated in Step 3, and the application-architect handoff. Verify:
+every requirement maps to a scenario; no scope creep; @depends-on/@parallel-risk integrity; UI specs
+have mockups; CUJ coverage if multi-spec. Present specs to user via AskUserQuestion. Produce handoff at:
+  specs/handoffs/step-4-<epic-slug>-product-owner.html
+End with PASS (proceed to approval) or BLOCKED (regenerate affected specs)."
 ```
 
-2. **Trace each journey end-to-end** — For every step in every CUJ, verify:
-   - A spec exists that covers this step
-   - The spec has scenarios for the user action at this step
-   - The spec's Technical Context includes the API endpoint or navigation target needed
+When the agent returns with PASS, mark all specs `@status(approved)` and proceed to architecture documentation. With BLOCKED, regenerate affected specs and re-dispatch.
 
-3. **Flag gaps** — Any CUJ step with no covering spec is a MISSING SPEC. Present these gaps to the user:
-   ```
-   "CUJ gap analysis found missing coverage:
-   
-   Journey: 'Log a workout'
-   Missing: No spec covers navigation from dashboard to workout screen
-   Missing: No spec covers the workout selection screen (user picks which workout to start)
-   
-   Journey: 'Trainer reviews client'
-   Missing: No spec covers the client detail view (trainer drills into one client)"
-   ```
-
-4. **Generate missing specs** — For each gap, generate a new spec (with its own `## Critical User Journeys` section per the spec generation rules) and re-run the CUJ trace. Repeat until all journeys are fully covered.
-
-**Skip when:** Decomposition has exactly one entry (single-spec design), OR no entry is tagged `@layer(ui)` or `@layer(full-stack)`. Deterministic check: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results, or the decomp map has one row.
-
-### Part 2: User Confirmation
-
-Present the specs to the user via AskUserQuestion:
-
-```
-"Here are the Gherkin specs I generated for your request:
-
-[List each spec file with a 1-line summary]
-- specs/feature-a.md — [summary] (X scenarios)
-- specs/feature-b.md — [summary] (Y scenarios, depends on feature-a)
-
-[Dependency graph showing build order and parallel lanes]
-Build order:
-  feature-a          (no dependencies)
-  feature-b          (depends on: feature-a)
-  feature-c          (no dependencies) ▐ parallel with feature-a
-  ⚠ feature-a and feature-c: @parallel-risk — both modify server.ts
-
-[Note any gaps or assumptions identified in Part 1]
-
-Do these specs capture what you asked for? You can also request re-decomposition
-('these two should be one spec' or 'this should be split further')."
-```
-
-Options:
-- "Yes, approve these specs" → Update all specs to `@status(approved)`, proceed to beads setup
-- "No, needs changes" → Ask clarifying questions about what's wrong, regenerate affected specs, re-check
-- User provides specific feedback → Incorporate, regenerate, re-check
+**Orchestrator-level gates that don't require dispatch:**
+- For UI-facing specs: `ls specs/mockups/` must show a mockup per spec. If missing, STOP — return to Step 2.85.
+- For greenfield: confirm `specs/system.md` exists.
 
 **BLOCK until user confirms.** Do not proceed to architecture documentation with unapproved specs.
 

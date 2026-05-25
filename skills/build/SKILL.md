@@ -266,114 +266,34 @@ For each spec in build order (auto-iterates):
 
 ### Step 3.1: Investigate
 
-#### Layer Detection (MANDATORY)
+**Layer Detection (orchestrator's job).** Read the spec's `@layer(...)` tag — this drives which role agents you dispatch downstream.
 
-Read the spec's `@layer(...)` tag at the top of the file. This is the authoritative signal for what must be built:
+| `@layer(...)` | Implementer | Required Step-3.3 reviewers |
+|---|---|---|
+| `api` | backend-engineer | security + devops + data |
+| `ui` | frontend-engineer | security + devops + (data if `@touches-data`) |
+| `full-stack` | backend-engineer then frontend-engineer | security + devops + data |
+| `cli` | backend-engineer | security + devops |
+| `infra` | backend-engineer | security + devops |
 
-| `@layer(...)` value | What Must Be Built |
-|---|---|
-| `@layer(api)` | Route handlers, middleware, DB queries, API tests. No UI work. |
-| `@layer(ui)` | Components, screens, navigation, component tests. No backend work. |
-| `@layer(full-stack)` | BOTH API and UI, wired together. Neither alone is complete. |
-| `@layer(cli)` | CLI commands and tests. No UI, no HTTP API. |
-| `@layer(infra)` | Configuration, build, deploy, DNS. Usually no test code beyond smoke checks. |
+For full-stack specs, `@status(verified)` requires BOTH layers implemented and wired. `require-handoff-artifact.sh` enforces this.
 
-**Backward-compat fallback** (specs missing `@layer(...)`): infer from `## UI Design` section presence (→ `ui` or `full-stack`) and Technical Context API entries (→ `api` or `full-stack`). Log the inferred layer and write the tag back to the spec.
-
-**Log the detected layers:**
-```bash
-bd comments add [epic-id] "LAYER DETECTION: specs/<feature-slug>.md
-
-Layers required: [API | UI | Full-stack (API + UI)]
-API signals: [endpoints listed in Technical Context — or N/A]
-UI signals: [screens/buttons/forms in scenarios, mockup exists — or N/A]
-
-Build plan: [API-first then UI | UI-only | API-only]"
-```
-
-**CRITICAL**: For full-stack specs, `@status(verified)` requires BOTH layers implemented, tested, and wired together. Building only the API layer and marking verified is a **process violation** — the spec scenarios describe user-visible behavior that requires UI implementation. This was the root cause of the trainr incident where 15 full-stack specs were marked verified with zero mobile UI code.
-
-Read the spec file for context. **If the spec has a `## UI Design` section**, also read:
-- `PRODUCT.md` — brand personality, register (brand vs product), anti-references, design principles
-- `DESIGN.md` — color tokens (OKLCH), typography scale, spacing system, component patterns
-- The component mockup in `specs/mockups/<feature-slug>/` (Storybook components) or `specs/mockups/<feature-slug>.html` (standalone HTML)
-- The architecture overview at `specs/arch.md` (if it exists)
-- The mock fidelity inventory (what's captured in mockup vs. deferred to build)
-- The quality results from `/impeccable critique` and `/impeccable detect` (noted in the UI Design section)
-
-**The mockup is the visual starting point for implementation** — not a reference to glance at. For UI-facing specs, the implementation should start FROM the mockup component code, wiring in real data and behavior. Do not implement UI from scratch when a mockup exists.
-
-Then dispatch investigation agents:
+**Dispatch codebase-investigator:**
 
 ```
 Agent tool (subagent_type: hyperpowers:codebase-investigator):
-"Find existing patterns for [what this spec describes].
-Check: similar implementations, naming conventions, error handling,
-test patterns, and existing code that does something similar.
-Spec context: [paste key details — feature description, scenarios, technical context]
-System spec context: [if specs/system.md exists, paste API conventions, data model]
-Dependency specs: [if @depends-on specs exist, paste their Technical Context — these are interfaces to integrate with]
-UI Design context: [if spec has ## UI Design section, paste it — typography, color palette, layout strategy, mockup path]
-Report file paths, line numbers, and patterns to follow."
+"Find existing patterns for specs/<slug>.md. Report file paths, line numbers, conventions. Read the
+PO handoff (step-2-<slug>-product-owner.html) and application-architect handoff (step-2.5-...) for
+context. If the spec has a ## UI Design section, also read PRODUCT.md, DESIGN.md, and the mockup."
 ```
 
-For specs involving external APIs/libraries/unfamiliar patterns, also dispatch internet-researcher in parallel.
+For specs involving external APIs/libraries/unfamiliar patterns, also dispatch `hyperpowers:internet-researcher` in parallel.
 
-#### Log investigation findings
+**Log findings into the spec.** Add a `## Investigation Findings` section with ≥3 lines including ≥2 file:line refs and a Decision: line. `hooks/require-investigation-findings.sh` blocks `@status(implemented)` writes without this section. Also log a summary as a bd comment on the epic for the audit trail.
 
-Write findings as an `## Investigation Findings` section in the spec file itself, AND log a summary as a bd comment on the epic:
+**Refinement.** Invoke `hyperpowers:sre-task-refinement` to surface boundary conditions, error paths, and at least 1 domain edge case not in the spec.
 
-```markdown
-## Investigation Findings
-
-- src/auth/middleware.ts:42 — existing session validation uses verifyJwt() with iss/aud claims
-- src/routes/*.ts — all routes use the consistent { error: { code, message } } response shape
-- specs/user-data-model.md (@depends-on) — user.id is UUID v4, not bigint
-Decision: extend middleware.ts rather than creating a parallel auth path
-```
-
-```bash
-bd comments add [epic-id] "INVESTIGATION FINDING for specs/<feature-slug>.md:
-
-Patterns discovered:
-- [Pattern at file:line — what it does]
-- [Convention: naming, error handling, response format]
-- [Integration points from dependency specs]
-
-Decision: [How findings influence implementation]"
-```
-
-**Why both?** The spec section is the deterministic evidence (`hooks/require-investigation-findings.sh` blocks `@status(implemented)` writes without it). The bd comment is the audit trail for the epic.
-
-**Quality minimum:** At least 3 non-blank lines under `## Investigation Findings` (the hook's floor), including 2 specific file paths with line numbers and 1 concrete convention.
-
-**Skip when:** Spec is tagged `@trivial` (typo/rename/config). The hook auto-allows `@trivial` specs through. For any other skip reason, add `@investigation-skip(<reason>)` to the spec — but this should be rare and the reason persists as documentation.
-
-#### Create beads task (after investigation)
-
-Now that you understand the codebase, create an informed implementation task:
-
-```bash
-bd create "Implement: [feature name]" --type feature --priority 2 \
-  --description "Implement all scenarios in specs/<feature-slug>.md
-
-Files to modify:
-- [file:line — what to change, based on investigation findings]
-- [file:line — what to add]
-
-Patterns to follow:
-- [convention discovered during investigation]
-
-Integration points:
-- [interfaces from dependency specs]" \
-  --design "Spec: specs/<feature-slug>.md"
-bd dep add [task-id] [epic-id] --type parent-child
-bd update [task-id] --status=in_progress
-```
-
-**REQUIRED SUB-SKILL:** Invoke `hyperpowers:sre-task-refinement` via the Skill tool to refine the task before implementation. The refinement must address: boundary conditions, error paths, concurrent/async edge cases, environment differences. Must identify at least 1 domain-specific edge case NOT in the spec.
-
-**Why tasks are created here (not in /design):** Investigation reveals the real implementation context — file paths, patterns, integration points. Tasks created before investigation are guesswork. Tasks created after investigation are actionable.
+**Skip the investigation findings section when:** Spec is `@trivial`. Otherwise use `@investigation-skip(reason)` only when the work is so derivative that codebase investigation adds nothing — rare.
 
 #### Step 3.1.1: Data Architect Investigation (when applicable)
 
@@ -464,112 +384,23 @@ Update spec status: `@status(approved)` → `@status(implemented)` when implemen
 
 ### Step 3.2.5: API Wiring Checkpoint (Full-stack specs)
 
-**BLOCKING GATE for full-stack specs.** After UI components pass GREEN (they render correctly), BEFORE verification can begin, every component must be wired to the real data layer. Components with hardcoded/mock data CANNOT proceed to Step 3.3.
+**BLOCKING GATE for full-stack specs.** The frontend-engineer agent owns the wiring procedure (its Phase 3: replace mocks with real API calls, follow the project's API client pattern, wire loading/error/empty states, no hardcoded data). The orchestrator's job is to verify the agent's handoff documents wiring evidence.
 
-**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)`. Deterministic check: `grep -E '@layer\((api|cli|infra)\)' specs/<slug>.md`. UI and full-stack specs MUST run this step — there is no "single-layer" judgment override.
+**Skip when:** Spec is `@layer(api|cli|infra)` (no UI to wire). Deterministic check: `grep -E '@layer\((api|cli|infra)\)' specs/<slug>.md`.
 
-**Process:**
+**Verify wiring evidence in the frontend-engineer handoff.** The `findings` section must contain a "Wiring evidence" table mapping each interactive element to the API endpoint it calls. Any UNWIRED element or remaining hardcoded mock data = CRITICAL — re-dispatch the agent.
 
-1. **Read the spec's `## Interaction Map`** — this is the wiring checklist. Every row is an interactive element that must be connected. If no Interaction Map exists, build one from the Technical Context endpoints + spec scenarios (and note in the spec as a living document update).
-2. **Read the system spec / arch.md** — find the project's API client pattern (e.g., centralized `api.ts`, Supabase client, WatermelonDB models, tRPC client). Components MUST use this pattern — no ad-hoc fetch calls that bypass the established architecture.
-3. **For EACH row in the Interaction Map:**
-   - **Create or import** the API service function following the project's pattern
-   - **Replace ALL hardcoded/mock data** with real data layer calls (API, database, or local-first store)
-   - **Add loading states** — skeleton screens or spinners while data loads
-   - **Add error states** — user-friendly messages when API calls fail
-   - **Add empty states** — guidance when no data exists yet
-   - **Wire response data** back to component state — UI updates from real responses, not optimistic local state alone
-4. **Run the app** (browser, simulator, or dev server) and verify each interactive action hits the real data layer. Tap every button. Submit every form. Navigate every tab. Confirm data persists across sessions.
-5. **Scan for remaining hardcoded data** — search the implementation files for:
-   - Hardcoded arrays/objects that should come from the API (`const workouts = [...]`)
-   - Mock data that was never replaced (`// TODO: replace with API call`)
-   - `console.log` or `alert()` instead of real actions
-   - Local state dispatches with no corresponding API call
-6. **Log wiring evidence:**
-
-```bash
-bd comments add [epic-id] "WIRING CHECKPOINT: specs/<feature-slug>.md
-
-API client pattern: [pattern from system spec — e.g., 'mobile/src/services/api.ts']
-Components wired:
-- [Component: WorkoutScreen] → 3 endpoints wired
-  - StartWorkout button → POST /api/v1/workout-logs — WIRED
-  - LogSet form → PATCH /api/v1/workout-logs/:id — WIRED
-  - History tab mount → GET /api/v1/workout-logs — WIRED
-- [Component: NutritionScreen] → 2 endpoints wired
-  - FoodSearch input → GET /api/v1/nutrition/food/search — WIRED
-  - LogEntry form → POST /api/v1/nutrition/entries — WIRED
-
-Hardcoded data remaining: NONE | [list of files with hardcoded data]
-Loading states: [all present | missing in: list]
-Error states: [all present | missing in: list]
-Empty states: [all present | missing in: list]
-
-Verdict: PASS | FAIL"
-```
-
-**Severity:**
-- Any UNWIRED interactive element = **CRITICAL** (`wiring-gap`). Cannot proceed.
-- Any remaining hardcoded mock data = **CRITICAL** (`hardcoded-data`). Cannot proceed.
-- Missing loading/error/empty states = **IMPORTANT**. Fix before proceeding unless explicitly deferred in spec.
-- Wrong API client pattern (ad-hoc fetch instead of project's service layer) = **IMPORTANT**. Refactor to use the established pattern.
-
-**This step produces evidence that Step 3.3f (API Integration Check) will verify independently.** Step 3.2.5 is "do the wiring." Step 3.3f is "verify the wiring was done correctly." Both are required — 3.2.5 prevents skipping the work, 3.3f prevents sloppy work.
+Step 3.3f (API Integration Check) verifies the same surface independently from the reviewer's side.
 
 ### Step 3.2.6: Dead UI Scan (All UI-facing specs)
 
-**BLOCKING GATE.** After wiring (3.2.5) and before verification (3.3), scan ALL implementation files for interactive elements that have no handler. This catches the pattern where mockup code is carried into implementation without adding functionality.
+**BLOCKING GATE.** Scan implementation files for interactive elements with no handler (buttons without `onPress`/`onClick`, empty `() => {}` handlers, `Alert('TODO')`, navigation that doesn't navigate, forms without `onSubmit`). This catches mockup-to-implementation handoff failures.
 
-**Cross-reference with the spec's `## Interaction Map`** — every UI element listed in the map must exist in the implementation WITH a functional handler. Any Interaction Map row with no corresponding handler is CRITICAL.
+The frontend-engineer agent SHOULD have caught these during REFACTOR; this is the orchestrator's belt-and-suspenders check. Cross-reference the spec's `## Interaction Map` — every row needs a functional handler in the implementation.
 
-**Search the implementation source files for:**
+Log a `DEAD UI SCAN: ... Verdict: PASS|FAIL` bd comment with element counts. Any dead element = CRITICAL. Decorative elements (icons, labels, dividers) are fine.
 
-```
-# Buttons/pressables with no handler
-- <Button> or <Pressable> or <TouchableOpacity> without onPress
-- <button> without onClick
-- handler functions that are empty: `onPress={() => {}}` or `onPress={undefined}`
-- handler functions that only log: `onPress={() => console.log('pressed')}`
-
-# Forms with no submission
-- <form> without onSubmit
-- Submit buttons that don't trigger form submission
-- Input fields with no onChange/onChangeText
-
-# Navigation elements with no navigation
-- Tab items without navigation handler
-- Links without href or onPress
-- "See more" / "View all" text that isn't tappable
-
-# Interactive elements with placeholder behavior
-- Alert('TODO') or Alert('Coming soon')
-- console.log() as the only action
-- Comments like // TODO: implement or // placeholder
-```
-
-**Log results:**
-
-```bash
-bd comments add [epic-id] "DEAD UI SCAN: specs/<feature-slug>.md
-
-Interactive elements scanned: [N]
-Functional (has real handler): [N]
-Dead (no handler / empty handler / console.log only): [N]
-
-Dead elements found:
-- [file:line] <Button 'Save'> — no onPress handler
-- [file:line] <Pressable 'Delete'> — onPress={() => {}}
-- [file:line] <TextInput 'Search'> — no onChangeText
-
-Verdict: PASS | FAIL"
-```
-
-**Severity:**
-- Any interactive element with no handler = **CRITICAL** (`dead-ui`). Cannot proceed.
-- Any handler that only logs/alerts = **CRITICAL** (`placeholder-handler`). Cannot proceed.
-- Decorative elements without handlers are fine (icons, labels, dividers).
-
-**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)`. Deterministic check: `grep -E '@layer\((api|cli|infra)\)' specs/<slug>.md`. UI and full-stack specs run this scan.
+**Skip when:** `@layer(api|cli|infra)`.
 
 ### Step 3.3: Verify
 
@@ -670,139 +501,16 @@ Include EXPLAIN output for new queries; cite file:line for every concern."
 
 #### Step 3.3d: Visual Fidelity + Design Quality Check (UI-facing specs only)
 
-For specs with a `## UI Design` section, run a comprehensive visual verification pipeline. **All six sub-steps (D1-D6) are required regardless of timeline.** Time pressure does not reduce the number of steps — each catches problems the others miss.
+The frontend-engineer agent's REFACTOR phase (Phase 4: visual fidelity self-audit) and the uiux-designer agent's gate-orchestration (the 5 `/impeccable` gates) together cover this step. Re-running them here is the orchestrator's "trust but verify" pass:
 
-**D1. Visual Fidelity Check**
+1. Confirm the frontend-engineer handoff's "Visual fidelity checklist" `<dl>` shows PASS for typography, color, layout, states, responsive.
+2. Confirm the `## UI Design` section in the spec lists the 5 Skill invocations (`critique`, `audit`, `harden`, `clarify`, `adapt`). `hooks/claim-vs-call-audit.sh` verifies they actually fired in this session.
+3. If any of those gates returned weakness findings, the uiux-designer should have applied the appropriate `/impeccable` enhancement (`bolder`, `colorize`, `typeset`, `animate`, etc.) and re-run `critique`.
+4. Log a `VISUAL FIDELITY + DESIGN QUALITY CHECK: ... Verdict: PASS|FAIL` bd comment with the per-axis verdicts copied from the handoffs.
 
-1. **Read the mockup** — open `specs/mockups/<feature-slug>/` or `specs/mockups/<feature-slug>.html`
-2. **Read PRODUCT.md and DESIGN.md** — load the design system tokens and brand context
-3. **Start the dev server** — view the implemented component in a browser
-4. **Compare against design decisions** from the spec's `## UI Design` section:
-   - Typography: correct fonts, sizes, hierarchy from DESIGN.md?
-   - Color palette: correct OKLCH tokens, not browser defaults?
-   - Layout/spacing: matches mockup spatial composition?
-   - CSS custom properties: resolving correctly (not undefined/fallback)?
-   - Key states: default, empty, error — all styled, not just functional?
-   - Aesthetic direction: matches the chosen visual direction and register?
-5. **Check for "raw HTML" symptoms:**
-   - Unstyled form elements (browser defaults)
-   - Missing hover/focus states
-   - No responsive behavior
-   - Generic fonts (system defaults instead of chosen typeface)
-   - CSS variables referenced but not defined
-   - Flat, lifeless layout with no visual hierarchy
+Visual fidelity failure OR any unaddressed CRITICAL gate finding is **CRITICAL** for the build — re-dispatch the relevant agent.
 
-**D2. Critique** (`/impeccable critique`) — evaluates against **design principles**
-
-Run a dual assessment on the implemented component:
-- **LLM design review**: visual hierarchy, readability, alignment with PRODUCT.md brand personality and design principles
-- **27 deterministic detection rules**: AI slop signals, overused patterns, accessibility violations, design system drift
-- **Nielsen heuristic scoring**: rate against the 10 usability heuristics
-- **Persona test**: Would target users from PRODUCT.md be satisfied?
-
-Read PRODUCT.md before running critique — the brand personality and anti-references define what "good" means for this project.
-
-**D3. Audit** (`/impeccable audit`) — Technical quality
-
-Run technical quality checks on the implementation:
-- Accessibility: contrast ratios, focus indicators, screen reader support, touch targets
-- Performance: image sizes, animation cost, render complexity, bundle impact
-- Responsive behavior: breakpoints, overflow, device-specific interactions
-
-Accessibility violations are **CRITICAL** — fix before proceeding.
-
-**D4. Harden** (`/impeccable harden`) — Production readiness
-
-Verify the implementation handles non-happy-path states:
-- Error states: API failures show user-friendly messages, not blank screens
-- Empty states: zero-data views guide users toward first action
-- Edge cases: long text, maximum items, slow connections, offline
-- Loading states: skeleton screens or spinners, not frozen UI
-
-Missing error/empty states are **IMPORTANT** — fix before proceeding.
-
-**D5. Enhancement (if needed)**
-
-If quality checks found the implementation is bland, generic, losing fidelity, or has other design weaknesses:
-
-| Weakness | Command | Action |
-|----------|---------|--------|
-| Lost personality from mockup | `/impeccable bolder` | Amplify back to mockup's level |
-| Needs extraordinary impact | `/impeccable overdrive` | Push past conventional limits (brand register) |
-| Colors flattened | `/impeccable colorize` | Restore OKLCH palette depth |
-| Typography degraded | `/impeccable typeset` | Fix type scale, hierarchy, rhythm |
-| Feels static/dead | `/impeccable animate` | Add functional motion from mock fidelity inventory |
-| Spacing/rhythm off | `/impeccable layout` | Restore grid, alignment, negative space |
-| Too loud/aggressive | `/impeccable quieter` | Tone down to appropriate level |
-| Too complex | `/impeccable distill` | Strip to essence (product register) |
-
-After enhancement, re-run critique to verify the fix. Maximum 2 enhancement-critique cycles.
-
-**D6. Clarify** (`/impeccable clarify`) — UX copy pass
-
-Review all user-facing text in the implementation:
-- Button labels: action-oriented ("Save changes" not "Submit")
-- Error messages: helpful and specific ("Email already registered" not "Error 409")
-- Empty states: guide toward action ("Add your first workout" not "No data")
-- Microcopy: tooltips, placeholders, confirmation dialogs
-
-**D7. Adapt** (`/impeccable adapt`) — Responsive verification
-
-Verify the implementation works across devices:
-- Mobile (375px): layout collapses gracefully, touch targets adequate
-- Tablet (768px): uses space effectively, not just stretched mobile
-- Desktop (1440px+): no awkward whitespace, content appropriately constrained
-
-**D8. Polish** (`/impeccable polish`) — Final design system alignment
-
-Final quality pass — checks DESIGN.md token alignment (read DESIGN.md before running):
-- Spacing consistency (all values from DESIGN.md scale)
-- Typography hierarchy (no orphan sizes, consistent line-height)
-- Color usage (no off-palette colors, proper contrast)
-- Interaction states (hover, focus, active, disabled — all styled)
-- Motion (entrances, transitions, feedback — appropriate to register)
-
-**D9. Optimize** (`/impeccable optimize`) — UI performance
-
-Diagnose and fix performance issues in the implementation:
-- Rendering: unnecessary re-renders, heavy components, virtualization for lists
-- Animations: GPU-accelerated vs. layout-thrashing, reduced motion support
-- Assets: image optimization, lazy loading, code splitting
-
-Performance issues are **IMPORTANT** for mobile apps, **MINOR** for admin dashboards.
-
-**D10. Log Results**
-
-```bash
-bd comments add [epic-id] "VISUAL FIDELITY + DESIGN QUALITY CHECK: specs/<feature-slug>.md
-
-Mockup: specs/mockups/<feature-slug>/
-Register: [brand/product]
-
-Visual Fidelity:
-  Typography: [PASS/FAIL — details]
-  Color palette: [PASS/FAIL — details]
-  Layout/spacing: [PASS/FAIL — details]
-  CSS tokens resolving: [PASS/FAIL — details]
-  Key states styled: [PASS/FAIL — details]
-  Overall aesthetic match: [PASS/FAIL — details]
-
-Design Quality:
-  Critique: [PASS/FAIL — score, issues found]
-  Audit: [PASS/FAIL — a11y, performance, responsive]
-  Harden: [PASS/FAIL — error/empty/edge states]
-  Clarify: [PASS/FAIL — UX copy quality]
-  Adapt: [PASS/FAIL — responsive across viewports]
-  Enhancement applied: [none / commands used]
-  Polish: [PASS/FAIL — design system alignment]
-  Optimize: [PASS/FAIL — performance]
-
-Verdict: PASS | FAIL"
-```
-
-Visual fidelity failure OR design quality failure is **CRITICAL** — tests passing with ugly or generic UI means the design phase was wasted. Fix before proceeding.
-
-**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)` AND does NOT have a `## UI Design` section. Deterministic check: `grep -E '@layer\((api|cli|infra)\)' specs/<slug>.md && ! grep -q '^## UI Design' specs/<slug>.md`. Specs with a `## UI Design` section MUST run D1–D10 regardless of layer tag (mockup exists → visual fidelity matters).
+**Skip when:** `@layer(api|cli|infra)` AND no `## UI Design` section. Specs with `## UI Design` always run, regardless of layer tag.
 
 #### Step 3.3d.1: Functional UI Test (BLOCKING GATE — enforced by hook)
 
@@ -1049,88 +757,11 @@ Any failing CUJ is CRITICAL — surface as a blocking <aside>."
 
 When the agent returns, verify the handoff's `acceptance-criteria` confirm every CUJ has ≥1 e2e test and all pass.
 
-**Reference procedure (kept for context — the agent owns the details):**
+Log a `E2E PLAYWRIGHT TESTS: CUJ Coverage ... Verdict: PASS|FAIL` bd comment on the epic with per-journey verdicts copied from the qa-engineer handoff.
 
-1. **Collect CUJs** — Read the `## Critical User Journeys` section from every spec in the epic. Build a master CUJ list.
+Any failing CUJ is **CRITICAL** — the journey represents what real users do, and a failing CUJ means the app is broken for the user even if every unit test passes. Re-dispatch qa-engineer after fixes.
 
-2. **Set up Playwright** (if not already configured):
-   ```bash
-   # Check if Playwright is installed
-   npx playwright --version 2>/dev/null || npx playwright install
-   ```
-   If no Playwright config exists, create a minimal `playwright.config.ts` for the project.
-
-3. **Generate e2e test files** — One test file per CUJ, placed in `e2e/` or `tests/e2e/`:
-
-   ```typescript
-   // e2e/log-a-workout.spec.ts
-   // CUJ: Log a workout
-   // Journey: Open app → Login → Navigate to workouts → Start workout → Log sets → Complete → View history
-
-   import { test, expect } from '@playwright/test';
-
-   test('CUJ: Log a workout end-to-end', async ({ page }) => {
-     // Step 1: Login (from auth spec)
-     await page.goto('/login');
-     await page.fill('[data-testid="email"]', 'client@test.com');
-     await page.fill('[data-testid="password"]', 'testpassword');
-     await page.click('[data-testid="login-button"]');
-     await expect(page).toHaveURL('/dashboard');
-
-     // Step 2: Navigate to workouts (from navigation/dashboard spec)
-     await page.click('[data-testid="nav-workouts"]');
-     await expect(page).toHaveURL('/workouts');
-
-     // Step 3: Start workout (from workout-tracking spec)
-     await page.click('[data-testid="start-workout"]');
-     await expect(page.locator('[data-testid="workout-timer"]')).toBeVisible();
-
-     // Step 4: Log a set (from workout-tracking spec)
-     await page.fill('[data-testid="reps-input"]', '8');
-     await page.fill('[data-testid="weight-input"]', '185');
-     await page.click('[data-testid="log-set"]');
-     await expect(page.locator('[data-testid="set-list"]')).toContainText('8 × 185');
-
-     // Step 5: Complete workout (from workout-tracking spec)
-     await page.click('[data-testid="complete-workout"]');
-     await expect(page.locator('[data-testid="workout-complete-confirmation"]')).toBeVisible();
-
-     // Step 6: Verify in history (from workout-tracking spec)
-     await page.click('[data-testid="nav-history"]');
-     await expect(page.locator('[data-testid="workout-history-list"]')).toContainText('today');
-   });
-   ```
-
-4. **Run e2e tests against the dev server:**
-   ```bash
-   npx playwright test
-   ```
-
-5. **Log results:**
-   ```bash
-   bd comments add [epic-id] "E2E PLAYWRIGHT TESTS: CUJ Coverage
-
-   CUJs tested:
-   - Log a workout: PASS | FAIL — [details]
-   - Trainer reviews client: PASS | FAIL — [details]
-   - New user onboarding: PASS | FAIL — [details]
-
-   Total CUJs: [N]
-   Passing: [N]
-   Failing: [N]
-
-   Verdict: PASS | FAIL"
-   ```
-
-**Severity:** Any failing CUJ = **CRITICAL**. The whole point of CUJs is that they represent what real users actually do. A failing CUJ means the app is broken for the user, even if every unit test passes.
-
-**What e2e tests catch that unit tests miss:**
-- Buttons wired to TODO/stub functions (caught because the journey doesn't progress)
-- Navigation that doesn't work (caught because page URL doesn't change)
-- Data that doesn't persist (caught because history page is empty)
-- Cross-feature integration failures (caught because features don't connect)
-
-**Skip when:** No spec in the epic is tagged `@layer(ui)` or `@layer(full-stack)`. Deterministic check across all epic specs: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no spec belonging to this epic. Single-spec UI/full-stack epics still run e2e — "single-spec" alone is not sufficient to skip.
+**Skip when:** No spec in the epic is tagged `@layer(ui)` or `@layer(full-stack)`. Deterministic check: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no specs in this epic. Single-spec UI/full-stack epics still run e2e — "single-spec" alone is not sufficient to skip.
 
 ### Step 4.2: Final Verification + Release Coordination
 

@@ -95,93 +95,41 @@ If `specs/system.md` exists, read it first — it provides the foundation.
 
 ## Step 3: Generate Architecture Document
 
-Generate `specs/arch.md` with a structured overview:
+**Dispatch the application-architect role agent.** The agent reads the approved specs, the PO handoff, and `specs/system.md`, then produces the content for `specs/arch.md` — component map, data flow, tech stack rationale, numbered design decisions, and (for full-stack projects) the aggregated Interaction Contract table.
 
-```markdown
-# Architecture: [Project/Epic Name]
-
-## Overview
-[2-3 sentence summary of the system and its purpose]
-
-## System Architecture
-[High-level description of how components interact]
-- Component responsibilities
-- Data flow between components
-- External service integrations
-- Key architectural decisions and rationale
-
-## Component Map
-| Component | Responsibility | Depends On | Spec |
-|-----------|---------------|------------|------|
-| [name] | [what it does] | [dependencies] | specs/feature-slug.md |
-
-## Data Flow
-[Description of how data moves through the system — request lifecycle, event flow, etc.]
-
-## Tech Stack
-[Framework, database, auth, deployment — pulled from system spec if it exists]
-
-## Key Design Decisions
-| Decision | Rationale | Alternatives Considered |
-|----------|-----------|------------------------|
-| [choice] | [why] | [what else was evaluated] |
-
-## Interaction Contract (Full-stack projects)
-
-Global mapping of ALL UI interactions to their backend endpoints, aggregated from per-spec `## Interaction Map` sections. This is the master wiring contract — /build uses it to verify cross-spec integration.
-
-| Spec | UI Element | User Action | API Endpoint | Method | Expected Result |
-|------|-----------|-------------|-------------|--------|----------------|
-| auth.md | Login form | submit | /api/auth/login | POST | Returns token, navigates to dashboard |
-| auth.md | Logout btn | press | /api/auth/logout | POST | Clears session, navigates to login |
-| workout-tracking.md | Start Workout btn | press | /api/v1/workout-logs | POST | Creates log, opens active workout |
-| workout-tracking.md | Log Set form | submit | /api/v1/workout-logs/:id | PATCH | Adds set, clears form |
-| nutrition-tracking.md | Food Search input | type | /api/v1/nutrition/food/search | GET | Shows matching foods |
-| ... | ... | ... | ... | ... | ... |
-
-**This table is auto-generated from the per-spec Interaction Maps.** If a spec has interactive UI elements but no Interaction Map section, flag it as incomplete.
+```
+Agent tool (subagent_type: application-architect, run_in_background: false):
+"You are running Step 4.5 (architecture documentation) for this epic. Read every approved spec, the
+PO handoff if present, and specs/system.md. Produce the arch.md content (component map, data flow,
+tech stack, design decisions, interaction contract aggregated from per-spec Interaction Maps).
+Produce your handoff at:
+  specs/handoffs/step-4.5-<epic-slug>-application-architect.html
+The orchestrator (this skill) assembles specs/arch.md from your handoff's findings."
 ```
 
-**Scaling rules:**
-- For greenfield projects, `arch.md` supplements `specs/system.md` — the system spec defines *what* the system is, `arch.md` shows *how* it's structured.
-- For non-greenfield work, `arch.md` focuses on the architecture of the new/changed components and how they integrate with the existing system.
-- For simple features (1-2 specs, no external integrations), keep arch.md concise — a short overview, component map, and one or two design decisions.
+When the agent returns, copy its `findings` content into `specs/arch.md`. Preserve the agent's structure (component map table, design-decisions list, data-flow narrative).
+
+**Scaling:** For simple features (1-2 specs, no integrations), arch.md is concise — the agent calibrates to scope.
 
 ## Step 4: Generate Architecture Diagrams
 
-Generate draw.io diagrams in `specs/diagrams/`:
+**Dispatch the devops-architect role agent** for the deployment topology and the application-architect's `<svg>` for the system diagram. The orchestrator's job is to convert the agent's diagram content into `.drawio` files.
 
-```bash
-mkdir -p specs/diagrams
+```
+Agent tool (subagent_type: devops-architect, run_in_background: false):
+"You are running Step 4.5 (deployment architecture) for this epic. Produce the deployment topology
+(inline <svg> in your handoff is fine — the orchestrator will translate to .drawio), observability
+stack, scaling notes, and failure-recovery section. Produce your handoff at:
+  specs/handoffs/step-4.5-<epic-slug>-devops-architect.html"
 ```
 
-### Required: System Architecture Diagram
+`mkdir -p specs/diagrams` and assemble:
 
-Always generate `specs/diagrams/system-architecture.drawio`:
-- High-level component diagram showing all major parts of the system
-- Clear, labeled boxes for components/services
-- Directional arrows for data flow and dependencies
-- Color coding: blue for existing components, green for new/changed components
-- Include a legend explaining colors and symbols
+- **`specs/diagrams/system-architecture.drawio`** (always) — from application-architect's component map. High-level components, labeled boxes, directional arrows, color coding (blue: existing, green: new/changed), legend.
+- **`specs/diagrams/data-flow.drawio`** (when the system has non-trivial request lifecycle) — from application-architect's data flow narrative.
+- **`specs/diagrams/deployment.drawio`** (when multiple services / infra) — from devops-architect's topology.
 
-### Optional: Additional Diagrams
-
-Generate when the architecture warrants them:
-
-**Data Flow Diagram** (`specs/diagrams/data-flow.drawio`):
-- When the system has non-trivial request lifecycle or event flow
-- Shows the path of data from entry point to storage/output
-- Labels each arrow with the data being transferred
-
-**Deployment Diagram** (`specs/diagrams/deployment.drawio`):
-- When the system involves multiple services, containers, or infrastructure components
-- Shows where components run and how they connect
-- Includes databases, caches, message queues, external services
-
-**Each diagram should:**
-- Be focused — one concept per diagram, not everything crammed into one
-- Use consistent styling across all diagrams in the project
-- Be readable at a glance — if a diagram needs zooming to read, split it
+**Each diagram:** focused (one concept), consistent styling, readable at a glance.
 
 ## Step 5: Generate Design Overview Page
 

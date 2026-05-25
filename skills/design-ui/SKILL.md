@@ -5,6 +5,8 @@ description: Use after decomposition to generate UI/UX design for user-facing sp
 
 <skill_overview>
 UI/UX design skill that produces component mockups, design system files, and `## UI Design` sections for Gherkin specs. Separates app-level design decisions (run once) from per-screen work (run per spec). Produces `specs/mockups/` artifacts that /build consumes as implementation starting points.
+
+**Role-agent orchestration (experimental branch).** This skill is now the **procedure manual** the `uiux-designer` role agent (`agents/uiux-designer.md`) reads when dispatched by `/design` Step 2.85. The primary invocation path is `Agent(subagent_type: uiux-designer, ...)`, not `Skill(design-ui)` directly. The agent reads this document, invokes the `/impeccable` gates as Skill calls, and produces an HTML handoff. When invoked as a standalone skill (e.g., after `/respec`), this skill behaves identically — the agent's prompt references the same procedure. The handoff path is `specs/handoffs/step-2.85-<slug>-uiux-designer.html`.
 </skill_overview>
 
 <rigidity_level>

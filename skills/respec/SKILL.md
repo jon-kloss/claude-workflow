@@ -138,72 +138,32 @@ Ask focused questions via AskUserQuestion until the change is fully specified. S
 
 ## Step 3: Blast Radius Analysis
 
-Before editing anything, trace the full dependency graph.
+**Dispatch the application-architect role agent.** Blast-radius analysis is structural: walk the `@depends-on`/`@blocks` graph, grep for informal references to the changing contract, classify the change as additive/corrective/contract-breaking, and produce a table of affected specs with the specific edits required. This is the architect's job.
 
-### Read all related specs
-
-```bash
-# Read the target spec (already done in Step 1)
-# Read all specs this one @blocks (downstream dependents)
-# Read all specs this one @depends-on (upstream dependencies)
-# For contract-breaking changes: read the full chain recursively
+```
+Agent tool (subagent_type: application-architect, run_in_background: false):
+"You are running /respec Step 3 (blast radius) for specs/<target-slug>.md. The user wants to change:
+<paste change description from Step 2>. Walk the dependency graph, grep specs/*.md for informal
+references to the changing contract symbols/paths, classify the change, and produce a table of
+affected specs with required edits. Produce your handoff at:
+  specs/handoffs/step-3-<target-slug>-application-architect.html
+End with a recommendation: PROPAGATE (list of specs) or LOCALIZED (target only)."
 ```
 
-### Check for informal references
+When the agent returns, present its blast radius to the user via AskUserQuestion:
 
-Beyond `@depends-on`/`@blocks` tags, grep `specs/` for references to the target spec's contracts (endpoint paths, data shapes, type names). Specs may consume a contract without a formal dependency tag.
-
-```bash
-# Example: if target spec defines POST /api/auth/register
-grep -r "register" specs/ --include="*.md"
-grep -r "error.*string" specs/ --include="*.md"  # if error shape is changing
-```
-
-If informal references are found, treat them as downstream dependencies for blast radius purposes.
-
-### Classify the change
-
-Based on the user's answers and your spec reading:
-
-**Additive:** New scenario added. No existing scenarios modified. Technical Context may expand (e.g., new enum value in a union type) but existing contracts are not broken.
-- Blast radius: target spec only
-- Downstream impact: none (expanding a type union is additive, changing a type shape is contract-breaking)
-- Status regression still required if spec was verified/implemented
-
-**Corrective:** Existing scenario modified. Behavior changes.
-- Blast radius: target spec + downstream specs that reference the corrected behavior
-- Check each downstream spec's scenarios and Technical Context for references to the old behavior
-
-**Contract-breaking:** Technical Context changes — data shapes, API contracts, error response formats, interface signatures.
-- Blast radius: target spec + ALL downstream specs in the `@blocks` chain
-- Every downstream spec's Technical Context and scenarios must be audited for references to the changed contract
-
-### Present blast radius to user
-
-Via AskUserQuestion, present:
 ```
 "Blast radius analysis for [change description]:
 
 Change type: [additive | corrective | contract-breaking]
-
 Target spec: specs/<target>.md (@status(current) -> @status(approved))
-
-Downstream specs affected:
-- specs/<downstream-1>.md — [what changes and why] (@status(current) -> @status(approved))
-- specs/<downstream-2>.md — [no changes needed, contract not referenced]
-
-Upstream specs: [not affected — changes flow downstream only]
-
-Beads tasks that will be affected:
-- beads-XXX (closed) — will be reopened
-- beads-YYY (in_progress) — work partially invalidated, will be flagged
-
-Existing tests: [N] test files for regressed specs will need updating during /build
-
+Downstream specs affected (from architect handoff):
+- specs/<downstream-1>.md — [what changes per architect]
+- ...
 Confirm this is the correct scope?"
 ```
 
-**BLOCK until user confirms.** If user narrows or widens scope, adjust and re-present.
+**BLOCK until user confirms.** If user narrows or widens scope, re-dispatch with the corrected scope and re-present.
 
 ## Step 4: Edit Specs
 
@@ -222,12 +182,22 @@ Confirm this is the correct scope?"
 
 ### Propagate to downstream specs (contract-breaking only)
 
-For each downstream spec in the `@blocks` chain that references the changed contract:
+**Dispatch the role-implementer agent for each affected downstream spec** based on its `@layer`:
+- `@layer(api|cli|infra)` → backend-engineer
+- `@layer(ui)` → frontend-engineer
+- `@layer(full-stack)` → backend-engineer (API portion) + frontend-engineer (UI portion)
 
-1. Update Technical Context to reflect new contract (data shapes, error formats, etc.)
-2. Update scenarios that reference old behavior (Given/When/Then steps using old formats)
-3. Regress `@status` -> `@status(approved)`
-4. Add `@respec` change note
+```
+Agent tool (subagent_type: <backend-engineer|frontend-engineer>, run_in_background: false):
+"You are propagating a contract change to specs/<downstream-slug>.md. The application-architect's
+blast-radius handoff (step-3-<target-slug>-application-architect.html) lists the specific edits
+required. Make those edits: update Technical Context, update scenarios that reference old behavior,
+regress @status to @status(approved), add @respec change note. Produce a brief handoff at:
+  specs/handoffs/respec-<downstream-slug>-<role>.html
+summarizing what changed and citing file:lines in the edited spec."
+```
+
+When the agent returns, verify the diff matches the architect's blast-radius edits and the `@status` was regressed.
 
 **Do NOT propagate when ALL three deterministic checks pass:**
 - **Additive change**: The diff to the upstream spec adds new `### Scenario:` blocks but modifies no existing scenario, no `## Technical Context` API entries, and no `## Interaction Map` entries. Verify with `git diff specs/<upstream-slug>.md` — look for `-` lines on existing scenario/contract sections.
