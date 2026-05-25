@@ -229,10 +229,12 @@ For each downstream spec in the `@blocks` chain that references the changed cont
 3. Regress `@status` -> `@status(approved)`
 4. Add `@respec` change note
 
-**Do NOT propagate when:**
-- The change is additive (new scenario, no contract change)
-- The downstream spec doesn't reference the changed contract
-- The downstream spec is `@status(draft)` (not yet approved — /design handles it)
+**Do NOT propagate when ALL three deterministic checks pass:**
+- **Additive change**: The diff to the upstream spec adds new `### Scenario:` blocks but modifies no existing scenario, no `## Technical Context` API entries, and no `## Interaction Map` entries. Verify with `git diff specs/<upstream-slug>.md` — look for `-` lines on existing scenario/contract sections.
+- **No reference in downstream**: `grep -qE '<changed-contract-symbol>|<changed-endpoint>' specs/<downstream-slug>.md` returns no match. List the specific symbols/paths/endpoints the diff changed and grep each. "Doesn't seem to reference" without running grep is not sufficient.
+- **Downstream is draft**: `grep -q '@status(draft)' specs/<downstream-slug>.md`. /design handles draft specs — they will pick up the new contract when next approved.
+
+If any check is false, propagate.
 
 ### Upstream specs
 

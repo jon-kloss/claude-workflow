@@ -316,7 +316,7 @@ For specs that involve onboarding, welcome flows, empty states, or first-time us
 
 Run this AFTER the quality gates for onboarding-related specs. It adds onboarding-specific design decisions that shape and critique don't cover.
 
-**Skip for:** Non-onboarding specs. Most specs in a cluster won't need this.
+**Skip when:** Spec is NOT tagged `@onboarding`. Deterministic check: `grep -q '@onboarding' specs/<slug>.md`. If a spec is onboarding-related but lacks the tag, add the tag — do not skip by inference.
 
 ### Step 2.4: Present Cluster and Confirm
 
@@ -357,7 +357,7 @@ After all mockups are built, run `/impeccable extract` to pull reusable tokens a
 
 This ensures the design system reflects what was ACTUALLY designed, not just what was planned in Phase 1.
 
-**Skip if:** DESIGN.md was just created via `/impeccable teach` in this session and no new tokens emerged during mockup creation.
+**Skip when:** A bd comment `EXTRACT GATE: no-new-tokens` was logged on the active epic in this session AND DESIGN.md was created via `/impeccable teach` earlier in the same session. Deterministic check: `bd comments <epic-id> | grep -q 'EXTRACT GATE: no-new-tokens'`. The bd comment must be written intentionally — "no new tokens emerged" by claim alone is not sufficient.
 
 ### Step 3.1: Add UI Design Sections
 

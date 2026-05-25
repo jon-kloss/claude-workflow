@@ -89,6 +89,13 @@ print(f'{task_id}|{epic_id}')
 task_id="${ids%%|*}"
 epic_id="${ids##*|}"
 
+# Remove this task from the in-flight verifier list (paired with verifier-dispatch.sh)
+INFLIGHT_FILE="${HOME}/.claude/hooks/state/verifier-inflight.txt"
+if [ -f "$INFLIGHT_FILE" ]; then
+    grep -v "^${task_id}|" "$INFLIGHT_FILE" > "${INFLIGHT_FILE}.tmp" 2>/dev/null || true
+    mv "${INFLIGHT_FILE}.tmp" "$INFLIGHT_FILE" 2>/dev/null || true
+fi
+
 # Extract verdict from result
 verdict="UNKNOWN"
 if [ -n "$result" ]; then

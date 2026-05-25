@@ -61,7 +61,7 @@ Approved specs in specs/
 - When stakeholders need a visual summary of the design
 - User types `/design-arch` directly
 
-**Skip ONLY when ALL three conditions are true:** (1) exactly one spec entry, (2) no `@depends-on`/`@blocks` relationships, (3) the change is a typo fix, rename, or config change. If any condition is false, run the skill. See Skip Criteria in critical_rules for the precise definition.
+**Skip ONLY when ALL three conditions are deterministically true:** (1) `ls specs/*.md | grep -v system.md | wc -l` returns 1, (2) `grep -lE '@depends-on|@blocks' specs/*.md` returns no matches, (3) the single spec is tagged `@trivial`. If any condition is false, run the skill. The third condition is now signaled by the `@trivial` tag — prose claims like "this is just a config change" without the tag are not sufficient.
 </when_to_use>
 
 <the_process>
@@ -361,12 +361,20 @@ Without /design-arch's "update, don't skip" rule, the agent looks at the existin
 
 ## Skip Criteria (Precise Definition)
 
-Skip /design-arch ONLY when ALL of these are true:
-- The decomposition map has **exactly one** spec entry
-- That spec has **no** `@depends-on` or `@blocks` relationships
-- The change is a **typo fix, rename, or config change** (not a behavioral change, not a new feature, not a bug fix that touches architecture)
+Skip /design-arch ONLY when ALL three deterministic checks pass:
 
-If any condition is false, /design-arch runs. "Two small specs" is not trivial. "A bug fix with a dependency" is not trivial. When in doubt, run the skill — concise output for simple work is fine, skipping is not.
+```bash
+# (1) Exactly one spec entry (excluding system.md)
+[ "$(ls specs/*.md 2>/dev/null | grep -v 'system.md' | wc -l)" -eq 1 ]
+
+# (2) No @depends-on or @blocks relationships anywhere
+! grep -qE '@depends-on|@blocks' specs/*.md
+
+# (3) The single spec is tagged @trivial
+grep -q '@trivial' "$(ls specs/*.md | grep -v system.md)"
+```
+
+All three must pass. If any returns false, /design-arch runs. "Two small specs" is not trivial. "A bug fix with a dependency" is not trivial. The qualitative condition is now a `@trivial` tag set during /design — prose claims without that tag are not sufficient to skip.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 

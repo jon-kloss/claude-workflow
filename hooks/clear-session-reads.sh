@@ -7,10 +7,16 @@ set -euo pipefail
 
 READS_DIR="${HOME}/.claude/hooks/state"
 READS_FILE="${READS_DIR}/session-reads.txt"
+AGENTS_FILE="${READS_DIR}/session-agents.log"
+SKILLS_FILE="${READS_DIR}/session-skills.log"
+INFLIGHT_FILE="${READS_DIR}/verifier-inflight.txt"
 
 mkdir -p "$READS_DIR"
 
-# Clear the file (truncate, don't delete - avoids race conditions)
+# Clear the files (truncate, don't delete - avoids race conditions)
 > "$READS_FILE"
+> "$AGENTS_FILE"
+> "$SKILLS_FILE"
+> "$INFLIGHT_FILE"
 
 echo '{}'

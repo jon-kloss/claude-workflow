@@ -61,4 +61,18 @@ print(f'{task_id}|{epic_id}')
 task_id="${ids%%|*}"
 epic_id="${ids##*|}"
 
+# Track in-flight verifier so block-status-during-verification.sh can detect
+# attempts to write @status(verified) before the verifier returns.
+INFLIGHT_DIR="${HOME}/.claude/hooks/state"
+INFLIGHT_FILE="${INFLIGHT_DIR}/verifier-inflight.txt"
+mkdir -p "$INFLIGHT_DIR"
+# Extract spec slug from prompt (best-effort)
+spec_slug=$("$PYTHON" -c "
+import re, sys
+prompt = sys.stdin.read()
+m = re.search(r'specs/([a-z0-9_-]+)\.md', prompt)
+print(m.group(1) if m else '')
+" <<< "$prompt" 2>/dev/null)
+printf '%s|%s|%s\n' "$task_id" "$epic_id" "$spec_slug" >> "$INFLIGHT_FILE"
+
 json_encode_context "CONTINUOUS VERIFIER DISPATCHED for task ${task_id} (epic ${epic_id}). Review of 5 dimensions in progress: correctness, consistency, edge cases, integration, dead weight."

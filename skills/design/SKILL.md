@@ -64,10 +64,14 @@ Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists
 ### Tags (at a glance)
 
 - `@status(draft|approved|implemented|verified)` — lifecycle tracking (required on every spec)
+- `@layer(api|ui|full-stack|cli|infra)` — required on every spec. Deterministic skip signal that hooks and verification steps key on. Set during decomposition.
+- `@trivial` — optional. Typo fix, rename, or config-only change. Permits skipping architecture docs and external feasibility research.
 - `@depends-on(feature-slug)` — this feature requires another feature to be implemented first
 - `@blocks(feature-slug)` — another feature depends on this one
 - `@parallel-risk(feature-slug)` — this spec modifies the same files as another independent spec. Both specs remain parallel (no `@depends-on` added). /build warns about potential merge conflicts and builds the smaller spec first.
-- Custom domain tags: `@auth`, `@api`, `@ui`, `@security`, etc. — categorization
+- Custom domain tags: `@auth`, `@security`, `@onboarding`, etc. — categorization
+
+See full tag reference and `@layer` value definitions in [resources/gherkin-spec-reference.md](resources/gherkin-spec-reference.md).
 
 ### Greenfield Rebuild Principle (summary)
 
@@ -203,31 +207,33 @@ Before generating specs, apply the decomposition heuristics (see Decomposition H
 2. **Scan for seams** — look for data boundaries, lifecycle boundaries, consumer boundaries, layer boundaries, and rule boundaries (see Seam Types table).
 3. **Build the decomposition map** — list each spec to generate, with:
    - Feature name and slug
+   - `@layer(...)` — `api`, `ui`, `full-stack`, `cli`, or `infra`. **Required on every entry.** Determines which verification gates apply downstream — hooks and `/build` steps key on this. Choose based on what the spec produces, not what it touches: a spec that adds an API endpoint *and* its UI consumer is `full-stack`; a spec that only adds the endpoint (UI consumer is a separate spec) is `api`.
    - `@depends-on` relationships (pieces that fail the independence test)
    - `@parallel-risk` relationships (independent pieces that modify the same file)
-4. **Skip for trivially single-behavior work** — typo fixes, renames, config changes. If the request maps to one cohesive behavior with no seams, the decomposition map is one entry. No seam analysis needed.
+   - `@trivial` flag for typo fixes, renames, or config-only changes (optional)
+4. **Skip for trivially single-behavior work** — typo fixes, renames, config changes. If the request maps to one cohesive behavior with no seams, the decomposition map is one entry. Tag it `@trivial` along with its `@layer(...)`. No seam analysis needed.
 
 ### Example Decomposition Maps
 
 **Single behavior (no decomposition):**
 ```
 Decomposition map:
-1. fix-readme-typo (no dependencies)
+1. fix-readme-typo  @layer(infra) @trivial (no dependencies)
 ```
 
 **Two independent behaviors:**
 ```
 Decomposition map:
-1. cli-export-command (no dependencies)
-2. api-export-endpoint (no dependencies, @parallel-risk: cli-export-command — both modify exports.ts)
+1. cli-export-command  @layer(cli) (no dependencies)
+2. api-export-endpoint  @layer(api) (no dependencies, @parallel-risk: cli-export-command — both modify exports.ts)
 ```
 
 **Behaviors with shared dependency:**
 ```
 Decomposition map:
-1. user-data-model (no dependencies)
-2. user-registration (@depends-on: user-data-model)
-3. user-authentication (@depends-on: user-data-model, @parallel-risk: user-registration — both modify user-routes.ts)
+1. user-data-model  @layer(api) (no dependencies)
+2. user-registration  @layer(full-stack) (@depends-on: user-data-model)
+3. user-authentication  @layer(full-stack) (@depends-on: user-data-model, @parallel-risk: user-registration — both modify user-routes.ts)
 ```
 
 ## Step 2.75: Validate Feasibility (when applicable)
@@ -247,7 +253,7 @@ Report: confirmed capabilities, limitations, and anything that contradicts the c
 
 **If research reveals problems:** Surface them as new questions to the user via AskUserQuestion. Do NOT silently adjust the design. Example: "Research shows the Stripe API doesn't support partial refunds on ACH transfers. Should we handle this differently?"
 
-**Skip this step for:** Work that doesn't involve external dependencies, well-understood internal changes, typo fixes, config changes.
+**Skip this step when:** Every entry in the decomposition map is tagged `@trivial`, OR the request is entirely internal to the codebase with no third-party APIs/libraries/protocols. The deterministic signal is `@trivial` — claims of "well-understood" without that tag are not sufficient.
 
 ## Step 2.85: UI/UX Design (when applicable)
 
@@ -269,7 +275,7 @@ Any decomposition map entry that involves:
 
 The `/design-ui` skill handles its own gate checks, batching strategy, quality gates, and user confirmation. When it returns, all UI-facing specs have mockups and UI Design content.
 
-**Skip for:** Decomposition maps with zero UI-facing entries (backend-only, CLI, API-only, infra).
+**Skip when:** No entry in the decomposition map is tagged `@layer(ui)` or `@layer(full-stack)`. Equivalent grep: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results. If any UI/full-stack spec exists in the decomp, `/design-ui` MUST run.
 
 ## Step 3: Generate Gherkin Spec Files
 
@@ -352,7 +358,7 @@ Trace every Critical User Journey across ALL specs to find gaps. This is the sys
 
 4. **Generate missing specs** — For each gap, generate a new spec (with its own `## Critical User Journeys` section per the spec generation rules) and re-run the CUJ trace. Repeat until all journeys are fully covered.
 
-**Skip for:** Single-spec designs, non-user-facing work (CLI tools, API-only, infra).
+**Skip when:** Decomposition has exactly one entry (single-spec design), OR no entry is tagged `@layer(ui)` or `@layer(full-stack)`. Deterministic check: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results, or the decomp map has one row.
 
 ### Part 2: User Confirmation
 
@@ -394,7 +400,7 @@ Options:
 
 The `/design-arch` skill handles its own gate checks and user confirmation. When it returns, architecture documentation is confirmed and complete.
 
-**Skip for:** Trivial changes (typo fixes, renames, config changes) where there is no meaningful architecture to document. If the decomposition map has only one simple-spec entry with no dependencies, skip this step.
+**Skip when ALL three are true:** (1) decomposition has exactly one spec entry, (2) that entry has no `@depends-on(...)` or `@blocks(...)`, AND (3) that entry is tagged `@trivial`. Deterministic: count spec files in `specs/` (excluding `system.md`), grep for `@depends-on\|@blocks`, grep for `@trivial`. If any condition is false, run `/design-arch`.
 
 ## Step 5: Beads Setup
 

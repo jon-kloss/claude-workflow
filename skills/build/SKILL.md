@@ -260,14 +260,17 @@ For each spec in build order (auto-iterates):
 
 #### Layer Detection (MANDATORY)
 
-Read the spec file and determine which implementation layers it requires:
+Read the spec's `@layer(...)` tag at the top of the file. This is the authoritative signal for what must be built:
 
-| Signal in Spec | Layer | What Must Be Built |
-|---|---|---|
-| API endpoints in Technical Context (`POST /api/...`) | **API** | Route handlers, middleware, DB queries, API tests |
-| UI screens, buttons, forms, navigation in scenarios | **UI** | Components, screens, navigation, component tests |
-| `## UI Design` section or mockup in `specs/mockups/` | **UI** | Start from mockup code, wire to real data |
-| Both API endpoints AND UI scenarios | **Full-stack** | BOTH layers, wired together. Neither alone is complete. |
+| `@layer(...)` value | What Must Be Built |
+|---|---|
+| `@layer(api)` | Route handlers, middleware, DB queries, API tests. No UI work. |
+| `@layer(ui)` | Components, screens, navigation, component tests. No backend work. |
+| `@layer(full-stack)` | BOTH API and UI, wired together. Neither alone is complete. |
+| `@layer(cli)` | CLI commands and tests. No UI, no HTTP API. |
+| `@layer(infra)` | Configuration, build, deploy, DNS. Usually no test code beyond smoke checks. |
+
+**Backward-compat fallback** (specs missing `@layer(...)`): infer from `## UI Design` section presence (→ `ui` or `full-stack`) and Technical Context API entries (→ `api` or `full-stack`). Log the inferred layer and write the tag back to the spec.
 
 **Log the detected layers:**
 ```bash
@@ -310,6 +313,17 @@ For specs involving external APIs/libraries/unfamiliar patterns, also dispatch i
 
 #### Log investigation findings
 
+Write findings as an `## Investigation Findings` section in the spec file itself, AND log a summary as a bd comment on the epic:
+
+```markdown
+## Investigation Findings
+
+- src/auth/middleware.ts:42 — existing session validation uses verifyJwt() with iss/aud claims
+- src/routes/*.ts — all routes use the consistent { error: { code, message } } response shape
+- specs/user-data-model.md (@depends-on) — user.id is UUID v4, not bigint
+Decision: extend middleware.ts rather than creating a parallel auth path
+```
+
 ```bash
 bd comments add [epic-id] "INVESTIGATION FINDING for specs/<feature-slug>.md:
 
@@ -321,7 +335,11 @@ Patterns discovered:
 Decision: [How findings influence implementation]"
 ```
 
-**Quality minimum:** At least 2 specific file paths with line numbers and 1 concrete convention.
+**Why both?** The spec section is the deterministic evidence (`hooks/require-investigation-findings.sh` blocks `@status(implemented)` writes without it). The bd comment is the audit trail for the epic.
+
+**Quality minimum:** At least 3 non-blank lines under `## Investigation Findings` (the hook's floor), including 2 specific file paths with line numbers and 1 concrete convention.
+
+**Skip when:** Spec is tagged `@trivial` (typo/rename/config). The hook auto-allows `@trivial` specs through. For any other skip reason, add `@investigation-skip(<reason>)` to the spec — but this should be rare and the reason persists as documentation.
 
 #### Create beads task (after investigation)
 
@@ -445,7 +463,7 @@ Update spec status: `@status(approved)` → `@status(implemented)` when implemen
 
 **BLOCKING GATE for full-stack specs.** After UI components pass GREEN (they render correctly), BEFORE verification can begin, every component must be wired to the real data layer. Components with hardcoded/mock data CANNOT proceed to Step 3.3.
 
-**Skip for:** API-only specs, specs with no UI layer, specs where layer detection (Step 3.1) found a single layer.
+**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)`. Deterministic check: `grep -E '@layer\((api|cli|infra)\)' specs/<slug>.md`. UI and full-stack specs MUST run this step — there is no "single-layer" judgment override.
 
 **Process:**
 
@@ -548,7 +566,7 @@ Verdict: PASS | FAIL"
 - Any handler that only logs/alerts = **CRITICAL** (`placeholder-handler`). Cannot proceed.
 - Decorative elements without handlers are fine (icons, labels, dividers).
 
-**Skip for:** API-only specs, backend-only specs.
+**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)`. Deterministic check: `grep -E '@layer\((api|cli|infra)\)' specs/<slug>.md`. UI and full-stack specs run this scan.
 
 ### Step 3.3: Verify
 
@@ -736,7 +754,33 @@ Verdict: PASS | FAIL"
 
 Visual fidelity failure OR design quality failure is **CRITICAL** — tests passing with ugly or generic UI means the design phase was wasted. Fix before proceeding.
 
-**Skip this step for:** Backend-only specs, API-only specs, CLI specs — any spec without a `## UI Design` section.
+**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)` AND does NOT have a `## UI Design` section. Deterministic check: `grep -E '@layer\((api|cli|infra)\)' specs/<slug>.md && ! grep -q '^## UI Design' specs/<slug>.md`. Specs with a `## UI Design` section MUST run D1–D10 regardless of layer tag (mockup exists → visual fidelity matters).
+
+#### Step 3.3d.1: Functional UI Test (BLOCKING GATE — enforced by hook)
+
+**For every `@layer(ui)` or `@layer(full-stack)` spec, a functional UI test must exist before `@status(verified)` can be written.** Visual fidelity (D1–D10 above) verifies the UI looks right by inspection — this step verifies the UI behaves right under automation.
+
+This gate is enforced by `hooks/require-ui-tests.sh`. The hook:
+
+1. **Detects the framework.** In priority order:
+   - `.claude/ui-test-framework` file override (one of: `playwright | cypress | detox | vitest-browser | jest-rtl | xcuitest`)
+   - Project file auto-detection: `playwright.config.*` or `@playwright/test` in `package.json` → Playwright (preferred for web/Electron); `cypress.config.*` or `cypress` dep → Cypress; `detox` dep → Detox (React Native); Vitest browser-mode config → Vitest browser; `@testing-library/react` + Jest/Vitest → Jest-RTL (component-level fallback); `*.xcodeproj` → XCUITest (native iOS).
+   - If nothing detected, the hook blocks with installation instructions.
+
+2. **Requires a test file referencing the spec.** Searches `tests/`, `e2e/`, `cypress/e2e/`, `__tests__/`, `e2e-tests/`, `ui-tests/`, `playwright-tests/`, `integration-tests/` (and `UITests/` for xcuitest) for a `*.spec.{ts,tsx,js,jsx,mjs,cjs}` / `*.test.*` / `*.e2e.*` / `*.swift|kt|java|py` file whose filename or contents reference the spec slug or its first significant word.
+
+3. **Blocks `@status(verified)` writes** that don't satisfy both checks.
+
+**Authoring guidance.** Write at least one test per spec that:
+- Renders or navigates to the UI surface the spec describes
+- Performs the user actions in one or more `### Scenario:` blocks
+- Asserts the observable behavior (text, state, network call, navigation)
+
+For full-stack specs, the test must exercise the wired-together stack — clicking the UI button and asserting the API was called with the expected payload counts; mocking the API in a way that hides wiring bugs does not.
+
+**Escape hatch.** Add `@ui-test-skip(<concise reason>)` to the spec. The reason persists in the file as documentation. Use this rarely — for scaffolding-only specs with no behavior to test, or for specs whose behavior is entirely covered by another spec's test (and cite the other spec slug in the reason).
+
+**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)` AND has no `## UI Design` section. The hook auto-skips these.
 
 #### Step 3.3e: Spec Scenario Coverage Check (Manual + Layer-Aware)
 
@@ -803,7 +847,7 @@ Verdict: PASS | FAIL"
 - STUB or MISSING API call = **CRITICAL** (`api-integration`). A button that doesn't call the API is a broken feature, regardless of whether unit tests pass.
 - Wrong endpoint or missing error handling = **IMPORTANT**
 
-**Skip this step for:** Backend-only specs, specs with no API endpoints in Technical Context, purely static/informational UI.
+**Skip when:** Spec is tagged `@layer(cli)` or `@layer(infra)`, OR is tagged `@layer(ui)` AND the Technical Context section contains no API entries. Deterministic check: `grep -E '@layer\((cli|infra)\)' specs/<slug>.md` matches, OR (`grep -q '@layer(ui)'` matches AND `grep -A20 '## Technical Context' specs/<slug>.md | grep -qE 'POST|GET|PUT|DELETE|PATCH'` does not match). `@layer(api)` and `@layer(full-stack)` always run this check.
 
 #### Step 3.3g: SRE + Intent Audit
 
@@ -1028,7 +1072,7 @@ After all specs are `@status(verified)`:
 - Data that doesn't persist (caught because history page is empty)
 - Cross-feature integration failures (caught because features don't connect)
 
-**Skip for:** Backend-only epics, CLI-only epics, single-spec epics with no UI.
+**Skip when:** No spec in the epic is tagged `@layer(ui)` or `@layer(full-stack)`. Deterministic check across all epic specs: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no spec belonging to this epic. Single-spec UI/full-stack epics still run e2e — "single-spec" alone is not sufficient to skip.
 
 ### Step 4.2: Final Verification
 
