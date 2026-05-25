@@ -101,11 +101,12 @@ elif echo "$spec_content" | grep -qE "@layer\(infra\)"; then
     layer="infra"
 fi
 
-# Build list of expected handoffs based on layer
+# Build list of expected handoffs based on layer + data tag
 expected=()
 expected+=("step-2-${slug}-product-owner.html")
 expected+=("step-2.5-${slug}-application-architect.html")
 expected+=("step-3.3-${slug}-security-architect.html")
+expected+=("step-3.3-${slug}-devops-architect.html")
 expected+=("step-4.1-${slug}-qa-engineer.html")
 
 case "$layer" in
@@ -119,6 +120,19 @@ case "$layer" in
         expected+=("step-3.2-${slug}-backend-engineer.html")
         ;;
 esac
+
+# data-architect required when:
+#   - spec is explicitly tagged @touches-data, OR
+#   - spec is @layer(api) or @layer(full-stack) (these implicitly touch data)
+touches_data="no"
+if echo "$spec_content" | grep -q "@touches-data"; then
+    touches_data="yes"
+elif [ "$layer" = "api" ] || [ "$layer" = "full-stack" ]; then
+    touches_data="yes"
+fi
+if [ "$touches_data" = "yes" ]; then
+    expected+=("step-3.3-${slug}-data-architect.html")
+fi
 
 # Collect skipped roles via @handoff-skip(role: reason)
 skipped_roles=$(echo "$spec_content" | grep -oE "@handoff-skip\([a-z-]+:" | sed 's/@handoff-skip(//; s/://' || true)

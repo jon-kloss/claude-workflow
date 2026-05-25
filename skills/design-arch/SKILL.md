@@ -5,6 +5,12 @@ description: Use after specs are approved to generate architecture documentation
 
 <skill_overview>
 Generates architecture documentation from approved Gherkin specs. Produces three artifacts: `specs/arch.md` (architecture document), `specs/diagrams/*.drawio` (architecture diagrams), and `specs/overview.html` (visual design overview for non-technical audiences). Can be invoked automatically by /design after spec approval, or independently when architecture docs need updating.
+
+**Role-agent orchestration (experimental branch).** This skill orchestrates two role agents:
+- `application-architect` — owns the component map, data flow, and design decisions in `arch.md`. Authors the architecture handoff at `specs/handoffs/step-4.5-<slug>-application-architect.html`.
+- `devops-architect` — owns the deployment topology, observability stack, scaling section, and failure-recovery section. Authors `specs/handoffs/step-4.5-<slug>-devops-architect.html`. The deployment diagram in `specs/diagrams/deployment.drawio` comes from this agent's `<svg>` output.
+
+The skill's existing procedure (gate checks, draw.io format, overview.html stakeholder design) still governs how the artifacts on disk are produced — the role agents contribute the *content* via their handoffs.
 </skill_overview>
 
 <rigidity_level>

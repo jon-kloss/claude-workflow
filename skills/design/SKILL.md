@@ -73,6 +73,7 @@ Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists
 - `@status(draft|approved|implemented|verified)` — lifecycle tracking (required on every spec)
 - `@layer(api|ui|full-stack|cli|infra)` — required on every spec. Deterministic skip signal that hooks and verification steps key on. Set during decomposition.
 - `@trivial` — optional. Typo fix, rename, or config-only change. Permits skipping architecture docs and external feasibility research.
+- `@touches-data` — optional. Spec adds, modifies, or migrates persistent data. Triggers data-architect role agent during build Step 3.1 and Step 3.3.3. `@layer(api|full-stack)` specs implicitly touch data; set this tag explicitly when a UI/CLI/infra spec also touches data (e.g., a CLI tool that writes to a shared DB).
 - `@depends-on(feature-slug)` — this feature requires another feature to be implemented first
 - `@blocks(feature-slug)` — another feature depends on this one
 - `@parallel-risk(feature-slug)` — this spec modifies the same files as another independent spec. Both specs remain parallel (no `@depends-on` added). /build warns about potential merge conflicts and builds the smaller spec first.

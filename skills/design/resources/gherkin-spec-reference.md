@@ -20,6 +20,7 @@ Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists
   - `cli` — command-line tool, no UI surface
   - `infra` — configuration, build, deploy, DNS, etc.
 - `@trivial` — optional flag for typo fixes, renames, and config-only changes. Permits skipping architecture docs and external feasibility research. Mutually exclusive with multi-spec decompositions.
+- `@touches-data` — optional flag indicating the spec adds, modifies, or migrates persistent data (schema changes, new tables/collections/columns, data migrations, new queries on hot paths). Required signal for the data-architect role agent during /build Step 3.1 (investigation) and Step 3.3.3 (data safety review). Apply during decomposition (Step 2.5) for any spec whose Technical Context includes schema or migration work, even if `@layer` is `ui` or `full-stack`. Hooks treat `@layer(api)` and `@layer(full-stack)` as implicitly touching data when this tag is absent — set the tag explicitly to be unambiguous.
 - `@depends-on(feature-slug)` — this feature requires another feature to be implemented first
 - `@blocks(feature-slug)` — another feature depends on this one
 - `@parallel-risk(feature-slug)` — this spec modifies the same files as another independent spec. Both specs remain parallel (no `@depends-on` added). /build warns about potential merge conflicts and builds the smaller spec first.

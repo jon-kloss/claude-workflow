@@ -375,6 +375,24 @@ bd update [task-id] --status=in_progress
 
 **Why tasks are created here (not in /design):** Investigation reveals the real implementation context — file paths, patterns, integration points. Tasks created before investigation are guesswork. Tasks created after investigation are actionable.
 
+#### Step 3.1.1: Data Architect Investigation (when applicable)
+
+**Dispatch the data-architect role agent** when the spec touches persistent data. This runs as a focused augment to the general investigation: schema context, existing query patterns near the spec's surface, integrity invariants, recent migrations.
+
+**Trigger condition:** Spec is tagged `@touches-data` OR `@layer(api|full-stack)` with Technical Context that mentions DB operations.
+
+```
+Agent tool (subagent_type: data-architect, run_in_background: false):
+"You are running Step 3.1.1 (data investigation) for specs/<slug>.md. Read the application-architect
+handoff, the spec's Technical Context, and the schema definition files. Produce a Step 3.1
+investigation handoff augment at:
+  specs/handoffs/step-3.1-<slug>-data-architect.html
+covering: tables/columns touched, existing query patterns, invariants (FKs, unique, soft-delete),
+recent migrations, indexes near the spec's surface."
+```
+
+(The Step 3.3 data safety REVIEW is a separate dispatch — see Step 3.3.3 below.)
+
 ### Step 3.2: Spec-Driven TDD
 
 **Dispatch the appropriate role-implementer agent(s) based on the spec's `@layer`.** Implementation procedure (RED/GREEN/REFACTOR, layer-aware tests, behavior-vs-render distinction, mockup-first UI build) lives in the agent prompts.
@@ -621,6 +639,34 @@ Each CRITICAL or IMPORTANT finding must cite a file:line in the implementation. 
 When the agent returns: if it produced an `<aside data-severity="critical" data-blocks-next-step="true">`, do NOT proceed to 3.3d. Fix the CRITICAL findings first, then re-dispatch.
 
 **Skip when:** Spec is `@trivial` (no functional change to security surface).
+
+#### Step 3.3c.2: DevOps / Operability Review
+
+**Dispatch the devops-architect role agent.** Reviews the diff for deployment delta (new env vars, secrets, infra), migration safety, feature-flag posture, observability (logs/metrics/traces), resource budgets, rate-limits/timeouts, health checks, rollback story, and cost.
+
+```
+Agent tool (subagent_type: devops-architect, run_in_background: false):
+"You are running Step 3.3c.2 (operability review) for specs/<slug>.md. Read the application-architect
+handoff, the implementation diff, and any infra files. Walk the operability checklist in your prompt.
+Cite file:line for every finding. Produce your handoff at:
+  specs/handoffs/step-3.3-<slug>-devops-architect.html"
+```
+
+**Skip when:** Spec is `@trivial`.
+
+#### Step 3.3c.3: Data Safety Review (when applicable)
+
+**Dispatch the data-architect role agent** when the spec touches persistent data (same trigger as Step 3.1.1). Reviews the implementation diff for schema-change safety, migration locking risk, index posture, query shapes (N+1, SELECT *), transactions, concurrent-write hazards, soft-delete consistency, PII handling.
+
+```
+Agent tool (subagent_type: data-architect, run_in_background: false):
+"You are running Step 3.3c.3 (data safety review) for specs/<slug>.md. Read the backend-engineer
+handoff (the diff), the schema files, and the recent migrations. Produce your handoff at:
+  specs/handoffs/step-3.3-<slug>-data-architect.html
+Include EXPLAIN output for new queries; cite file:line for every concern."
+```
+
+**Trigger:** `@touches-data` tag OR `@layer(api|full-stack)` with DB operations in Technical Context.
 
 #### Step 3.3d: Visual Fidelity + Design Quality Check (UI-facing specs only)
 
@@ -1086,9 +1132,23 @@ When the agent returns, verify the handoff's `acceptance-criteria` confirm every
 
 **Skip when:** No spec in the epic is tagged `@layer(ui)` or `@layer(full-stack)`. Deterministic check across all epic specs: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no spec belonging to this epic. Single-spec UI/full-stack epics still run e2e — "single-spec" alone is not sufficient to skip.
 
-### Step 4.2: Final Verification
+### Step 4.2: Final Verification + Release Coordination
 
 **REQUIRED SUB-SKILL:** Invoke `hyperpowers:verification-before-completion` via the Skill tool to gate epic closure on fresh verification evidence.
+
+**Dispatch the release-coordinator role agent.** It performs the cross-spec coherence check, verifies every spec reached `@status(verified)` with full handoff chains, aggregates devops findings, confirms CUJ coverage, and authors the explicit rollback plan that the epic needs before `bd close`.
+
+```
+Agent tool (subagent_type: release-coordinator, run_in_background: false):
+"You are running Step 4.2 (final verification) for epic <epic-id>. Verify all specs in the epic reached
+@status(verified) with full handoff chains. Aggregate devops-architect findings across specs. Confirm
+the qa-engineer e2e CUJ coverage is complete and passing. Author a numbered rollback plan a 3 AM
+oncall engineer could execute. Produce handoff at:
+  specs/handoffs/step-4.2-<epic-id>-release-coordinator.html
+End with one of three verdicts: READY-TO-CLOSE, READY-WITH-CAVEATS, or BLOCKED."
+```
+
+The `require-release-handoff.sh` hook blocks `bd close <epic-id>` unless the handoff exists and the verdict is READY-TO-CLOSE or READY-WITH-CAVEATS. BLOCKED verdicts must be resolved first (or override via `bd comments add <epic-id> "RELEASE-SKIP: <reason>"`).
 
 ### Step 4.3: Close Tests Gate Task
 ```bash
