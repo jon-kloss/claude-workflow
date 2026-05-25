@@ -267,6 +267,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/claim-vs-call-audit.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/require-layer-tag.sh"
         }
       ]
     },
@@ -294,6 +298,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/block-status-during-verification.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/guard-spec-bash-writes.sh"
         }
       ]
     },
@@ -382,7 +390,11 @@ HOOKS_EOF
 )
 
 # Merge hooks into settings using python3 (cross-platform, no jq dependency)
-# Deduplicates on re-install: skips entries whose command already exists
+# Deduplicates AT THE COMMAND LEVEL within matching (event, matcher) entries.
+# This avoids the prior bug where adding a new hook to an existing entry block
+# (e.g. new require-verifier-agents.sh into the Edit|Write entry that already
+# contains block-unread-edits.sh) caused the whole entry to be skipped because
+# *some* commands matched existing ones.
 "$PYTHON" -c "
 import json, sys
 
@@ -394,22 +406,30 @@ with open(settings_path, 'r') as f:
 
 existing_hooks = settings.get('hooks', {})
 
-# Collect all existing hook commands for deduplication
-def get_commands(entries):
-    cmds = set()
-    for entry in entries:
-        for h in entry.get('hooks', []):
-            cmds.add(h.get('command', ''))
-    return cmds
+def find_matching_entry(entries, matcher):
+    for e in entries:
+        if e.get('matcher', '') == matcher:
+            return e
+    return None
 
-# For each event, append only entries not already present
+# For each event:
+#   For each new entry (a {matcher, hooks[]} block):
+#     If an existing entry has the same matcher, merge command-by-command (skip
+#     any new command whose string already appears in the existing entry's hooks).
+#     If no existing entry has that matcher, append the new entry whole.
 for event, new_entries in new_hooks.items():
     existing_entries = existing_hooks.get(event, [])
-    existing_cmds = get_commands(existing_entries)
-    for entry in new_entries:
-        entry_cmds = {h.get('command', '') for h in entry.get('hooks', [])}
-        if not entry_cmds & existing_cmds:
-            existing_entries.append(entry)
+    for new_entry in new_entries:
+        new_matcher = new_entry.get('matcher', '')
+        match = find_matching_entry(existing_entries, new_matcher)
+        if match is None:
+            existing_entries.append(new_entry)
+            continue
+        existing_cmds = {h.get('command', '') for h in match.get('hooks', [])}
+        for h in new_entry.get('hooks', []):
+            if h.get('command', '') not in existing_cmds:
+                match.setdefault('hooks', []).append(h)
+                existing_cmds.add(h.get('command', ''))
     existing_hooks[event] = existing_entries
 
 settings['hooks'] = existing_hooks
