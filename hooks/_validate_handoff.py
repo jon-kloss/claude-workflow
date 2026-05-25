@@ -1,0 +1,94 @@
+#!/usr/bin/env python3
+"""
+Validate a role-agent handoff HTML file against the schema in
+docs/role-agent-handoff-schema.md.
+
+Usage: _validate_handoff.py <path> <expected-slug> <expected-role>
+
+Prints a pipe-separated list of errors to stdout (empty stdout = pass).
+Exit code is always 0 — the calling hook reads stdout to decide.
+"""
+import sys
+import re
+
+if len(sys.argv) != 4:
+    print("usage error")
+    sys.exit(0)
+
+path, expected_slug, expected_role = sys.argv[1], sys.argv[2], sys.argv[3]
+
+try:
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+except Exception as e:
+    print(f"unreadable: {e}")
+    sys.exit(0)
+
+errors = []
+Q = r"[\"']"
+
+# 1. <html data-handoff-version="1">
+if not re.search(r"<html[^>]*\bdata-handoff-version\s*=\s*" + Q + r"1" + Q, content, re.I):
+    errors.append("missing <html data-handoff-version='1'>")
+
+# 2. Required <meta> attributes
+required_meta = [
+    "data-from-role",
+    "data-spec-slug",
+    "data-step",
+    "data-produced-at",
+    "data-input-references",
+]
+for attr in required_meta:
+    pat = r"<meta[^>]*\b" + re.escape(attr) + r"\s*=\s*" + Q + r"[^\"']*" + Q
+    if not re.search(pat, content, re.I):
+        errors.append(f"missing <meta {attr}=...>")
+
+# 3. Required <section data-role> blocks
+for s in ("summary", "findings", "acceptance-criteria", "open-questions"):
+    pat = r"<section[^>]*\bdata-role\s*=\s*" + Q + r"\s*" + re.escape(s) + r"\s*" + Q
+    if not re.search(pat, content, re.I):
+        errors.append(f"missing <section data-role=\"{s}\">")
+
+# 4. data-spec-slug matches filename slug
+m = re.search(
+    r"<meta[^>]*\bdata-spec-slug\s*=\s*" + Q + r"\s*([a-z0-9_-]+)\s*" + Q,
+    content,
+    re.I,
+)
+if m and m.group(1) != expected_slug:
+    errors.append(
+        f"data-spec-slug='{m.group(1)}' but filename slug is '{expected_slug}'"
+    )
+
+# 5. data-from-role matches role expected by filename
+m = re.search(
+    r"<meta[^>]*\bdata-from-role\s*=\s*" + Q + r"\s*([a-z0-9_-]+)\s*" + Q,
+    content,
+    re.I,
+)
+if m and m.group(1) != expected_role:
+    errors.append(
+        f"data-from-role='{m.group(1)}' but filename role is '{expected_role}'"
+    )
+
+# 6. Critical unresolved <aside data-severity="critical" data-blocks-next-step="true">
+critical_blockers = re.findall(
+    r"<aside[^>]*\bdata-severity\s*=\s*"
+    + Q
+    + r"critical"
+    + Q
+    + r"[^>]*\bdata-blocks-next-step\s*=\s*"
+    + Q
+    + r"true"
+    + Q,
+    content,
+    re.I,
+)
+if critical_blockers:
+    errors.append(
+        f"contains {len(critical_blockers)} unresolved critical-blocking <aside> — handoff says next step must not proceed"
+    )
+
+if errors:
+    print("|".join(errors))

@@ -5,6 +5,13 @@ description: Use when starting new work - Socratic questioning via AskUserQuesti
 
 <skill_overview>
 Design skill that shapes work through Socratic questioning, generates Gherkin spec files as the source of truth for design intent, performs a reality check against the original request, and sets up beads for sub-task tracking. Produces `@status(approved)` specs in `specs/` that the `/build` skill consumes.
+
+**Role-agent orchestration (experimental branch).** This skill is the orchestrator. Deep procedural work is delegated to specialized role agents in `agents/`:
+- `product-owner` — Step 2 Socratic + Step 4 reality check
+- `application-architect` — Step 2.5 decomposition (and Step 4.5 architecture docs)
+- `uiux-designer` — Step 2.85 UI/UX (wraps `/design-ui`)
+
+Each role agent produces an HTML handoff at `specs/handoffs/<step>-<slug>-<role>.html` per `docs/role-agent-handoff-schema.md`.
 </skill_overview>
 
 <rigidity_level>
@@ -125,116 +132,44 @@ Parallel risk: when two independent specs will modify the same file, tag both wi
 
 ## Step 2: Socratic Questioning
 
-Ask focused questions using AskUserQuestion until you can fully define the work. The number of questions scales naturally with complexity — a typo fix needs 0-1 questions, a new feature needs 3-5+.
+**Dispatch the product-owner role agent.** This step is run by `agents/product-owner.md` — the procedural detail (how to drill down, greenfield protocol, completeness gate categories) lives there. Your job here is to dispatch and consume the handoff.
 
-**BLOCKING REQUIREMENT: All questions MUST use AskUserQuestion tool.**
+```
+Agent tool (subagent_type: product-owner, run_in_background: false):
+"You are running Step 2 (Socratic questioning) for a new design session. The user's request is below.
+Use AskUserQuestion to probe requirements until you can hand off to the application-architect for
+decomposition. Produce your handoff file at:
+  specs/handoffs/step-2-<spec-slug>-product-owner.html
+per docs/role-agent-handoff-schema.md.
 
-Enforcement rules:
-1. **Use AskUserQuestion tool** — Do NOT print questions as text. AskUserQuestion blocks execution until the user responds. Text questions do not block and lead to proceeding without answers.
-2. **Do NOT dispatch codebase investigation agents** — Codebase investigation is /build's job. Dispatching codebase-investigator during design leads to the agent rationalizing that it has "enough context" to skip the user's answers.
-3. **Internet research IS allowed** — Dispatch `hyperpowers:internet-researcher` to research the user's domain, tech choices, API capabilities, and library constraints. This makes questions sharper. If research reveals a problem or constraint, surface it as a new question to the user — do NOT silently assume or skip asking.
-4. **Do NOT proceed until answers are received** — If you asked a question, you must receive and incorporate the answer before moving forward. "Making reasonable defaults for ambiguous parts" is not acceptable.
-5. **Multiple rounds are expected for complex work** — If the work involves new features, integrations, or architectural decisions, one round of questions is probably insufficient.
-6. **Research informs and validates — it never replaces asking** — If you learn the project uses passport.js, that informs what to ask, it doesn't eliminate the need to ask. If research shows an API doesn't support webhooks, that becomes a question ("The Stripe API doesn't support X — how should we handle this?"), not a silent design decision.
-7. **Drill down relentlessly** — Every answer the user gives should spawn follow-up questions that dig deeper. "React Native" → "Expo or bare RN? What minimum OS versions? Which navigation library?" Surface-level answers produce surface-level specs. Push until you have enough detail to write code.
-8. **Never accept vague answers** — If the user says "standard auth" or "normal CRUD," that is NOT an answer. Push: "Standard auth meaning email/password only? Social login? MFA? Password reset flow? Session or token-based?" Vagueness is where bugs hide.
+User's request: <paste the user's original message>"
+```
 
-Questions to stabilize:
-- **What** — What is being built/changed/fixed?
-- **Why** — What problem does this solve?
-- **Where** — Which parts of the system are affected?
-- **User Journeys** — What end-to-end journeys does this feature participate in? What does the user do before arriving here? What do they do after? (e.g., "User logs in → navigates to workouts → starts workout → logs sets → completes → views history") (skip for Simple specs and non-user-facing work)
-- **Constraints** — What must NOT change? What are the boundaries?
-- **Dependencies** — Does this depend on other features? Do other features depend on this?
-- **Edge cases** — What happens with empty/invalid/unexpected input?
+When the agent returns, read its handoff. Verify:
+- The handoff file exists at the expected path.
+- The `acceptance-criteria` section has at least one machine-checkable item.
+- The `open-questions` section is empty OR every open question has been escalated to the user.
 
-For simple changes (typo, rename, config), 0-1 questions may suffice — the request itself may be fully specified. Don't ask questions for the sake of asking.
-
-### Greenfield Questioning Protocol
-
-**For greenfield projects (no existing codebase, building from scratch), questioning intensity increases dramatically.** A greenfield project cannot be fully spec'd from a single round of questions. The user's initial description is a starting point, not a specification.
-
-**Minimum 3 rounds of questions are required.** Each round drills deeper based on the previous answers.
-
-**Round 1 — Scope & Architecture** (broad strokes):
-- Platform, tech stack, deployment target
-- User roles and access model
-- Core feature list (what's MVP vs. later?)
-- Data ownership and privacy model
-- Third-party integrations
-
-**Round 2 — Feature Deep-Dive** (for each major feature area from Round 1):
-- Data model: What fields? What types? What's required vs. optional?
-- User interactions: What does the user click/tap/type? What do they see in response?
-- Permissions: Who can see/edit/delete what? What about shared data?
-- Error states: What happens when it fails? What does the user see?
-- Edge cases: Empty states, max limits, concurrent access
-
-**Round 3 — Integration & Flows** (connecting the pieces):
-- CUJs: Walk through every major user journey end-to-end, step by step
-- Cross-feature dependencies: How does feature A hand off to feature B?
-- Notification model: When does the app reach out to the user?
-- Onboarding: What does a brand-new user experience?
-- Settings & configuration: What can users control?
-
-**Completeness Gate:** Before proceeding to decomposition, verify you have answers covering ALL of these categories. If any category has gaps, ask another round. Do NOT proceed with assumptions.
-
-| Category | Covered? |
-|----------|----------|
-| Platform & tech stack | |
-| User roles & permissions | |
-| Data model per feature | |
-| API contracts (endpoints, request/response shapes) | |
-| User journeys (end-to-end flows) | |
-| Error handling & edge cases | |
-| Third-party integrations | |
-| Onboarding & first-run experience | |
-| Notification model | |
-| Settings & user preferences | |
-| Monetization / billing (if applicable) | |
-| Offline behavior (if applicable) | |
+If acceptance is incomplete (open questions outstanding, vague answers), do NOT proceed to Step 2.5 — dispatch the product-owner again with the gaps surfaced.
 
 ## Step 2.5: Decompose
 
-Before generating specs, apply the decomposition heuristics (see Decomposition Heuristics in gherkin_spec_reference) to identify how the work should be split.
+**Dispatch the application-architect role agent.** This step is run by `agents/application-architect.md` — the independence test, seam scan, and decomposition heuristics live there.
 
-**Inputs:** Answers from Socratic questioning.
-**Outputs:** A decomposition map — list of specs to generate with their `@depends-on` and `@parallel-risk` relationships.
-
-### Process
-
-1. **Apply the independence test** to the work: can each piece be tested without the others existing? Does each have its own inputs/outputs? Would removing one break the other's tests?
-2. **Scan for seams** — look for data boundaries, lifecycle boundaries, consumer boundaries, layer boundaries, and rule boundaries (see Seam Types table).
-3. **Build the decomposition map** — list each spec to generate, with:
-   - Feature name and slug
-   - `@layer(...)` — `api`, `ui`, `full-stack`, `cli`, or `infra`. **Required on every entry.** Determines which verification gates apply downstream — hooks and `/build` steps key on this. Choose based on what the spec produces, not what it touches: a spec that adds an API endpoint *and* its UI consumer is `full-stack`; a spec that only adds the endpoint (UI consumer is a separate spec) is `api`.
-   - `@depends-on` relationships (pieces that fail the independence test)
-   - `@parallel-risk` relationships (independent pieces that modify the same file)
-   - `@trivial` flag for typo fixes, renames, or config-only changes (optional)
-4. **Skip for trivially single-behavior work** — typo fixes, renames, config changes. If the request maps to one cohesive behavior with no seams, the decomposition map is one entry. Tag it `@trivial` along with its `@layer(...)`. No seam analysis needed.
-
-### Example Decomposition Maps
-
-**Single behavior (no decomposition):**
 ```
-Decomposition map:
-1. fix-readme-typo  @layer(infra) @trivial (no dependencies)
+Agent tool (subagent_type: application-architect, run_in_background: false):
+"You are running Step 2.5 (decomposition) for this design session. Read the product-owner handoff at
+specs/handoffs/step-2-<spec-slug>-product-owner.html and produce a decomposition map. Tag every spec
+with @layer(api|ui|full-stack|cli|infra) and @trivial where applicable. Produce your handoff at:
+  specs/handoffs/step-2.5-<spec-slug>-application-architect.html"
 ```
 
-**Two independent behaviors:**
-```
-Decomposition map:
-1. cli-export-command  @layer(cli) (no dependencies)
-2. api-export-endpoint  @layer(api) (no dependencies, @parallel-risk: cli-export-command — both modify exports.ts)
-```
+When the agent returns, read its handoff. Verify:
+- The decomposition table in `findings` lists every spec with `@layer`, `@depends-on`, `@parallel-risk`.
+- The `acceptance-criteria` items are machine-checkable (greps, file counts, dependency-cycle check).
+- The `data-input-references` meta tag points to the PO handoff.
 
-**Behaviors with shared dependency:**
-```
-Decomposition map:
-1. user-data-model  @layer(api) (no dependencies)
-2. user-registration  @layer(full-stack) (@depends-on: user-data-model)
-3. user-authentication  @layer(full-stack) (@depends-on: user-data-model, @parallel-risk: user-registration — both modify user-routes.ts)
-```
+If the decomposition has issues (cycles, missing tags, unclear seams), dispatch again with the specific concern — do NOT proceed.
 
 ## Step 2.75: Validate Feasibility (when applicable)
 
@@ -257,7 +192,24 @@ Report: confirmed capabilities, limitations, and anything that contradicts the c
 
 ## Step 2.85: UI/UX Design (when applicable)
 
-**REQUIRED SUB-SKILL:** Invoke `design-ui` via the Skill tool. It handles the full UI/UX design pipeline and produces:
+**Dispatch the uiux-designer role agent.** This step is run by `agents/uiux-designer.md` — the agent owns `/design-ui` invocation, PRODUCT.md/DESIGN.md authoring, mockup generation, and the 5 `/impeccable` quality gates.
+
+```
+Agent tool (subagent_type: uiux-designer, run_in_background: false):
+"You are running Step 2.85 (UI/UX design) for the UI-facing specs in this decomposition. Read the
+application-architect handoff at specs/handoffs/step-2.5-<slug>-application-architect.html to identify
+which specs are @layer(ui) or @layer(full-stack). For each, ensure PRODUCT.md and DESIGN.md exist,
+generate mockups in specs/mockups/, invoke all 5 /impeccable gates per spec, and add ## UI Design
+sections. Produce your handoff at:
+  specs/handoffs/step-2.85-<spec-slug>-uiux-designer.html (one per UI-bearing spec)"
+```
+
+When the agent returns, verify:
+- Every UI-facing spec from the decomposition has a corresponding mockup file at `specs/mockups/<slug>/` or `specs/mockups/<slug>.html`.
+- Every UI-facing spec has a `## UI Design` section in its `.md` file listing the gate Skill invocations made.
+- The `claim-vs-call-audit.sh` hook will catch any false claims at `@status(verified)` time, but checking now saves a round-trip.
+
+It handles the full UI/UX design pipeline and produces:
 - `PRODUCT.md` + `DESIGN.md` (if missing — via `/impeccable teach`)
 - Component mockups in `specs/mockups/` for all UI-facing specs
 - `## UI Design` sections ready to incorporate into specs

@@ -5,6 +5,14 @@ description: Use after /design to implement approved specs - validates specs exi
 
 <skill_overview>
 Build skill that consumes `@status(approved)` Gherkin specs produced by `/design` and implements them in dependency order. For each spec: investigates codebase, runs spec-driven TDD (RED/GREEN/REFACTOR), verifies with full suite + code review + spec coverage, and updates `@status(verified)`. Auto-iterates through all specs. Pauses and directs to `/respec` if a spec needs modification, or `/design` if the work needs entirely new specs.
+
+**Role-agent orchestration (experimental branch).** This skill is the orchestrator. The deep procedural work is delegated to specialized role agents in `agents/`:
+- `backend-engineer` / `frontend-engineer` — Step 3.2 TDD
+- `security-architect` — Step 3.3c.1 threat-model review
+- `qa-engineer` — Step 4.1 e2e CUJs
+- (`spec-sre-auditor` already exists — Step 3.3g intent audit)
+
+Each role agent produces an HTML handoff at `specs/handoffs/<step>-<slug>-<role>.html`. The `require-handoff-artifact.sh` hook blocks `@status(verified)` writes if any required handoff is missing or schema-invalid. See `docs/role-agent-handoff-schema.md`.
 </skill_overview>
 
 <rigidity_level>
@@ -369,56 +377,33 @@ bd update [task-id] --status=in_progress
 
 ### Step 3.2: Spec-Driven TDD
 
-**Before writing ANY implementation code**, generate failing tests from the spec scenarios.
+**Dispatch the appropriate role-implementer agent(s) based on the spec's `@layer`.** Implementation procedure (RED/GREEN/REFACTOR, layer-aware tests, behavior-vs-render distinction, mockup-first UI build) lives in the agent prompts.
 
-#### Layer-Aware Test Generation
-
-For **full-stack specs** (API + UI), tests must cover BOTH layers. Do not generate tests for only one layer.
-
-| Spec Scenario | API Test | UI Test (render + **behavior**) | Integration Test |
-|---|---|---|---|
-| "Client taps Start Workout" | `POST /api/v1/workout-logs` returns 201 | Button renders AND `fireEvent.press` triggers handler, state updates | Button calls real API endpoint (not stub) |
-| "Trainer sees client list" | `GET /api/v1/trainer/clients` returns list | List renders AND shows real data, pull-to-refresh triggers reload | Component fetches from real API on mount |
-| "Client logs a set" | `PATCH /api/v1/workout-logs/:id` accepts set data | Form renders AND `fireEvent.changeText` + submit dispatches, UI updates | Form submission calls API, UI updates from response |
-
-**CRITICAL — UI tests must assert BEHAVIOR, not just rendering.** A test that only checks `expect(button).toBeTruthy()` is a render test, not a UI test. Every interactive element needs a behavior assertion:
-
-| Element | Render-only (INSUFFICIENT) | Behavior assertion (REQUIRED) |
+| `@layer(...)` | Agents to dispatch | Order |
 |---|---|---|
-| Button | `expect(getByText('Start')).toBeTruthy()` | `fireEvent.press(button)` → state change / handler called / navigation triggered |
-| Form | `expect(getByPlaceholder('Weight')).toBeTruthy()` | `fireEvent.changeText(input, '185')` + submit → values dispatched |
-| Toggle | `expect(toggle).toBeTruthy()` | `fireEvent(toggle, 'valueChange', true)` → state updates |
-| List item | `expect(getByText('Bench Press')).toBeTruthy()` | `fireEvent.press(item)` → navigates to detail / expands / selects |
-| Tab / Nav | `expect(tab).toBeTruthy()` | `fireEvent.press(tab)` → correct screen displayed |
-| Delete / Remove | `expect(deleteBtn).toBeTruthy()` | `fireEvent.press(deleteBtn)` → item removed from list, confirmation shown |
+| `api`, `cli`, `infra` | `backend-engineer` only | sequential |
+| `ui` | `frontend-engineer` only | sequential |
+| `full-stack` | `backend-engineer` THEN `frontend-engineer` | sequential — backend first so frontend wires to a real API |
 
-**Build order for full-stack specs:**
-1. **API-first**: RED/GREEN/REFACTOR for API tests → API routes working
-2. **UI-second**: RED/GREEN/REFACTOR for UI tests → Components rendered, starting from mockup
-3. **Wire together**: RED/GREEN/REFACTOR for integration tests → UI calls real API
+```
+Agent tool (subagent_type: backend-engineer, run_in_background: false):
+"You are running Step 3.2 (TDD) for specs/<slug>.md (@layer=<layer>). Read the application-architect
+handoff (step-2.5), product-owner handoff (step-2), and the spec's Investigation Findings section.
+For every ### Scenario:, apply RED→GREEN→REFACTOR with at-least-one test per scenario. Produce your
+handoff at: specs/handoffs/step-3.2-<slug>-backend-engineer.html"
+```
 
-All three must be GREEN before the spec can proceed to verification.
+For `@layer(full-stack)`, dispatch frontend-engineer after backend returns:
 
-**The cycle:**
-1. **READ** the spec file. If a `## UI Design` section exists, also read the mockup.
-2. **RED** — For each `### Scenario:`, write failing tests for ALL detected layers (API, UI, integration). For each `### Scenario Outline:` + `#### Examples`, write one test per row per layer. All tests MUST fail.
-3. **GREEN** — Write minimal implementation to make tests pass. One scenario at a time. **For UI-facing specs: start from the mockup component code** — copy it as the base, then wire in real data/logic/state to make tests pass. Do NOT implement UI from scratch when a mockup exists.
-4. **REFACTOR** — Clean up while keeping tests green. **For UI-facing specs: verify the component still matches the mockup's visual design** — typography, color palette, layout, spacing, and aesthetic decisions from the `## UI Design` section must be preserved. Passing tests with ugly UI is not GREEN.
-5. **BROWSER ITERATION** (UI-facing specs only) — After each scenario group is GREEN, view the implementation in a browser/simulator across viewports:
-   - Desktop (1440px+), tablet (768px), mobile (375px) — or device simulator for mobile apps
-   - Compare against the mockup side-by-side
-   - Check: do CSS tokens resolve? Are fonts loading? Does layout collapse gracefully?
-   - Fix visual issues immediately — do not defer to "later"
-6. **REPEAT** — Next scenario.
+```
+Agent tool (subagent_type: frontend-engineer, run_in_background: false):
+"You are running Step 3.2 (TDD, UI portion) for specs/<slug>.md (@layer=full-stack). Read the
+backend-engineer handoff to know what endpoints exist. Start UI implementation from the mockup at
+specs/mockups/<slug>/. Wire UI to real API. Assert visual fidelity at REFACTOR. Produce your handoff
+at: specs/handoffs/step-3.2-<slug>-frontend-engineer.html"
+```
 
-**REQUIRED SUB-SKILL:** For specs with few scenarios (1-3), invoke `hyperpowers:test-driven-development` via the Skill tool to run the RED→GREEN→REFACTOR cycle.
-
-**REQUIRED SUB-SKILL:** For specs with many scenarios/rules, invoke `hyperpowers:executing-plans` via the Skill tool to iterate through tasks.
-
-**IMPORTANT when using executing-plans:** Seed the task docs with spec references:
-1. `context.md` lists spec files as Key Files with instruction to read them
-2. `tasks.md` Now items reference which spec scenarios they address
-3. `plan.md` acceptance checks reference spec coverage
+After the engineer agents return, verify their handoffs are at the expected paths and the test files referenced in their `acceptance-criteria` exist. The `hyperpowers:test-runner` agent will execute the tests in Step 3.3a.
 
 #### Continuous Verifier (multi-scenario specs)
 
@@ -619,6 +604,23 @@ Additionally check:
 - Config/options parsed but never acted on = CRITICAL
 - Stubs exposed as functional = CRITICAL
 - Variables assigned but unused = IMPORTANT
+
+#### Step 3.3c.1: Security Architecture Review
+
+**Dispatch the security-architect role agent** between code-review (3.3c) and visual-fidelity (3.3d). It threat-models the diff, walks trust boundaries, and flags injection / SSRF / IDOR / CSRF / XSS / secrets / authz / authn issues.
+
+```
+Agent tool (subagent_type: security-architect, run_in_background: false):
+"You are running Step 3.3c.1 (security review) for specs/<slug>.md. Read the application-architect
+handoff (step-2.5) for data-flow context, the spec, and the implementation diff. Apply the OWASP-style
+checklist in your prompt. Produce your handoff at:
+  specs/handoffs/step-3.3-<slug>-security-architect.html
+Each CRITICAL or IMPORTANT finding must cite a file:line in the implementation. Do not invent threats."
+```
+
+When the agent returns: if it produced an `<aside data-severity="critical" data-blocks-next-step="true">`, do NOT proceed to 3.3d. Fix the CRITICAL findings first, then re-dispatch.
+
+**Skip when:** Spec is `@trivial` (no functional change to security surface).
 
 #### Step 3.3d: Visual Fidelity + Design Quality Check (UI-facing specs only)
 
@@ -985,13 +987,23 @@ Continue until all specs are processed.
 
 After all specs are `@status(verified)`:
 
-### Step 4.1: Playwright E2E Tests (Critical User Journeys)
+### Step 4.1: E2E Tests for Critical User Journeys
 
-**MANDATORY for multi-spec epics with UI-facing specs.** This is the cross-spec integration gate that catches what per-spec verification misses.
+**Dispatch the qa-engineer role agent.** The agent collects every `## Critical User Journeys` row across the epic's specs, authors one e2e test per journey using the project's detected test framework (Playwright/Cypress/Detox), runs the suite, and reports coverage.
 
-**Why this exists:** Per-spec verification tests each feature in isolation. Playwright e2e tests walk the actual user journey end-to-end through the real running application — navigation, data flow, API calls, and cross-feature integration all exercised together.
+```
+Agent tool (subagent_type: qa-engineer, run_in_background: false):
+"You are running Step 4.1 (e2e tests for CUJs) for this epic. Read every spec in the epic and collect
+the ## Critical User Journeys tables. Read the application-architect, backend-engineer, and
+frontend-engineer handoffs to know what was implemented. Author one e2e test file per unique journey.
+Run the suite. Produce your handoff at:
+  specs/handoffs/step-4.1-<epic-id>-qa-engineer.html
+Any failing CUJ is CRITICAL — surface as a blocking <aside>."
+```
 
-**Process:**
+When the agent returns, verify the handoff's `acceptance-criteria` confirm every CUJ has ≥1 e2e test and all pass.
+
+**Reference procedure (kept for context — the agent owns the details):**
 
 1. **Collect CUJs** — Read the `## Critical User Journeys` section from every spec in the epic. Build a master CUJ list.
 
