@@ -370,6 +370,22 @@ else
 fi
 
 echo ""
+echo "=== require-ui-tests first-word blocklist (catches 2026-05-26 hook-enforcement dogfood finding) ==="
+# Bug: when a spec's first hyphen-split word is "test", "spec", "unit", "e2e",
+# or "integration", the first-word substitution matched every *.test.ts file
+# in the project. The hook source should now have a `case "$first_word" in
+# test|tests|spec|...) first_word="$slug" ;;` block.
+TOTAL=$((TOTAL+1))
+if grep -qE 'first_word="\$slug"' "$HOOK_DIR/require-ui-tests.sh" && \
+   grep -qE 'test\|tests\|spec' "$HOOK_DIR/require-ui-tests.sh"; then
+    echo "  PASS  require-ui-tests.sh first-word blocklist present"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-ui-tests.sh missing first-word blocklist — slugs starting with 'test-' etc. will match any *.test.ts"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
 echo "=== hook output-shape regressions (catches the 2026-05-26 dogfood finding) ==="
 # Regression: every blocking hook must either exit 2 (with stderr message) OR
 # emit the modern hookSpecificOutput JSON schema with permissionDecision=deny.

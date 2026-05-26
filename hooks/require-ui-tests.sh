@@ -157,7 +157,17 @@ fi
 # Look for a test file referencing this spec slug. Search common test dirs.
 # Use the slug AND its first significant word (e.g. "user-auth" → also "user")
 # as grep alternatives, to catch tests named more loosely.
+#
+# Blocklist: when the first hyphen-split word is a generic test prefix, do NOT
+# use it as a substitution — it would match every test file in the directory
+# (e.g. slug "test-foo" → first_word "test" → matches every *.test.ts). Caught
+# by the 2026-05-26 hook-enforcement dogfood; tightened here.
 first_word="$(echo "$slug" | cut -d- -f1)"
+case "$first_word" in
+    test|tests|spec|specs|unit|e2e|integration|it)
+        first_word="$slug"   # fall back to full slug; no substitution
+        ;;
+esac
 
 # Build search dirs (only those that exist)
 search_dirs=()
