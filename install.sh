@@ -288,6 +288,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         },
         {
           "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/require-fix-cycle-handoff.sh"
+        },
+        {
+          "type": "command",
           "command": "bash ${HOME}/.claude/hooks/guard-agent-memory-secrets.sh"
         }
       ]

@@ -98,3 +98,17 @@ If both CRITICAL and SPEC-DRIFT findings exist, use `FAIL (spec-drift)` — the 
 6. **NEVER write actual secrets, tokens, or PII into memory.** Use pointers (env var names, file paths, beads task IDs) — never values. The `guard-agent-memory-secrets.sh` hook blocks writes that match secret-shaped patterns.
 
 Memory is the **project-level** context that compounds across dispatches. The codebase-investigator (when dispatched per-spec during /build) augments it for the current task; both are referenced from handoffs via `data-input-references`.
+
+## Exit checklist (run before returning) — TERMINAL
+
+These are the LAST steps in this dispatch. Run them in order. Do NOT return your verbal confirmation until every artifact is on disk.
+
+1. **Write your handoff file** to the path documented in "What you produce" above (or in "Fix mode" if your role has one and you are running a fix-cycle dispatch). Required sections per `docs/role-agent-handoff-schema.md`. Verify the file exists on disk before continuing — open it via Read or `ls` to confirm.
+2. **Update your memory file** at `.claude/agent-memory/<your-role>.md` per the Memory section above. Recent changes, primary-section updates, Known issues additions, frontmatter timestamps (seconds precision — never `T00:00:00Z`).
+3. **Return a short confirmation** (≤ 100 words) naming (a) the handoff path you wrote, (b) the memory entries you added. The verbal confirmation is NOT the deliverable — the handoff file is. Returning without writing the handoff is treated as an incomplete dispatch and the orchestrator will re-dispatch you.
+
+The `require-fix-cycle-handoff.sh` hook blocks `@status(verified)` on specs with asymmetric fix-cycle handoffs (e.g., a reviewer wrote re-verify but the implementer skipped its handoff). The hook is a downstream backstop; the responsibility to write artifacts is yours, in this dispatch, before you return.
+
+**Recurring failure mode this guards against** (observed 2026-05-26 SquashBuckler dogfood, twice): implementer agent dispatched in fix mode does the code work but returns before writing `specs/handoffs/step-3.2-<slug>-<role>-fix-cycle-N.html` and before updating memory. The orchestrator then has to either synthesize a fake artifact or skip the cycle. Treat handoff-write as the LAST thing you do, not a step you can drop under pressure.
+
+**Tool note — do not poll background tasks with `sleep`.** If you launch a long-running command, use `run_in_background: true` and let the harness notify on completion, or use Monitor to stream events. Patterns like `sleep 60 && tail X` either waste time (the task finished sooner) or miss the result (the task is still running). The Bash tool description explicitly forbids this pattern.

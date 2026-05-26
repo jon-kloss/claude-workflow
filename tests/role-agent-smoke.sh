@@ -428,6 +428,114 @@ else
 fi
 
 echo ""
+echo "=== fix-cycle handoff symmetry + exit checklists (2026-05-26 SquashBuckler session) ==="
+
+# workflow-b66: require-fix-cycle-handoff.sh hook exists and is registered
+TOTAL=$((TOTAL+1))
+if [ -f "$HOOK_DIR/require-fix-cycle-handoff.sh" ] && [ -x "$HOOK_DIR/require-fix-cycle-handoff.sh" ]; then
+    echo "  PASS  require-fix-cycle-handoff.sh present and executable"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-fix-cycle-handoff.sh missing or not executable"
+    FAIL=$((FAIL+1))
+fi
+
+TOTAL=$((TOTAL+1))
+if grep -q 'require-fix-cycle-handoff.sh' "$WORKFLOW_DIR/install.sh"; then
+    echo "  PASS  require-fix-cycle-handoff.sh registered in install.sh"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-fix-cycle-handoff.sh not registered in install.sh"
+    FAIL=$((FAIL+1))
+fi
+
+# Hook behavior tests — build a synthetic project with handoffs and exercise
+FC_TMP="$TMP/fix-cycle-test"
+mkdir -p "$FC_TMP/specs/handoffs"
+FC_SPEC="$FC_TMP/specs/example-feature.md"
+echo "@layer(api)" > "$FC_SPEC"
+FC_VERIFIED_CONTENT="@layer(api) @status(verified)"
+
+# Case 1: no cycle handoffs at all => allow (base-handoff hook owns the non-cycle case)
+got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "no fix-cycle handoffs at all -> allow" "allow" "$got"
+
+# Case 2: cycle 1 has BOTH implementer + reviewer => allow
+touch "$FC_TMP/specs/handoffs/step-3.2-example-feature-backend-engineer-fix-cycle-1.html"
+touch "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-cycle-1.html"
+got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "cycle 1 symmetric (impl + reviewer) -> allow" "allow" "$got"
+
+# Case 3: cycle 2 has reviewer but NOT implementer (the actual bug) => block
+touch "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-cycle-2.html"
+got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "cycle 2 reviewer-only (the bug) -> block" "block" "$got"
+
+# Case 4: cycle 2 implementer added => allow
+touch "$FC_TMP/specs/handoffs/step-3.2-example-feature-backend-engineer-fix-cycle-2.html"
+got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "cycle 2 now symmetric -> allow" "allow" "$got"
+
+# Case 5: cycle 3 has implementer but NOT reviewer => block (other direction)
+touch "$FC_TMP/specs/handoffs/step-3.2-example-feature-backend-engineer-fix-cycle-3.html"
+got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "cycle 3 implementer-only (no re-verify) -> block" "block" "$got"
+
+# Case 6: @fix-cycle-skip(3: reason) override => allow
+FC_VERIFIED_SKIP="@layer(api) @status(verified) @fix-cycle-skip(3: reviewer findings withdrawn after re-investigation)"
+got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_SKIP" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "cycle 3 with @fix-cycle-skip(3: ...) -> allow" "allow" "$got"
+
+# Case 7: @trivial spec bypasses fix-cycle check
+FC_TRIVIAL_SPEC="$FC_TMP/specs/trivial-fix.md"
+echo "@layer(api) @trivial" > "$FC_TRIVIAL_SPEC"
+got=$(mkpayload_edit "$FC_TRIVIAL_SPEC" "@layer(api) @trivial @status(verified)" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "@trivial spec bypasses fix-cycle hook" "allow" "$got"
+
+# workflow-myr: every agent has the terminal Exit checklist section
+TOTAL=$((TOTAL+1))
+agents_with_exit=$(grep -lE '^## Exit checklist \(run before returning\)' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+if [ "$agents_with_exit" -eq 11 ]; then
+    echo "  PASS  all 11 agents have terminal Exit checklist section"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  expected 11 agents with Exit checklist, found $agents_with_exit (workflow-myr regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-myr: exit checklist names handoff-write as terminal step
+TOTAL=$((TOTAL+1))
+agents_with_terminal_handoff=$(grep -lE 'TERMINAL|handoff file is NOT|verbal confirmation is NOT the deliverable' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+if [ "$agents_with_terminal_handoff" -ge 11 ]; then
+    echo "  PASS  all agents emphasize handoff-as-deliverable in exit checklist"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  only $agents_with_terminal_handoff/11 agents emphasize terminal handoff-write"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-1bo: sleep-poll anti-pattern guidance present in agent prompts
+TOTAL=$((TOTAL+1))
+agents_with_sleep_warn=$(grep -lE 'do not poll background tasks with .sleep' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+if [ "$agents_with_sleep_warn" -eq 11 ]; then
+    echo "  PASS  all 11 agents carry sleep-poll anti-pattern warning"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  expected 11 agents with sleep-poll warning, found $agents_with_sleep_warn (workflow-1bo regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-1bo: build/SKILL.md Step 3.3h references the sleep anti-pattern
+TOTAL=$((TOTAL+1))
+if grep -q 'Do not sleep-poll background work' "$WORKFLOW_DIR/skills/build/SKILL.md"; then
+    echo "  PASS  build/SKILL.md Step 3.3h flags sleep-poll anti-pattern"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  build/SKILL.md missing sleep-poll guidance in Step 3.3h"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
 echo "=== require-ui-tests first-word blocklist (catches 2026-05-26 hook-enforcement dogfood finding) ==="
 # Bug: when a spec's first hyphen-split word is "test", "spec", "unit", "e2e",
 # or "integration", the first-word substitution matched every *.test.ts file

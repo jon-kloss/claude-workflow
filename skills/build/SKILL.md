@@ -665,6 +665,12 @@ Next: proceed to Step 3.4 | run cycle $((N+1)) | escalate to user (cycle cap rea
 
 The fix-cycle is the single most important orchestration step. Without it, reviewers' findings become advisory text nobody acts on; with it, every CRITICAL has a deterministic path to resolution.
 
+**Backstop hook: `require-fix-cycle-handoff.sh`** (PreToolUse on Edit/Write of `@status(verified)`). For each cycle number N detected under `specs/handoffs/`, both sides must exist on disk: at least one `step-3.2-<slug>-<role>-fix-cycle-N.html` (implementer) AND at least one `step-3.3-<slug>-<role>-cycle-N.html` (reviewer). Asymmetric cycles block. This catches the recurring failure mode where an implementer agent does the fix work but returns without writing its handoff — by the time you try to verify the spec, the asymmetry surfaces and you can re-dispatch with stronger language. Override per cycle via `@fix-cycle-skip(<N>: <reason>)`.
+
+**Post-dispatch sanity check** (after each agent returns in a fix-cycle): immediately confirm the expected handoff file exists on disk (`ls specs/handoffs/step-3.2-<slug>-<role>-fix-cycle-${N}.html`). If missing, re-dispatch the same agent with: *"Your prior dispatch returned without writing `<expected-path>`. That handoff IS the deliverable, not the verbal confirmation. Per your Exit checklist section, write it now."* The Exit checklist section in every agent prompt names this as a TERMINAL step.
+
+**Do not sleep-poll background work.** If a test-runner or fix-mode dispatch is long-running, use `run_in_background: true` and let the harness notify on completion, or `Monitor` to stream events. `sleep 60 && tail X` either wastes time or misses the result. Recurring anti-pattern; the Bash tool description forbids it.
+
 ### Step 3.4: User Sign-Off Checkpoint
 
 **Unless `--auto` flag was passed**, pause and present a summary to the user for final sign-off before marking the spec as verified.
