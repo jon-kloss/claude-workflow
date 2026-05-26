@@ -241,6 +241,8 @@ The installer:
 
 **Switching branches.** Run `git checkout <branch>` in `~/.claude/workflow`, then `./install.sh` again. The installer is dedup-aware at the command level, so re-installation correctly refreshes symlinks without duplicating hook registrations in `settings.json`.
 
+**Restart Claude Code after install** — the subagent registry loads at session start. Newly-installed role agents won't be dispatchable as `subagent_type=<role>` until you `/clear` or start a fresh session. Hooks reload on every tool call so they're always current, but agent types are registered once. If you try to dispatch a newly-installed agent and get `Agent type '<name>' not found`, that's the symptom — restart and retry.
+
 **Verifying the install:**
 
 ```bash
