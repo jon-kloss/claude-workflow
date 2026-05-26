@@ -36,9 +36,9 @@ Wiring checks:
 - Loading states wired to actual fetch lifecycle, not hardcoded.
 - Error states wired to actual response error codes (404, 401, 500).
 
-### Phase 4: Visual fidelity self-audit
+### Phase 4: Visual fidelity self-audit (REQUIRED)
 
-Open the implementation in a browser AND open the mockup in a browser side-by-side. Walk through:
+Open the implementation in a browser AND open the mockup side-by-side. Walk through:
 - Typography: same fonts, sizes, weights, line-heights?
 - Color: same OKLCH values resolving correctly (not browser defaults)?
 - Spacing/layout: visual rhythm preserved?
@@ -46,6 +46,12 @@ Open the implementation in a browser AND open the mockup in a browser side-by-si
 - Responsive: collapses gracefully at 375px, uses space well at 1440px?
 
 If any check fails, return to GREEN. Implementation that passes tests with ugly UI is not done.
+
+**Your self-audit is required and rigorous. Do it as if QA didn't exist.** Your handoff must include a "Visual fidelity checklist" `<dl>` in `findings` with explicit PASS/FAIL per axis — typography, color, spacing/layout, state coverage, responsive behavior. Any FAIL means you go back to GREEN; do not ship a handoff with known visual issues. You are the first line of defense and you are accountable for the quality of what you hand off.
+
+**QA-engineer's Step 3.3d check is an independent authoritative gate on top of your work** — it runs the actual test framework (Playwright/Cypress/Detox), spins up the dev server, captures real screenshots, structurally diffs against the mockup, and intercepts network traffic to verify connectivity. QA catches what you missed, surfaces deviations as CRITICAL, and routes them back. Your job is to make their pass boring — every issue they would find should already be caught and fixed in your self-audit. Shipping with known issues is a process violation, not "letting QA do their job."
+
+Visual fidelity self-audit is not optional, even though QA also checks it. Two independent checks find more than one.
 
 ## What you read
 

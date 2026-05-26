@@ -505,111 +505,35 @@ Include EXPLAIN output for new queries; cite file:line for every concern."
 
 **Trigger:** `@touches-data` tag OR `@layer(api|full-stack)` with DB operations in Technical Context.
 
-#### Step 3.3d: Visual Fidelity + Design Quality Check (UI-facing specs only)
+#### Step 3.3d: QA Engineer per-spec verification (authoritative)
 
-The frontend-engineer agent's REFACTOR phase (Phase 4: visual fidelity self-audit) and the uiux-designer agent's gate-orchestration (the 5 `/impeccable` gates) together cover this step. Re-running them here is the orchestrator's "trust but verify" pass:
+**Dispatch the qa-engineer role agent.** This step CONSOLIDATES three checks that used to be orchestrator-inline (visual fidelity, scenario coverage, API integration) under a single dispatch. The QA agent runs the actual test framework against the actual running app — spins up the dev server, drives a real browser, screenshots both implementation and mockup, intercepts network traffic to verify every Interaction Map row fires its declared API call.
 
-1. Confirm the frontend-engineer handoff's "Visual fidelity checklist" `<dl>` shows PASS for typography, color, layout, states, responsive.
-2. Confirm the `## UI Design` section in the spec lists the 5 Skill invocations (`critique`, `audit`, `harden`, `clarify`, `adapt`). `hooks/claim-vs-call-audit.sh` verifies they actually fired in this session.
-3. If any of those gates returned weakness findings, the uiux-designer should have applied the appropriate `/impeccable` enhancement (`bolder`, `colorize`, `typeset`, `animate`, etc.) and re-run `critique`.
-4. Log a `VISUAL FIDELITY + DESIGN QUALITY CHECK: ... Verdict: PASS|FAIL` bd comment with the per-axis verdicts copied from the handoffs.
-
-Visual fidelity failure OR any unaddressed CRITICAL gate finding is **CRITICAL** for the build — re-dispatch the relevant agent.
-
-**Skip when:** `@layer(api|cli|infra)` AND no `## UI Design` section. Specs with `## UI Design` always run, regardless of layer tag.
-
-#### Step 3.3d.1: Functional UI Test (BLOCKING GATE — enforced by hook)
-
-**For every `@layer(ui)` or `@layer(full-stack)` spec, a functional UI test must exist before `@status(verified)` can be written.** Visual fidelity (D1–D10 above) verifies the UI looks right by inspection — this step verifies the UI behaves right under automation.
-
-This gate is enforced by `hooks/require-ui-tests.sh`. The hook:
-
-1. **Detects the framework.** In priority order:
-   - `.claude/ui-test-framework` file override (one of: `playwright | cypress | detox | vitest-browser | jest-rtl | xcuitest`)
-   - Project file auto-detection: `playwright.config.*` or `@playwright/test` in `package.json` → Playwright (preferred for web/Electron); `cypress.config.*` or `cypress` dep → Cypress; `detox` dep → Detox (React Native); Vitest browser-mode config → Vitest browser; `@testing-library/react` + Jest/Vitest → Jest-RTL (component-level fallback); `*.xcodeproj` → XCUITest (native iOS).
-   - If nothing detected, the hook blocks with installation instructions.
-
-2. **Requires a test file referencing the spec.** Searches `tests/`, `e2e/`, `cypress/e2e/`, `__tests__/`, `e2e-tests/`, `ui-tests/`, `playwright-tests/`, `integration-tests/` (and `UITests/` for xcuitest) for a `*.spec.{ts,tsx,js,jsx,mjs,cjs}` / `*.test.*` / `*.e2e.*` / `*.swift|kt|java|py` file whose filename or contents reference the spec slug or its first significant word.
-
-3. **Blocks `@status(verified)` writes** that don't satisfy both checks.
-
-**Authoring guidance.** Write at least one test per spec that:
-- Renders or navigates to the UI surface the spec describes
-- Performs the user actions in one or more `### Scenario:` blocks
-- Asserts the observable behavior (text, state, network call, navigation)
-
-For full-stack specs, the test must exercise the wired-together stack — clicking the UI button and asserting the API was called with the expected payload counts; mocking the API in a way that hides wiring bugs does not.
-
-**Escape hatch.** Add `@ui-test-skip(<concise reason>)` to the spec. The reason persists in the file as documentation. Use this rarely — for scaffolding-only specs with no behavior to test, or for specs whose behavior is entirely covered by another spec's test (and cite the other spec slug in the reason).
-
-**Skip when:** Spec is tagged `@layer(api)`, `@layer(cli)`, or `@layer(infra)` AND has no `## UI Design` section. The hook auto-skips these.
-
-#### Step 3.3e: Spec Scenario Coverage Check (Manual + Layer-Aware)
-
-After code review returns, manually verify **per layer**:
-1. Read the spec file
-2. Check the layer detection from Step 3.1 (API, UI, or Full-stack)
-3. For every `### Scenario:` and `### Scenario Outline:`:
-   - **API layer** (if detected): API route/handler exists for the scenario's action. At least one API test.
-   - **UI layer** (if detected): Component/screen exists that renders the scenario's UI. At least one component/UI test.
-   - **Integration** (if full-stack): UI code calls the real API endpoint. At least one integration/wiring test.
-
-**CRITICAL**: For full-stack specs, a scenario is NOT covered by API tests alone. "Client taps Start Workout" requires BOTH an API route AND a UI component with a button that calls it. API-only coverage of a full-stack scenario is a **CRITICAL** failure (`layer-gap`).
-
-```bash
-bd comments add [epic-id] "SPEC COVERAGE CHECK: specs/<feature-slug>.md
-
-Layers detected: [API | UI | Full-stack]
-
-Total scenarios: [N]
-API layer — Implemented: [N] / Tested: [N]
-UI layer — Implemented: [N] / Tested: [N]  (or N/A if API-only)
-Integration — Wired: [N] / Tested: [N]     (or N/A if single-layer)
-Missing implementation: [list — specify which layer]
-Missing tests: [list — specify which layer]
-
-Verdict: PASS | FAIL"
+```
+Agent tool (subagent_type: qa-engineer, run_in_background: false):
+"You are running Step 3.3d (per-spec QA) for specs/<slug>.md. Read the engineers' handoffs, the
+spec, the mockup at specs/mockups/<slug>/, and DESIGN.md. Author an independent test plan with four
+matrices (scenario coverage, connectivity, visual fidelity, exploratory). Detect the test framework,
+spin up the dev server, run the framework against the running app. For each visual matrix row,
+structurally compare computed styles between implementation and mockup; if the spec is tagged
+@visual-pixel-diff, also run pixel-diff via toHaveScreenshot. For each connectivity matrix row,
+intercept the network and verify the expected request fires. Author test files in tests/e2e/ or the
+framework's convention. Produce handoff at:
+  specs/handoffs/step-3.3-<slug>-qa-engineer.html
+Any failing scenario, missing connectivity, or visual mismatch is CRITICAL — surface as a blocking <aside>."
 ```
 
-Unimplemented scenario = CRITICAL (`spec-coverage`). Untested scenario = IMPORTANT.
+When the agent returns, verify the handoff's acceptance-criteria pass and that the test files referenced exist on disk. The `require-ui-tests.sh` hook independently checks that test files reference the spec slug.
 
-#### Step 3.3f: API Integration Check (UI-facing specs with backend)
+**Visual fidelity comparison method:**
+- **Structural diff (mandatory)** — for every UI surface in the spec, QA walks matched selectors in both implementation and mockup, comparing computed styles (typography axes, color, spacing, layout, state coverage). This is the binding check.
+- **Pixel diff (opt-in)** — for specs tagged `@visual-pixel-diff`, QA additionally runs `toHaveScreenshot()` against a captured mockup screenshot with `maxDiffPixelRatio: 0.05`. Use this for brand surfaces or exact-recreation specs; pixel-diff is flaky on subpixel rendering otherwise.
 
-**For specs where UI scenarios imply backend persistence or API calls**, verify every interactive element is wired to the real API — not just local state, stubs, or TODO functions.
+**Frontend-engineer's REFACTOR self-check is preliminary; QA's check is authoritative.** Don't ship a frontend handoff with known visual deviations and rely on QA to catch them — fix at REFACTOR first.
 
-**Process:**
+**Skip when:** Spec is `@trivial`. UI checks within QA auto-skip for `@layer(api|cli|infra)` specs without a `## UI Design` section.
 
-1. **Read the spec's Technical Context** — identify all API endpoints listed
-2. **Read the spec scenarios** — identify every user action that implies backend communication:
-   - Buttons that create/update/delete data (POST, PATCH, DELETE)
-   - Forms that submit data
-   - Navigation that loads data (GET)
-   - State changes that must persist across sessions
-3. **For each action, verify in the implementation code:**
-   - An actual API call is made (fetch, axios, Supabase client, etc.) — not a TODO, stub, console.log, or local-state-only dispatch
-   - The API call uses the correct endpoint from Technical Context
-   - Error handling exists for the API call (loading state, error state)
-   - Success updates the UI with the response (not just optimistic local state)
-
-4. **Log results:**
-
-```bash
-bd comments add [epic-id] "API INTEGRATION CHECK: specs/<feature-slug>.md
-
-Interactive elements checked:
-- [Button: 'Start Workout'] → POST /api/v1/workout-logs — WIRED | STUB | MISSING
-- [Button: 'Log Set'] → PATCH /api/v1/workout-logs/:id — WIRED | STUB | MISSING
-- [Button: 'Complete Workout'] → PATCH /api/v1/workout-logs/:id — WIRED | STUB | MISSING
-- [Navigation: 'History'] → GET /api/v1/workout-logs — WIRED | STUB | MISSING
-
-Verdict: PASS | FAIL"
-```
-
-**Severity:**
-- STUB or MISSING API call = **CRITICAL** (`api-integration`). A button that doesn't call the API is a broken feature, regardless of whether unit tests pass.
-- Wrong endpoint or missing error handling = **IMPORTANT**
-
-**Skip when:** Spec is tagged `@layer(cli)` or `@layer(infra)`, OR is tagged `@layer(ui)` AND the Technical Context section contains no API entries. Deterministic check: `grep -E '@layer\((cli|infra)\)' specs/<slug>.md` matches, OR (`grep -q '@layer(ui)'` matches AND `grep -A20 '## Technical Context' specs/<slug>.md | grep -qE 'POST|GET|PUT|DELETE|PATCH'` does not match). `@layer(api)` and `@layer(full-stack)` always run this check.
+(The `hooks/require-ui-tests.sh` hook continues to enforce that a test file referencing the spec slug exists before `@status(verified)`. QA-engineer authors those tests.)
 
 #### Step 3.3g: SRE + Intent Audit
 
@@ -747,16 +671,19 @@ Continue until all specs are processed.
 
 After all specs are `@status(verified)`:
 
-### Step 4.1: E2E Tests for Critical User Journeys
+### Step 4.1: Epic-level QA — Cross-spec Critical User Journeys
 
-**Dispatch the qa-engineer role agent.** The agent collects every `## Critical User Journeys` row across the epic's specs, authors one e2e test per journey using the project's detected test framework (Playwright/Cypress/Detox), runs the suite, and reports coverage.
+**Dispatch the qa-engineer role agent (second dispatch — distinct from Step 3.3d).** Step 3.3d covered per-spec verification (visual fidelity, connectivity, scenario coverage). Step 4.1 covers the journeys that SPAN multiple specs — the integration tests per-spec QA can't see because they exist only when several features are wired together (e.g. "register → log in → create list → add task → mark done → view history").
+
+The agent collects every `## Critical User Journeys` row across the epic's specs, authors one e2e test per unique journey, runs the suite against the running app, and reports cross-spec coverage. Same framework detection logic as Step 3.3d.
 
 ```
 Agent tool (subagent_type: qa-engineer, run_in_background: false):
-"You are running Step 4.1 (e2e tests for CUJs) for this epic. Read every spec in the epic and collect
-the ## Critical User Journeys tables. Read the application-architect, backend-engineer, and
-frontend-engineer handoffs to know what was implemented. Author one e2e test file per unique journey.
-Run the suite. Produce your handoff at:
+"You are running Step 4.1 (epic-level e2e for cross-spec CUJs) for this epic. Read every spec's
+## Critical User Journeys table and build a master list of UNIQUE journeys spanning multiple specs.
+Read the per-spec QA handoffs at specs/handoffs/step-3.3-*-qa-engineer.html — those cover per-spec
+behavior; you cover the cross-spec wire-together. Author one e2e file per journey at
+tests/e2e/cuj-<journey-slug>.spec.ts. Spin up the dev server and run the suite. Produce handoff at:
   specs/handoffs/step-4.1-<epic-id>-qa-engineer.html
 Any failing CUJ is CRITICAL — surface as a blocking <aside>."
 ```

@@ -105,7 +105,7 @@ for h in product-owner application-architect security-architect qa-engineer back
         application-architect) step=step-2.5 ;;
         backend-engineer)      step=step-3.2 ;;
         security-architect|devops-architect|data-architect) step=step-3.3 ;;
-        qa-engineer)           step=step-4.1 ;;
+        qa-engineer)           step=step-3.3 ;;
     esac
     write_handoff specs/handoffs "$step" api-feature "$h"
 done
@@ -159,7 +159,7 @@ for h in product-owner application-architect security-architect qa-engineer uiux
         uiux-designer)         step=step-2.85 ;;
         frontend-engineer)     step=step-3.2 ;;
         security-architect|devops-architect) step=step-3.3 ;;
-        qa-engineer)           step=step-4.1 ;;
+        qa-engineer)           step=step-3.3 ;;
     esac
     write_handoff specs/handoffs "$step" ui-feature "$h"
 done

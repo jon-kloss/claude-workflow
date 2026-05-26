@@ -119,7 +119,7 @@ expected+=("step-2-${slug}-product-owner.html")
 expected+=("step-2.5-${slug}-application-architect.html")
 expected+=("step-3.3-${slug}-security-architect.html")
 expected+=("step-3.3-${slug}-devops-architect.html")
-expected+=("step-4.1-${slug}-qa-engineer.html")
+expected+=("step-3.3-${slug}-qa-engineer.html")
 
 case "$layer" in
     "ui"|"full-stack")
