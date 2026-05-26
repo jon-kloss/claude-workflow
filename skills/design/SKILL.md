@@ -12,6 +12,12 @@ Design skill that shapes work through Socratic questioning, generates Gherkin sp
 - `uiux-designer` — Step 2.85 UI/UX (wraps `/design-ui`)
 
 Each role agent produces an HTML handoff at `specs/handoffs/<step>-<slug>-<role>.html` per `docs/role-agent-handoff-schema.md`.
+
+**Parallel-dispatch pattern.** To dispatch multiple role agents concurrently (e.g. `application-architect` + `devops-architect` for Step 4.5 arch docs), include MULTIPLE `Agent` tool calls in a SINGLE message. The harness fans them out in parallel. Splitting calls across separate messages serializes them. Verify by reading `data-produced-at` timestamps in the handoffs — they should overlap.
+
+**Inline-synthesis fallback.** If the `Agent` tool is not available in your toolset (i.e. you are yourself a dispatched subagent and cannot dispatch further), fall back to inline synthesis: read each role's `agents/<role>.md` prompt, perform the role's work yourself, produce the same handoff file at the same path, and mark it with `<note data-synthesized="true">This handoff was synthesized inline because the Agent tool was unavailable.</note>` in the `findings` section. The audit trail stays schema-compliant; what's lost is diversity-of-perspective.
+
+**Known limitation: TaskCreate reminders.** The Claude Code harness emits `system-reminder` messages suggesting `TaskCreate` periodically. They come from the harness itself, not our hooks, and cannot be silenced from the workflow side. Beads is the canonical task tracker (per the SessionStart hook); ignore the TaskCreate reminders.
 </skill_overview>
 
 <rigidity_level>

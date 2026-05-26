@@ -162,14 +162,19 @@ fi
 echo "  - $agent_count agent files linked"
 
 # 3. Install hooks
+# Includes both *.sh entry points AND *.py helpers (e.g. _validate_handoff.py
+# which require-handoff-artifact.sh invokes). Missing .py helpers caused a
+# critical bug where the entire handoff-artifact gate false-positive blocked
+# every @status(verified) write under set -euo pipefail.
 echo "[3/6] Installing hooks..."
 mkdir -p "$CLAUDE_DIR/hooks"
 hook_count=0
-for hook in "$SCRIPT_DIR"/hooks/*.sh; do
+for hook in "$SCRIPT_DIR"/hooks/*.sh "$SCRIPT_DIR"/hooks/*.py; do
+    [ -f "$hook" ] || continue   # skip if a glob expanded to nothing
     backup_and_link "$hook" "$CLAUDE_DIR/hooks/$(basename "$hook")"
     hook_count=$((hook_count + 1))
 done
-echo "  - $hook_count hook scripts linked"
+echo "  - $hook_count hook files linked (.sh + .py)"
 
 # Write manifest of installed files (used by uninstall to identify our files)
 echo "# Workflow install manifest - do not edit" > "$MANIFEST_FILE"
@@ -185,7 +190,8 @@ if [ -d "$SCRIPT_DIR/agents" ]; then
         echo "$CLAUDE_DIR/agents/$(basename "$agent")" >> "$MANIFEST_FILE"
     done
 fi
-for hook in "$SCRIPT_DIR"/hooks/*.sh; do
+for hook in "$SCRIPT_DIR"/hooks/*.sh "$SCRIPT_DIR"/hooks/*.py; do
+    [ -f "$hook" ] || continue
     echo "$CLAUDE_DIR/hooks/$(basename "$hook")" >> "$MANIFEST_FILE"
 done
 
@@ -352,6 +358,15 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/track-skills.sh"
+        }
+      ]
+    },
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/molecule-autoclose-warn.sh"
         }
       ]
     }

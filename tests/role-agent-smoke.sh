@@ -192,7 +192,12 @@ echo "=== require-release-handoff.sh ==="
 # Switch back to the workflow dir so `bd` works.
 cd "$WORKFLOW_DIR" || exit 1
 
-EPIC_ID=$(bd create --title="[epic] SMOKE TEST release hook" --description="smoke test, ignore" --type=feature --priority=4 2>&1 | grep -oE 'workflow-[a-z0-9]+' | head -1)
+# Regression: build-test (2026-05-25) found that bd with --type=epic auto-displays [EPIC]
+# uppercase in bd show output, but require-release-handoff.sh's grep was case-sensitive
+# '[epic]'. The hook never matched → silent under-block. Use --type=epic here, NOT
+# --type=feature with [epic] in title (the latter doesn't reproduce the bug because
+# bd echoes the title verbatim).
+EPIC_ID=$(bd create --title="SMOKE TEST release hook (uppercase prefix)" --description="smoke test, ignore" --type=epic --priority=4 2>&1 | grep -oE 'workflow-[a-z0-9]+' | head -1)
 NONEPIC_ID=$(bd create --title="smoke non-epic" --description="smoke test, ignore" --type=task --priority=4 2>&1 | grep -oE 'workflow-[a-z0-9]+' | head -1)
 
 if [ -z "$EPIC_ID" ] || [ -z "$NONEPIC_ID" ]; then
@@ -231,6 +236,46 @@ EOF
     # Cleanup
     bd close "$EPIC_ID" --reason="smoke test cleanup" > /dev/null 2>&1
     bd close "$NONEPIC_ID" --reason="smoke test cleanup" > /dev/null 2>&1
+fi
+
+echo ""
+echo "=== installed-form regressions (require ~/.claude/hooks/ to reflect a real install) ==="
+# These tests catch the 2026-05-25 build-test regression: install.sh was only globbing
+# *.sh and skipping *.py helpers like _validate_handoff.py. The earlier smoke tests
+# all ran against the workflow repo's hooks/ directly, so they couldn't catch the
+# install-symlink path. These regressions check the installed form.
+
+TOTAL=$((TOTAL+1))
+if [ -f "$HOME/.claude/hooks/_validate_handoff.py" ]; then
+    echo "  PASS  _validate_handoff.py present in ~/.claude/hooks/ (install.sh symlinked *.py)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  _validate_handoff.py MISSING from ~/.claude/hooks/ — install.sh did not symlink *.py helpers"
+    echo "        (run: cd $WORKFLOW_DIR && bash install.sh)"
+    FAIL=$((FAIL+1))
+fi
+
+# Regression: require-handoff-artifact.sh must degrade gracefully when validator missing.
+# We can't easily simulate "missing validator" without touching the install (classifier
+# would block), so we check the hook source for the defensive guard pattern.
+TOTAL=$((TOTAL+1))
+if grep -q 'VALIDATOR=' "$HOOK_DIR/require-handoff-artifact.sh" && \
+   grep -q 'if \[ ! -f "\$VALIDATOR" \]' "$HOOK_DIR/require-handoff-artifact.sh"; then
+    echo "  PASS  require-handoff-artifact.sh has defensive validator-existence guard"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-handoff-artifact.sh lacks defensive validator check — will hard-block silently on missing _validate_handoff.py"
+    FAIL=$((FAIL+1))
+fi
+
+# Regression: require-release-handoff.sh must use case-insensitive [epic] grep.
+TOTAL=$((TOTAL+1))
+if grep -qE 'grep -[a-z]*i[a-z]*E.*\\\[epic\\\]' "$HOOK_DIR/require-release-handoff.sh"; then
+    echo "  PASS  require-release-handoff.sh uses case-insensitive [epic] grep"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-release-handoff.sh has case-sensitive [epic] regex — will miss [EPIC] uppercase from bd --type=epic"
+    FAIL=$((FAIL+1))
 fi
 
 echo ""

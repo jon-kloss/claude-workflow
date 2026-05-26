@@ -62,7 +62,9 @@ if [ -z "$show_out" ]; then
 fi
 
 # Look for "[epic]" in the title line. bd show formats: "○ id · TITLE..."
-if ! echo "$show_out" | grep -qE '\[epic\]'; then
+# Case-insensitive: bd emits [EPIC] in current versions but historical/lower
+# forms exist in older databases.
+if ! echo "$show_out" | grep -qiE '\[epic\]'; then
     echo '{}'
     exit 0
 fi

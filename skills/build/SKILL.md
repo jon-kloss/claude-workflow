@@ -13,6 +13,12 @@ Build skill that consumes `@status(approved)` Gherkin specs produced by `/design
 - (`spec-sre-auditor` already exists — Step 3.3g intent audit)
 
 Each role agent produces an HTML handoff at `specs/handoffs/<step>-<slug>-<role>.html`. The `require-handoff-artifact.sh` hook blocks `@status(verified)` writes if any required handoff is missing or schema-invalid. See `docs/role-agent-handoff-schema.md`.
+
+**Parallel-dispatch pattern.** To dispatch multiple role agents concurrently (e.g. `security-architect` + `devops-architect` + `data-architect` for Step 3.3's review pass), include MULTIPLE `Agent` tool calls in a SINGLE message. The harness fans them out in parallel. Splitting calls across separate messages serializes them and wall-clock grows linearly. After dispatching, verify parallelism by reading `data-produced-at` timestamps in the handoffs — they should overlap.
+
+**Inline-synthesis fallback.** If the `Agent` tool is not available in your toolset (i.e. you are yourself a dispatched subagent and cannot dispatch further), fall back to inline synthesis: read each role's `agents/<role>.md` prompt, perform the role's work yourself, produce the same handoff file at the same path, and mark it with `<note data-synthesized="true">This handoff was synthesized inline because the Agent tool was unavailable.</note>` in the `findings` section. The audit trail stays schema-compliant; what's lost is diversity-of-perspective.
+
+**Known limitation: TaskCreate reminders.** The Claude Code harness emits `system-reminder` messages suggesting `TaskCreate` periodically. They come from the harness itself, not our hooks, and cannot be silenced from the workflow side. Beads is the canonical task tracker (per the SessionStart hook); ignore the TaskCreate reminders.
 </skill_overview>
 
 <rigidity_level>

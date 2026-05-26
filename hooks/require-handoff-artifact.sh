@@ -29,6 +29,18 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
+# Defensive: if the Python validator isn't installed (e.g. install.sh ran on
+# an older version that only symlinked *.sh, or the file was manually removed),
+# degrade gracefully. Without this guard, set -euo pipefail propagates the
+# [Errno 2] from Python and aborts the script with exit 2, which the harness
+# interprets as an empty block — a silent over-block that's hard to debug.
+VALIDATOR="$HOOK_DIR/_validate_handoff.py"
+if [ ! -f "$VALIDATOR" ]; then
+    echo >&2 "require-handoff-artifact: validator not found at $VALIDATOR — allowing edit (run install.sh to restore)"
+    echo '{}'
+    exit 0
+fi
+
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
     exit 0
@@ -153,7 +165,7 @@ for handoff_filename in "${expected[@]}"; do
         continue
     fi
     # Validate schema via Python helper
-    validation_result=$("$PYTHON" "$HOOK_DIR/_validate_handoff.py" "$handoff_path" "$slug" "$role" 2>/dev/null)
+    validation_result=$("$PYTHON" "$VALIDATOR" "$handoff_path" "$slug" "$role" 2>/dev/null || true)
     if [ -n "$validation_result" ]; then
         malformed+=("$handoff_filename: $validation_result")
     fi
