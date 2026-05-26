@@ -613,6 +613,58 @@ Action: [returning to fix | fixing inline | deferring]"
 
 Maximum 3 fix-verify cycles per spec before escalating to user.
 
+#### Step 3.3h: Fix-Cycle (run after any reviewer returns CRITICAL/IMPORTANT findings)
+
+**Reviewers (QA, security-architect, devops-architect, data-architect, code-reviewer, sre-auditor) flag — implementers fix — finders re-verify.** This is the explicit orchestration of that loop. Each finding in a reviewer handoff carries `data-route-to="<role>"` per `docs/role-agent-handoff-schema.md`; this step reads those attributes and dispatches the right implementer.
+
+**Process per cycle:**
+
+1. **Aggregate findings.** Across every reviewer handoff produced in Step 3.3a–3.3g, collect every `<aside data-severity="critical|important">` and every findings-table row with `data-route-to`. Don't drop SUGGESTION findings — they go into open-questions, not the fix queue.
+2. **Group by `data-route-to`.** Build a per-implementer queue:
+   ```
+   backend-engineer:    [finding-1, finding-3, finding-7]
+   frontend-engineer:   [finding-2, finding-5]
+   uiux-designer:       [finding-4]
+   ```
+3. **Dispatch implementers in parallel.** Independent implementers can fix in parallel — include multiple `Agent` tool calls in a SINGLE message (per the parallel-dispatch pattern in this skill's header). Each dispatch includes that implementer's findings list and the source-handoff paths:
+
+   ```
+   Agent tool (subagent_type: backend-engineer, run_in_background: false):
+   "You are running Step 3.3h fix-cycle N for specs/<slug>.md. Findings routed to you:
+   - finding-1 from specs/handoffs/step-3.3-<slug>-security-architect.html (CRITICAL: missing CSRF on PATCH /api/preferences/theme:24)
+   - finding-3 from specs/handoffs/step-3.3-<slug>-data-architect.html (IMPORTANT: schema/migration drift)
+   ...
+   Per your fix-mode protocol: fix narrowly, add regression tests, re-run affected tests. Produce
+   follow-up handoff at specs/handoffs/step-3.2-<slug>-backend-engineer-fix-cycle-N.html."
+   ```
+
+4. **Re-dispatch the original finders.** When all implementers have returned, re-dispatch each reviewer whose findings were addressed, with the prior cycle's handoff path so they can re-verify only the previously-flagged findings (not the whole spec). Re-dispatched reviewers produce new handoffs at `specs/handoffs/step-3.3-<slug>-<role>-cycle-N.html`.
+
+5. **Re-aggregate.** Read the new reviewer handoffs. If any CRITICAL or IMPORTANT findings remain (new or unaddressed), go to cycle N+1.
+
+6. **Cap at 3 cycles.** After cycle 3, if CRITICAL findings still exist, do NOT write `@status(verified)`. Pause and escalate to the user via AskUserQuestion with the remaining findings + recommended disposition (override / defer to follow-up beads task / `/respec` the spec).
+
+**Routing exceptions:**
+- `data-route-to="product-owner"` — does NOT enter the fix-cycle. Escalate to user via AskUserQuestion. Likely needs `/respec` or scope decision.
+- `data-route-to="application-architect"` — does NOT enter the fix-cycle. Pause and run a focused `/respec` slice (blast radius + propagation) before resuming /build on the affected specs.
+
+**Logging:**
+
+```bash
+bd comments add [epic-id] "FIX CYCLE $N for specs/<slug>.md:
+Findings addressed: [N CRITICAL, M IMPORTANT, K SUGGESTION-deferred]
+Routed to:
+  backend-engineer: [N1 findings, handoff: step-3.2-<slug>-backend-engineer-fix-cycle-$N.html]
+  frontend-engineer: [N2 findings, handoff: ...]
+Reviewer verdicts (after fix):
+  qa-engineer: PASS | FAIL (M remaining)
+  security-architect: PASS | FAIL
+  ...
+Next: proceed to Step 3.4 | run cycle $((N+1)) | escalate to user (cycle cap reached)"
+```
+
+The fix-cycle is the single most important orchestration step. Without it, reviewers' findings become advisory text nobody acts on; with it, every CRITICAL has a deterministic path to resolution.
+
 ### Step 3.4: User Sign-Off Checkpoint
 
 **Unless `--auto` flag was passed**, pause and present a summary to the user for final sign-off before marking the spec as verified.

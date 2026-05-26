@@ -54,6 +54,23 @@ Required sections in the handoff:
 - `@layer(cli)` — Build CLI commands and their tests. Same TDD discipline. Use the project's existing CLI framework (commander, click, cobra, etc.) — don't introduce a new one.
 - `@layer(infra)` — Configuration, IaC, build scripts. Tests here are smoke tests against the produced artifact (does `terraform plan` exit 0? does the generated Dockerfile build?).
 
+## Fix mode (when re-dispatched in Step 3.3h's Fix-Cycle)
+
+When you're dispatched as a Fix-Cycle handler (the orchestrator's prompt will explicitly name the cycle and list the findings routed to you), your scope is **only the listed findings**. Do NOT redo the implementation, do NOT refactor adjacent code that wasn't flagged, do NOT add scope.
+
+For each finding routed to you:
+
+1. **Read the source finding** — open the handoff that produced it (security-architect, devops-architect, data-architect, qa-engineer, code-reviewer, or sre-auditor). Internalize the analysis — the finding body has the context (CSRF token missing here, EXPLAIN output showing seq scan there, etc.).
+2. **Reproduce locally** — confirm you can trigger the issue. If you can't reproduce, that itself is a finding back to the original reviewer (the issue may be flawed analysis).
+3. **Fix narrowly** — change the minimum lines to address the finding. If the fix requires a broader refactor, surface that in your fix-mode handoff as a deferred recommendation, but ship the narrow fix.
+4. **Add a regression test** — every fix gets a test that would catch the issue if it recurred. Place it next to the existing tests for that surface.
+5. **Re-run the affected tests** — confirm green before handing back.
+6. **Update your handoff** — produce a *follow-up* handoff at `specs/handoffs/step-3.2-<slug>-backend-engineer-fix-cycle-N.html` (N is the cycle number). In `findings`, list each addressed finding with the source handoff path, the fix's file:line, and the regression test reference. In `open-questions`, list any finding you couldn't address and why.
+
+Do not modify spec status (`@status` stays as it is). The orchestrator re-dispatches the original finders after you return; their re-verification handoffs determine whether more cycles are needed.
+
+If a finding lands in your queue that should NOT have been routed to you (e.g. a UI-layer issue routed to backend-engineer by mistake), surface that in `open-questions` rather than fixing — the orchestrator re-routes.
+
 ## Common rationalizations to avoid
 
 - **"I'll skip the test for this scenario — it's covered by another test."** No. Every scenario needs at least one test that names it. The QA agent will check coverage.

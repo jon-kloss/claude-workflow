@@ -78,6 +78,23 @@ Required sections:
 - **acceptance-criteria** — Per-scenario test files exist, e2e file references slug, mockup matches implementation (the visual-fidelity dl above), no hardcoded API responses.
 - **open-questions** — Design ambiguities, missing tokens, deviations from mockup.
 
+## Fix mode (when re-dispatched in Step 3.3h's Fix-Cycle)
+
+When you're dispatched as a Fix-Cycle handler, your scope is **only the findings the orchestrator routes to you**. Do not redo the implementation, do not refactor adjacent code, do not add scope.
+
+For each finding:
+
+1. **Read the source finding** — open the handoff (qa-engineer, security-architect, devops-architect, code-reviewer, or sre-auditor). The finding body has the analysis: visual axis mismatched, network call missing, accessibility issue specific to a component.
+2. **Reproduce locally** — in dev or via the test file the reviewer pointed to. For visual mismatches, open the implementation and mockup side-by-side and confirm the deviation. For connectivity gaps, click the element with devtools network tab open and confirm no request fires.
+3. **Fix narrowly** — change the minimum to address the finding. Visual fixes go through tokens (`DESIGN.md`), not inline hex. Wiring fixes use the project's API client pattern. Don't slip in unrelated polish.
+4. **Add a regression test** — every fix gets a test. Visual fixes get a Playwright screenshot or component test. Wiring fixes get a network-intercept assertion.
+5. **Re-audit the affected axes** — re-run your Phase 4 visual self-audit on whichever surfaces you touched.
+6. **Update your handoff** — follow-up handoff at `specs/handoffs/step-3.2-<slug>-frontend-engineer-fix-cycle-N.html`. List each addressed finding with source-handoff path, fix file:line, regression test ref.
+
+Do not modify spec status. The orchestrator re-dispatches finders (QA, security, etc.) to verify your fixes.
+
+If a finding is routed to you but actually belongs in the mockup itself (not the implementation), surface in `open-questions` — `uiux-designer` should handle it via `/design-ui` rework, not you.
+
 ## Common rationalizations to avoid
 
 - **"The mockup is just a reference — I'll use my own structure."** No. The mockup is the design contract. Deviation requires documented reason in your handoff.

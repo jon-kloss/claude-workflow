@@ -101,20 +101,56 @@ Required `<section data-role>` blocks (all four must be present, even if empty):
 ### Optional callouts
 
 ```html
-<aside data-severity="critical" data-blocks-next-step="true">
+<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="true">
   <p>Critical issue — the next step must NOT proceed until this is resolved.</p>
+  <p>Specifics: file:line, screenshot, repro steps, etc.</p>
 </aside>
 
-<aside data-severity="important">
+<aside data-severity="important" data-route-to="frontend-engineer">
   <p>Important but does not block.</p>
 </aside>
 
 <aside data-severity="suggestion">
-  <p>Nice-to-have.</p>
+  <p>Nice-to-have. No routing required.</p>
 </aside>
 ```
 
 `<aside data-severity>` values: `critical | important | suggestion`. The `data-blocks-next-step="true"` flag (only valid on `critical`) signals that the next role-agent dispatch must be paused for user intervention.
+
+### Routing: who fixes what (`data-route-to`)
+
+When a reviewer agent (QA, security-architect, devops-architect, data-architect, sre-auditor, code-reviewer) finds an issue, it does NOT fix the issue itself — the finder verifies and the implementer fixes. Each `<aside data-severity="critical|important">` and each row of a findings table SHOULD carry a `data-route-to="<role>"` attribute naming the agent responsible for the fix.
+
+Canonical routing values:
+
+| `data-route-to=` | When to use |
+|---|---|
+| `backend-engineer` | API code, server-side logic, schema/migrations, queries, security holes in server code, performance issues server-side, observability instrumentation (logs/metrics/traces in server code) |
+| `frontend-engineer` | UI components, wiring to APIs, visual fidelity deviations, accessibility issues in components, XSS / CSRF / DOM-side security, client-side performance |
+| `uiux-designer` | Mockup itself is wrong, gate-output didn't catch a design issue, register/brand drift, missing design-system tokens — anything that requires going back to `/design-ui` |
+| `application-architect` | Architectural fit is wrong — seams, dependencies, separation of concerns. Triggers `/respec` for affected specs. |
+| `devops-architect` | Infrastructure-as-code, deployment topology, runbook, alerting — anything outside the application code |
+| `product-owner` | Spec is wrong or ambiguous — scope creep, missing acceptance criteria, contradictory requirements. Triggers `/respec` or a user clarifying question. |
+
+Architect agents (security, devops, data) and quality agents (QA, sre-auditor) are **advisory** — they identify issues but always `data-route-to=` an implementer (`backend-engineer`, `frontend-engineer`, or `uiux-designer`). If you find yourself wanting to route to `security-architect`, route to whichever engineer owns the code containing the security hole and include the architect's analysis in the finding body.
+
+`data-route-to` is optional on `data-severity="suggestion"` (those don't trigger a fix dispatch). It IS required on `data-severity="critical"` and `data-severity="important"` — without it, the orchestrator can't dispatch a fix.
+
+### Findings tables that route
+
+Rows of a findings `<table>` MAY include a `data-route-to` cell. If your findings are in a `<dl>`, attach `data-route-to` to the `<dd>`. Example:
+
+```html
+<table>
+  <thead><tr><th>Issue</th><th>file:line</th><th>Severity</th><th>Route to</th></tr></thead>
+  <tbody>
+    <tr><td>Missing CSRF token on PATCH</td><td>src/api/preferences/theme/route.ts:24</td><td>CRITICAL</td><td data-route-to="backend-engineer">backend-engineer</td></tr>
+    <tr><td>Toggle hover state missing</td><td>src/components/ThemeToggle.tsx:12</td><td>IMPORTANT</td><td data-route-to="frontend-engineer">frontend-engineer</td></tr>
+  </tbody>
+</table>
+```
+
+The orchestrator reads these to build the fix-cycle dispatch list.
 
 ## What goes in `findings`
 
