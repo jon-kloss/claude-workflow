@@ -2,6 +2,8 @@
 
 An enforced, spec-driven developer workflow for Claude Code with skills for Socratic design, architecture documentation, UI/UX design, TDD implementation, spec modification, and workflow retrospectives.
 
+> **Branches at a glance.** `master` is the stable, text-driven workflow (single Claude session follows the SKILL.md prose). `experiment/role-agents` adds a layer of 11 specialized role agents (product-owner, application-architect, security-architect, devops-architect, data-architect, uiux-designer, backend-engineer, frontend-engineer, qa-engineer, release-coordinator, spec-sre-auditor) that the orchestrator dispatches via the `Agent` tool, communicating via HTML handoff files. See [Role-Agent System (experimental)](#role-agent-system-experimental).
+
 ## What It Does
 
 Every task flows through a pipeline of skills:
@@ -62,6 +64,78 @@ Auto-invoked by `/design` for UI-facing work. Also callable independently (e.g.,
 4. **Propose** — Drafts skill edits for recurring patterns, prose for one-offs
 5. **Save** — Persists key findings to memory for cross-session awareness
 
+## Role-Agent System (experimental)
+
+> **Branch: `experiment/role-agents`.** The role-agent system is an opt-in layer that decomposes each SKILL.md's procedural text into 11 specialized agent personas. The orchestrator (the parent Claude session) dispatches role agents via the `Agent` tool; each agent produces a versioned HTML handoff at a predictable path that the next agent reads. This was added because single-Claude SKILL.md runs were skipping required steps under no-interactive-user constraints — moving the procedural detail into per-role prompts forces explicit dispatch and creates a checkable artifact per step.
+
+### Why HTML handoffs
+
+Inspired by [Simon Willison's "unreasonable effectiveness of HTML"](https://simonwillison.net/2026/May/8/unreasonable-effectiveness-of-html/) extended to inter-agent communication. Each handoff is:
+
+- **User-auditable** — `open specs/handoffs/foo.html` renders in a browser with proper hierarchy. The user can spot-check any session.
+- **Machine-parseable** — required `<meta data-*>` and `<section data-role="...">` tags are the only contract; hooks grep for them.
+- **Rich content** — inline `<svg>` for architecture diagrams, `<details>` for collapsibles, `<table>` for matrices.
+- **Versionable** — `data-handoff-version` on the `<html>` element.
+
+Full schema: [docs/role-agent-handoff-schema.md](docs/role-agent-handoff-schema.md). Path convention: `specs/handoffs/<step>-<spec-slug>-<role>.html`.
+
+### Role agents
+
+11 personas, each with a focused system prompt in [agents/](agents/) (~400-600 words each). The orchestrator dispatches via `Agent(subagent_type=<role>, ...)`.
+
+| Role | Phase | What it owns |
+|------|-------|--------------|
+| `product-owner` | Design | Socratic questioning (Step 2), reality check + sign-off (Step 4) |
+| `application-architect` | Design + Respec | Decomposition (Step 2.5), arch docs (Step 4.5), blast radius |
+| `uiux-designer` | Design | Wraps `/design-ui` — PRODUCT.md, DESIGN.md, mockups, `/impeccable` gate pipeline |
+| `security-architect` | Build | Step 3.3c.1 threat-model review (OWASP-style on the diff) |
+| `devops-architect` | Build + Design | Deployment topology, observability, scaling, rollback (Step 3.3c.2 + Step 4.5) |
+| `data-architect` | Build | Schema design (Step 3.1.1), migration safety + query review (Step 3.3c.3) — conditional on `@touches-data` or `@layer(api\|full-stack)` |
+| `backend-engineer` | Build | TDD for `@layer(api\|cli\|infra)` + the API portion of `@layer(full-stack)` |
+| `frontend-engineer` | Build | TDD for `@layer(ui)` + UI portion of full-stack; owns Step 3.2.5 wiring + Step 3.3d visual fidelity |
+| `qa-engineer` | Build | Per-spec scenario coverage (Step 3.3e) + epic-level Playwright/Cypress/Detox e2e (Step 4.1) |
+| `release-coordinator` | Build | Final cross-spec coherence check + rollback plan (Step 4.2 — gates `bd close <epic>`) |
+| `spec-sre-auditor` | Build | Step 3.3g intent + SRE-rigor audit (carried over from master) |
+
+### Required spec tags
+
+New tags introduced by the role-agent system, documented fully in [skills/design/resources/gherkin-spec-reference.md](skills/design/resources/gherkin-spec-reference.md):
+
+| Tag | Purpose | Required? |
+|-----|---------|-----------|
+| `@layer(api\|ui\|full-stack\|cli\|infra)` | Deterministic skip signal — drives which role agents apply per spec | Required on every spec |
+| `@trivial` | Typo/rename/config-only change — permits skipping architecture docs + feasibility research | Optional |
+| `@touches-data` | Spec adds/modifies/migrates persistent data — triggers `data-architect` even on UI specs | Optional |
+
+### Parallel-dispatch pattern
+
+To dispatch multiple role agents concurrently (e.g. `security-architect` + `devops-architect` + `data-architect` for Step 3.3 review), include MULTIPLE `Agent` tool calls in a SINGLE message. Calls split across separate messages serialize. Verify by reading overlapping `data-produced-at` timestamps in the resulting handoffs.
+
+### Inline-synthesis fallback
+
+If the `Agent` tool is unavailable in your session (e.g., the orchestrator is itself a dispatched subagent), fall back to inline synthesis: read each role's `agents/<role>.md` prompt, perform the work yourself, produce the same handoff file at the same path, and add `<note data-synthesized="true">` to the `findings` section. The audit trail stays schema-compliant; what's lost is diversity-of-perspective (independently-prompted role agents push back on the orchestrator and surface disagreements; inline synthesis cannot).
+
+### Validation
+
+The role-agent system was validated by two test runs on a polished full-stack todo app (`/tmp/role-test/experiment`):
+
+- **`/design` end-to-end** — 7 real subagent dispatches, 13 approved specs, 6 schema-compliant handoffs, 4 inter-agent disagreements surfaced (PO vs devops on rate-limiting, researcher contradicting an ORM assumption, PO catching documentation drift across role boundaries, uiux-designer running unprompted extract pass).
+- **`/build` on a single representative spec (dark-mode)** — 14 real subagent dispatches (~46 min, ~848k tokens), 26 passing tests, real working dark-mode implementation, 6 more inter-agent disagreements (most valuable: SRE auditor caught 2 intent bugs no mechanical reviewer saw — `next-themes` localStorage override on hydration, rapid-toggle last-write-wins).
+
+The validation tests also surfaced 4 real defects in our own hook infrastructure, all fixed and regression-tested:
+1. `install.sh` was only globbing `*.sh` and missing `_validate_handoff.py`
+2. `require-release-handoff.sh` was case-sensitive `[epic]` but bd emits `[EPIC]`
+3. `require-handoff-artifact.sh` lacked defensive validator-existence handling
+4. Beads' molecule auto-close bypasses the `bd close <epic>` gate structurally (post-hoc warning added via `molecule-autoclose-warn.sh`)
+
+### Smoke test
+
+`tests/role-agent-smoke.sh` runs 18 deterministic checks: handoff-artifact schema, release-handoff hook behavior, installed-form regressions for the 4 bugs above. Run from the repo root:
+
+```bash
+bash tests/role-agent-smoke.sh
+```
+
 ## What's Included
 
 ```
@@ -76,21 +150,52 @@ Auto-invoked by `/design` for UI-facing work. Also callable independently (e.g.,
 │   ├── build/SKILL.md                  # /build — Spec-driven TDD + visual fidelity + verification
 │   ├── respec/SKILL.md                 # /respec — Modify specs with blast radius tracing
 │   └── workflow-retrospective/SKILL.md # Incident triage + metrics analysis skill
+├── agents/                             # Role-agent personas dispatched via the Agent tool
+│   ├── product-owner.md                # Socratic, reality check, sign-off
+│   ├── application-architect.md        # Decomposition, arch docs, blast radius
+│   ├── security-architect.md           # Threat model, OWASP review (NET-NEW role)
+│   ├── devops-architect.md             # Deployment, observability, scaling, rollback
+│   ├── data-architect.md               # Schema, migration safety, query plans
+│   ├── uiux-designer.md                # Wraps /design-ui invocation + /impeccable gates
+│   ├── backend-engineer.md             # TDD on @layer(api|cli|infra) + full-stack API
+│   ├── frontend-engineer.md            # TDD on @layer(ui) + full-stack UI + wiring
+│   ├── qa-engineer.md                  # Scenario coverage + e2e CUJ tests
+│   ├── release-coordinator.md          # Epic close + rollback plan
+│   └── spec-sre-auditor.md             # Intent + SRE-grade rigor audit
 ├── hooks/
 │   ├── _common.sh                      # Shared utilities for hooks
+│   ├── _validate_handoff.py            # Python helper: HTML handoff schema validator
 │   ├── beads-auto-resume.sh            # Surfaces in-progress work + spec statuses on session start
-│   ├── track-reads.sh                  # Tracks Read/Grep/Glob calls
-│   ├── block-unread-edits.sh           # Blocks edits on unread files
+│   ├── block-unread-edits.sh           # Blocks edits on files that haven't been read first
+│   ├── block-status-during-verification.sh # Blocks status writes while a verifier is in-flight
+│   ├── check-open-beads.sh             # Warns about open tasks + non-verified specs on session end
+│   ├── claim-vs-call-audit.sh          # Blocks UI-spec verification unless /impeccable gates actually fired
 │   ├── clear-session-reads.sh          # Resets read tracking per session
-│   ├── require-bead-description.sh     # Enforces --description on bd create
-│   ├── remind-integration-tests.sh     # Reminds to write integration tests after code review
-│   ├── verifier-dispatch.sh            # Tracks verification agent dispatch
-│   ├── verifier-return.sh              # Tracks verification results, blocks premature closure
-│   ├── wwiwo.sh                        # "What Was I Working On?" — beads + spec status
-│   ├── workflow-reminder.sh            # Context-aware reminder (/design vs /build)
 │   ├── detect-correction.sh            # Detects user corrections, prompts incident logging
-│   └── check-open-beads.sh             # Warns about open tasks + non-verified specs on session end
+│   ├── guard-spec-bash-writes.sh       # Blocks Bash file writes to specs/ that bypass Edit/Write hooks
+│   ├── molecule-autoclose-warn.sh      # PostToolUse: warns when beads auto-closes an epic via molecule promotion
+│   ├── remind-integration-tests.sh     # Reminds to write integration tests after code review
+│   ├── require-bead-description.sh     # Enforces --description on bd create
+│   ├── require-design-ui.sh            # Blocks @status(approved) on UI specs without mockups
+│   ├── require-handoff-artifact.sh     # Blocks @status(verified) without required role-agent handoffs
+│   ├── require-investigation-findings.sh # Blocks @status(implemented) without ## Investigation Findings
+│   ├── require-layer-tag.sh            # Blocks @status(approved|implemented|verified) without @layer(...)
+│   ├── require-release-handoff.sh      # Blocks bd close <epic> without release-coordinator handoff
+│   ├── require-ui-tests.sh             # Blocks UI-spec verification without a referencing test file
+│   ├── require-verifier-agents.sh      # Blocks @status(verified) without code-reviewer dispatch
+│   ├── track-agents.sh                 # PostToolUse: logs every Agent dispatch to session state
+│   ├── track-reads.sh                  # Tracks Read/Grep/Glob calls
+│   ├── track-skills.sh                 # PostToolUse: logs every Skill invocation to session state
+│   ├── verifier-dispatch.sh            # Tracks when Continuous Verifier is dispatched
+│   ├── verifier-return.sh              # Tracks verifier results, blocks premature closure
+│   ├── workflow-reminder.sh            # Context-aware reminder (/design vs /build)
+│   └── wwiwo.sh                        # "What Was I Working On?" — beads + spec status
+├── docs/
+│   └── role-agent-handoff-schema.md    # HTML handoff format reference (5 <meta> + 4 <section data-role>)
+├── tests/
+│   └── role-agent-smoke.sh             # 18 deterministic regressions for handoff + release hooks + install
 ├── specs/                              # Gherkin spec files (per-project, not shipped)
+│   ├── handoffs/                       # Role-agent HTML handoffs (created by experimental branch)
 │   ├── mockups/                        # UI component mockups (Storybook or HTML)
 │   └── diagrams/                       # Architecture diagrams (.drawio)
 ├── plans/
@@ -120,14 +225,30 @@ Auto-invoked by `/design` for UI-facing work. Also callable independently (e.g.,
 ```bash
 git clone <this-repo> ~/.claude/workflow
 cd ~/.claude/workflow
+# Stable workflow (text-driven, single Claude session):
+./install.sh
+# OR — experimental role-agent system:
+git checkout experiment/role-agents
 ./install.sh
 ```
 
 The installer:
 - Links skills to `~/.claude/skills/` (edits in the repo are instantly live)
-- Links hooks to `~/.claude/hooks/` (same - no manual sync needed)
-- Merges hook config into `~/.claude/settings.json` (backs up first)
+- Links agents to `~/.claude/agents/` (one symlink per file in `agents/`)
+- Links hooks to `~/.claude/hooks/` (both `*.sh` and `*.py` helpers — same as skills, no manual sync needed)
+- Merges hook config into `~/.claude/settings.json` (backs up first; idempotent — re-running is safe)
 - Optionally disables the superpowers plugin (recommended)
+
+**Switching branches.** Run `git checkout <branch>` in `~/.claude/workflow`, then `./install.sh` again. The installer is dedup-aware at the command level, so re-installation correctly refreshes symlinks without duplicating hook registrations in `settings.json`.
+
+**Verifying the install:**
+
+```bash
+# Smoke test all hooks against the installed form:
+bash tests/role-agent-smoke.sh
+# Expected: "Total: 18  Pass: 18  Fail: 0" on the experiment branch
+# (Fewer applicable checks on master since role-agent hooks aren't installed.)
+```
 
 On macOS/Linux, symlinks are used. On Windows, hard links are used (no
 Developer Mode or Admin prompt required, but source and target must be on
@@ -228,20 +349,61 @@ For greenfield projects, the complete set of specs in `specs/` must be sufficien
 
 ## Hooks
 
+Hooks are organized by event. Most are deterministic gates that block on missing prerequisites (`@status` transitions, missing handoffs, etc.). Each has a documented override path when the block is genuinely a false positive — never silently ignore an unexpected block.
+
+### SessionStart
+
+| Hook | What It Does |
+|------|--------------|
+| `beads-auto-resume.sh` | Checks for in-progress beads work + Gherkin spec statuses |
+| `clear-session-reads.sh` | Resets file read tracking + session-agents/skills/inflight logs so each session starts fresh |
+
+### PreToolUse — Edit / Write (gates spec-status transitions)
+
+| Hook | What It Does |
+|------|--------------|
+| `block-unread-edits.sh` | Blocks edits on files that haven't been read first |
+| `require-design-ui.sh` | Blocks `@status(approved)` on UI-facing specs missing PRODUCT.md, DESIGN.md, or mockups. Use `@backend-only` to skip. |
+| `require-layer-tag.sh` | Blocks `@status(approved\|implemented\|verified)` on specs without `@layer(api\|ui\|full-stack\|cli\|infra)` |
+| `require-investigation-findings.sh` | Blocks `@status(implemented)` without `## Investigation Findings` section (3+ lines). Override: `@investigation-skip(reason)`. Auto-allows `@trivial`. |
+| `require-verifier-agents.sh` | Blocks `@status(verified)` without a `hyperpowers:code-reviewer` Agent dispatch in this session referencing the spec slug. Override: `@verifier-skip(reason)`. |
+| `block-status-during-verification.sh` | Blocks status edits + `bd close` while a Continuous Verifier is in-flight |
+| `require-ui-tests.sh` | Blocks `@status(verified)` on UI specs without a test file referencing the slug. Auto-detects Playwright/Cypress/Detox/Vitest/Jest-RTL/XCUITest. Override: `@ui-test-skip(reason)`. |
+| `require-handoff-artifact.sh` | (experimental branch) Blocks `@status(verified)` without the role-agent handoff chain present + schema-compliant. Override: `@handoff-skip(role: reason)`. Auto-allows `@trivial`. |
+| `claim-vs-call-audit.sh` | Blocks `@status(verified)` on UI-bearing specs unless all 5 `/impeccable` gates fired via the Skill tool in this session for that slug. Override: `@gate-skip(<gate>: reason)`. |
+
+### PreToolUse — Bash
+
+| Hook | What It Does |
+|------|--------------|
+| `require-bead-description.sh` | Enforces `--description` flag on `bd create` |
+| `remind-integration-tests.sh` | Reminds to write integration tests after code review agents return |
+| `guard-spec-bash-writes.sh` | Blocks Bash commands that write to `specs/*.md` (`cat >`, `sed -i`, `tee`, etc.) — spec edits must go through Edit/Write so the gate hooks audit them |
+| `require-release-handoff.sh` | (experimental branch) Blocks `bd close <epic-id>` without a release-coordinator handoff with verdict `READY-TO-CLOSE` or `READY-WITH-CAVEATS`. Override: `bd comments add <epic> "RELEASE-SKIP: <reason>"`. |
+
+### PreToolUse — Agent
+
+| Hook | What It Does |
+|------|--------------|
+| `verifier-dispatch.sh` | Tracks when Continuous Verifier is dispatched (writes to `state/verifier-inflight.txt`) |
+
+### PostToolUse
+
 | Hook | Event | What It Does |
-|------|-------|-------------|
-| `beads-auto-resume.sh` | SessionStart | Checks for in-progress beads work + Gherkin spec statuses |
-| `clear-session-reads.sh` | SessionStart | Resets file read tracking so each session starts fresh |
-| `block-unread-edits.sh` | PreToolUse (Edit/Write) | Blocks edits on files that haven't been read first |
-| `require-design-ui.sh` | PreToolUse (Edit/Write) | Blocks `@status(approved)` on UI-facing specs missing PRODUCT.md, DESIGN.md, or mockups. Use `@backend-only` tag to skip. |
-| `require-bead-description.sh` | PreToolUse (Bash) | Enforces `--description` flag on `bd create` commands |
-| `track-reads.sh` | PostToolUse (Read/Grep/Glob) | Tracks which files have been read (used by block-unread-edits) |
-| `remind-integration-tests.sh` | PostToolUse (Agent) | Reminds to write integration tests after code review agents return |
-| `verifier-dispatch.sh` | PreToolUse (Agent) | Tracks when verification agents are dispatched |
-| `verifier-return.sh` | PostToolUse (Agent) | Tracks verification agent results; blocks premature task closure |
-| `wwiwo.sh` | UserPromptSubmit (matcher: `wwiwo`) | Shows beads tasks + Gherkin spec statuses |
+|------|-------|--------------|
+| `track-reads.sh` | Read/Grep/Glob | Tracks which files have been read (paired with `block-unread-edits`) |
+| `track-agents.sh` | Agent | Logs every Agent dispatch (timestamp, subagent_type, prompt) — consumed by `require-verifier-agents` |
+| `track-skills.sh` | Skill | Logs every Skill invocation — consumed by `claim-vs-call-audit` |
+| `verifier-return.sh` | Agent | Logs verifier verdict to bd, removes the in-flight marker |
+| `molecule-autoclose-warn.sh` | Bash | (experimental branch) Warns when `bd close <child>` triggered beads' internal molecule auto-close on the parent epic, bypassing `require-release-handoff.sh` |
+
+### UserPromptSubmit / Stop
+
+| Hook | Event | What It Does |
+|------|-------|--------------|
 | `workflow-reminder.sh` | UserPromptSubmit | Context-aware: suggests `/build` if approved specs exist, `/design` if not |
-| `detect-correction.sh` | UserPromptSubmit | Detects user corrections to Claude's approach; prompts incident logging for the retrospective |
+| `detect-correction.sh` | UserPromptSubmit | Detects user corrections; prompts incident logging for the retrospective |
+| `wwiwo.sh` | UserPromptSubmit (matcher: `wwiwo`) | Shows beads tasks + Gherkin spec statuses |
 | `check-open-beads.sh` | Stop | Warns about open beads tasks + non-verified specs on session end |
 
 ## Workflow Incident Logging
