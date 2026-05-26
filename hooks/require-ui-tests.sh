@@ -135,10 +135,22 @@ if [ -z "$framework" ]; then
 fi
 
 if [ -z "$framework" ]; then
-    cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing (@layer ui/full-stack or ## UI Design section present) and is being marked @status(verified), but no UI test framework is installed in this project.\n\nInstall one and add a config file:\n  Playwright (web/Electron):  npx create-playwright \n  Cypress (web):              npm i -D cypress && npx cypress open \n  Detox (React Native):       https://wix.github.io/Detox/\n  Vitest browser mode:        https://vitest.dev/guide/browser/\n  Jest + react-testing-library: https://testing-library.com/docs/react-testing-library/intro/\n\nOr override detection by writing one of those keywords to .claude/ui-test-framework.\n\nTo skip this check (rare, document the reason), add to the spec:\n  @ui-test-skip(<reason>)"}
+    cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing (@layer ui/full-stack or ## UI Design section present) and is being marked @status(verified), but no UI test framework is installed in this project.
+
+Install one and add a config file:
+  Playwright (web/Electron):  npx create-playwright 
+  Cypress (web):              npm i -D cypress && npx cypress open 
+  Detox (React Native):       https://wix.github.io/Detox/
+  Vitest browser mode:        https://vitest.dev/guide/browser/
+  Jest + react-testing-library: https://testing-library.com/docs/react-testing-library/intro/
+
+Or override detection by writing one of those keywords to .claude/ui-test-framework.
+
+To skip this check (rare, document the reason), add to the spec:
+  @ui-test-skip(<reason>)
 EOF
-    exit 0
+    exit 2
 fi
 
 # ---------- Test evidence ----------
@@ -165,10 +177,16 @@ if [ "$framework" = "xcuitest" ]; then
 fi
 
 if [ ${#search_dirs[@]} -eq 0 ]; then
-    cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no recognized test directory exists in this project.\n\nDetected framework: ${framework}\n\nCreate one of: tests/, e2e/, cypress/e2e/, __tests__/, e2e-tests/, ui-tests/, playwright-tests/, integration-tests/ (or UITests/ for xcuitest), then add a test file that references '${slug}'.\n\nTo skip (rare, document the reason): add @ui-test-skip(<reason>) to the spec."}
+    cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no recognized test directory exists in this project.
+
+Detected framework: ${framework}
+
+Create one of: tests/, e2e/, cypress/e2e/, __tests__/, e2e-tests/, ui-tests/, playwright-tests/, integration-tests/ (or UITests/ for xcuitest), then add a test file that references '${slug}'.
+
+To skip (rare, document the reason): add @ui-test-skip(<reason>) to the spec.
 EOF
-    exit 0
+    exit 2
 fi
 
 # Search: filename contains slug OR file contents contain slug
@@ -193,10 +211,24 @@ for dir in "${search_dirs[@]}"; do
 done
 
 if [ -z "$match" ]; then
-    cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no functional UI test references this spec.\n\nDetected framework: ${framework}\nSearched: $(printf '%s ' "${search_dirs[@]#$project_root/}")\n\nAdd at least one test file that:\n  - Has '${slug}' in its filename (e.g. ${slug}.spec.ts), OR\n  - References '${slug}' in its test descriptions/imports\n\nThe test must exercise the actual UI surface (render the component, interact with it, assert behavior), not just unit-test internal helpers.\n\nReference: build/SKILL.md Step 3.3d (visual fidelity) and 4.1 (e2e for UI-bearing epics).\n\nTo skip this check (rare, document the reason): add to the spec:\n  @ui-test-skip(<concise reason>)"}
+    cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no functional UI test references this spec.
+
+Detected framework: ${framework}
+Searched: $(printf '%s ' "${search_dirs[@]#$project_root/}")
+
+Add at least one test file that:
+  - Has '${slug}' in its filename (e.g. ${slug}.spec.ts), OR
+  - References '${slug}' in its test descriptions/imports
+
+The test must exercise the actual UI surface (render the component, interact with it, assert behavior), not just unit-test internal helpers.
+
+Reference: build/SKILL.md Step 3.3d (visual fidelity) and 4.1 (e2e for UI-bearing epics).
+
+To skip this check (rare, document the reason): add to the spec:
+  @ui-test-skip(<concise reason>)
 EOF
-    exit 0
+    exit 2
 fi
 
 # Test exists — allow

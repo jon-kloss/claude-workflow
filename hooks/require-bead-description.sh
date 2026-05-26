@@ -44,4 +44,7 @@ if echo "$command" | grep -q -- '--description'; then
 fi
 
 # Block: bd create without --description
-echo '{"error": "BLOCKED: bd create requires --description flag. Every bead must have a description explaining WHY this issue exists and WHAT needs to be done. Add --description=\"...\" to your command."}'
+cat >&2 <<'EOF'
+BLOCKED: bd create requires --description flag. Every bead must have a description explaining WHY this issue exists and WHAT needs to be done. Add --description="..." to your command.
+EOF
+exit 2

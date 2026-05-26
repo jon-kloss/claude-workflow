@@ -13,8 +13,10 @@ READS_FILE="${READS_DIR}/session-reads.txt"
 
 # If reads file doesn't exist, block (no reads have happened)
 if [ ! -f "$READS_FILE" ]; then
-    echo '{"error": "BLOCKED: You must Read, Grep, or Glob the target file before editing it. Investigate existing code first."}'
-    exit 0
+    cat >&2 <<'EOF'
+BLOCKED: You must Read, Grep, or Glob the target file before editing it. Investigate existing code first.
+EOF
+    exit 2
 fi
 
 # Read tool use event from stdin
@@ -68,4 +70,7 @@ if [ ! -e "$abs_path" ]; then
 fi
 
 # Block: file exists but wasn't read first
-echo "{\"error\": \"BLOCKED: You must Read, Grep, or Glob '$(basename "$abs_path")' before editing it. Investigate existing code first. File: $abs_path\"}"
+cat >&2 <<EOF
+BLOCKED: You must Read, Grep, or Glob '$(basename "$abs_path")' before editing it. Investigate existing code first. File: $abs_path
+EOF
+exit 2

@@ -102,6 +102,23 @@ if [ "$findings_present" = "yes" ]; then
     exit 0
 fi
 
-cat <<EOF
-{"error": "BLOCKED: Writing @status(implemented) to specs/${slug}.md but no ## Investigation Findings section with content exists.\n\nbuild/SKILL.md Step 3.1 requires investigation before implementation. Add an ## Investigation Findings section to the spec with at least 3 lines of content covering:\n\n  - Patterns discovered (file:line references)\n  - Conventions to follow (naming, error handling, response format)\n  - Integration points from dependency specs\n  - Decision: how the findings influence implementation\n\nExample:\n  ## Investigation Findings\n  - src/auth/middleware.ts:42 — existing session validation uses verifyJwt() with iss/aud claims\n  - src/routes/*.ts — all routes use the consistent { error: { code, message } } response shape\n  - specs/user-data-model.md (@depends-on) — user.id is UUID v4, not bigint\n  Decision: extend middleware.ts rather than creating a parallel auth path.\n\nTo skip (rare — typo fixes use @trivial instead): add @investigation-skip(<reason>) to the spec."}
+cat >&2 <<EOF
+BLOCKED: Writing @status(implemented) to specs/${slug}.md but no ## Investigation Findings section with content exists.
+
+build/SKILL.md Step 3.1 requires investigation before implementation. Add an ## Investigation Findings section to the spec with at least 3 lines of content covering:
+
+  - Patterns discovered (file:line references)
+  - Conventions to follow (naming, error handling, response format)
+  - Integration points from dependency specs
+  - Decision: how the findings influence implementation
+
+Example:
+  ## Investigation Findings
+  - src/auth/middleware.ts:42 — existing session validation uses verifyJwt() with iss/aud claims
+  - src/routes/*.ts — all routes use the consistent { error: { code, message } } response shape
+  - specs/user-data-model.md (@depends-on) — user.id is UUID v4, not bigint
+  Decision: extend middleware.ts rather than creating a parallel auth path.
+
+To skip (rare — typo fixes use @trivial instead): add @investigation-skip(<reason>) to the spec.
 EOF
+exit 2

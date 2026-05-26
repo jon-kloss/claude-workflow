@@ -86,10 +86,16 @@ if [ -z "$handoff_path" ]; then
         echo '{}'
         exit 0
     fi
-    cat <<EOF
-{"error": "BLOCKED: bd close ${target_id} (epic) requires a release-coordinator handoff at specs/handoffs/step-4.2-${target_id}-release-coordinator.html\n\nDispatch the release-coordinator role agent before closing the epic:\n  Agent(subagent_type: release-coordinator, prompt: 'You are running Step 4.2 (final verification) for epic ${target_id}. Verify all spec @status(verified), all handoff chains, all CUJ tests, rollback plan. Produce handoff at specs/handoffs/step-4.2-${target_id}-release-coordinator.html with verdict READY-TO-CLOSE / BLOCKED / READY-WITH-CAVEATS.')\n\nTo override (rare — document the reason), add a bd comment:\n  bd comment ${target_id} 'RELEASE-SKIP: <concise reason>'"}
+    cat >&2 <<EOF
+BLOCKED: bd close ${target_id} (epic) requires a release-coordinator handoff at specs/handoffs/step-4.2-${target_id}-release-coordinator.html
+
+Dispatch the release-coordinator role agent before closing the epic:
+  Agent(subagent_type: release-coordinator, prompt: 'You are running Step 4.2 (final verification) for epic ${target_id}. Verify all spec @status(verified), all handoff chains, all CUJ tests, rollback plan. Produce handoff at specs/handoffs/step-4.2-${target_id}-release-coordinator.html with verdict READY-TO-CLOSE / BLOCKED / READY-WITH-CAVEATS.')
+
+To override (rare — document the reason), add a bd comment:
+  bd comment ${target_id} 'RELEASE-SKIP: <concise reason>'
 EOF
-    exit 0
+    exit 2
 fi
 
 # Handoff exists — check verdict. Look for verdict line in the document.
@@ -108,15 +114,22 @@ case "$verdict" in
         exit 0
         ;;
     "BLOCKED")
-        cat <<EOF
-{"error": "BLOCKED: release-coordinator verdict for epic ${target_id} is BLOCKED.\n\nHandoff: ${handoff_path}\n\nResolve the blockers documented in the handoff's findings section before closing the epic. To override (rare):\n  bd comment ${target_id} 'RELEASE-SKIP: <concise reason>'"}
+        cat >&2 <<EOF
+BLOCKED: release-coordinator verdict for epic ${target_id} is BLOCKED.
+
+Handoff: ${handoff_path}
+
+Resolve the blockers documented in the handoff's findings section before closing the epic. To override (rare):
+  bd comment ${target_id} 'RELEASE-SKIP: <concise reason>'
 EOF
-        exit 0
+        exit 2
         ;;
     *)
-        cat <<EOF
-{"error": "BLOCKED: release-coordinator handoff at ${handoff_path} has no verdict line (READY-TO-CLOSE, READY-WITH-CAVEATS, or BLOCKED).\n\nThe agent's output must end with one of those verdicts. Either the dispatch was incomplete or the handoff was hand-edited. Re-dispatch the release-coordinator or restore the verdict line."}
+        cat >&2 <<EOF
+BLOCKED: release-coordinator handoff at ${handoff_path} has no verdict line (READY-TO-CLOSE, READY-WITH-CAVEATS, or BLOCKED).
+
+The agent's output must end with one of those verdicts. Either the dispatch was incomplete or the handoff was hand-edited. Re-dispatch the release-coordinator or restore the verdict line.
 EOF
-        exit 0
+        exit 2
         ;;
 esac

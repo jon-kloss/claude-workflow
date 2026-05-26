@@ -117,6 +117,17 @@ fi
 # Extract the spec target for a clearer message
 spec_target=$(echo "$cmd" | grep -oE 'specs/[a-zA-Z0-9_.-]+\.md' | head -1)
 
-cat <<EOF
-{"error": "BLOCKED: Bash command appears to write to ${spec_target} (pattern: ${write_pattern_found}).\n\nSpec edits MUST go through the Edit or Write tool. Bash file writes bypass workflow verification hooks (require-verifier-agents, require-ui-tests, require-investigation-findings, claim-vs-call-audit, require-design-ui) and would let unverified specs reach @status(verified) silently.\n\nUse:\n  Edit  — replace specific text in an existing spec\n  Write — replace the entire spec file\n\nIf this Bash command is NOT meant to modify the spec (false positive — e.g. you're piping spec contents to another tool), restructure the command so it doesn't redirect into the spec file. The hook keys on '>specs/<slug>.md', 'sed -i', and similar write-shaped patterns.\n\nNo override is offered at the Bash level — by design. Spec edits go through audited tools."}
+cat >&2 <<EOF
+BLOCKED: Bash command appears to write to ${spec_target} (pattern: ${write_pattern_found}).
+
+Spec edits MUST go through the Edit or Write tool. Bash file writes bypass workflow verification hooks (require-verifier-agents, require-ui-tests, require-investigation-findings, claim-vs-call-audit, require-design-ui) and would let unverified specs reach @status(verified) silently.
+
+Use:
+  Edit  — replace specific text in an existing spec
+  Write — replace the entire spec file
+
+If this Bash command is NOT meant to modify the spec (false positive — e.g. you're piping spec contents to another tool), restructure the command so it doesn't redirect into the spec file. The hook keys on '>specs/<slug>.md', 'sed -i', and similar write-shaped patterns.
+
+No override is offered at the Bash level — by design. Spec edits go through audited tools.
 EOF
+exit 2

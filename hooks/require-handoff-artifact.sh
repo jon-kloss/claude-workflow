@@ -191,6 +191,13 @@ if [ ${#malformed[@]} -gt 0 ]; then
     done
 fi
 
-cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is being marked @status(verified), but its role-agent handoff chain is incomplete.\n\nDetected @layer: ${layer:-(none — add @layer tag first)}\n${err_body}\nDispatch the missing role agents and produce their handoff files per docs/role-agent-handoff-schema.md. To skip a specific role (rare — document the reason), add to the spec content:\n  @handoff-skip(<role-slug>: <concise reason>)\n  e.g. @handoff-skip(security-architect: spec is a UI text-only copy change, no security surface)"}
+cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is being marked @status(verified), but its role-agent handoff chain is incomplete.
+
+Detected @layer: ${layer:-(none — add @layer tag first)}
+${err_body}
+Dispatch the missing role agents and produce their handoff files per docs/role-agent-handoff-schema.md. To skip a specific role (rare — document the reason), add to the spec content:
+  @handoff-skip(<role-slug>: <concise reason>)
+  e.g. @handoff-skip(security-architect: spec is a UI text-only copy change, no security surface)
 EOF
+exit 2

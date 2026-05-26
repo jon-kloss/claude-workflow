@@ -83,6 +83,18 @@ while IFS= read -r line; do
     detection_lines="${detection_lines}\n  - ${line}"
 done <<< "$detection"
 
-cat <<EOF
-{"error": "BLOCKED: Write to ${basename_file} contains secret-shaped content. Agent memory files are committed to git by default; secrets MUST NOT be written into memory.\n\nDetected:${detection_lines}\n\nRemediation:\n  1. Remove the secret-shaped strings from the write.\n  2. If the memory needs to reference where secrets live, use a POINTER instead — name the env var, secret manager path, or doc location, never the value.\n  3. If this is a genuine false positive (e.g. you're documenting a known-public test fixture), add the literal token to the new_string:\n       @memory-allow-secret(<concise reason>)\n     The override persists in the memory file as documentation.\n\nReference: skills/onboard/SKILL.md critical_rules #1."}
+cat >&2 <<EOF
+BLOCKED: Write to ${basename_file} contains secret-shaped content. Agent memory files are committed to git by default; secrets MUST NOT be written into memory.
+
+Detected:${detection_lines}
+
+Remediation:
+  1. Remove the secret-shaped strings from the write.
+  2. If the memory needs to reference where secrets live, use a POINTER instead — name the env var, secret manager path, or doc location, never the value.
+  3. If this is a genuine false positive (e.g. you're documenting a known-public test fixture), add the literal token to the new_string:
+       @memory-allow-secret(<concise reason>)
+     The override persists in the memory file as documentation.
+
+Reference: skills/onboard/SKILL.md critical_rules #1.
 EOF
+exit 2

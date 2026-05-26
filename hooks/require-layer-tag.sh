@@ -84,6 +84,18 @@ elif echo "$spec_content" | grep -qE 'POST\s+/|GET\s+/|PUT\s+/|DELETE\s+/|PATCH\
     suggested="api"
 fi
 
-cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md does not have a @layer(...) tag, but the edit sets @status(approved|implemented|verified).\n\nEvery spec must declare @layer with one of: api | ui | full-stack | cli | infra.\n\nThis is the deterministic signal that downstream hooks key on (require-ui-tests, claim-vs-call-audit, /build's Step 3.2.5 wiring checkpoint, etc.). Removing or omitting the tag would bypass those gates.\n\nAdd the tag near the top of the spec, after @status:\n  @status(...)\n  @layer(${suggested})\n\nSuggested value based on spec contents: @layer(${suggested}).\nReference: skills/design/resources/gherkin-spec-reference.md for tag semantics."}
+cat >&2 <<EOF
+BLOCKED: specs/${slug}.md does not have a @layer(...) tag, but the edit sets @status(approved|implemented|verified).
+
+Every spec must declare @layer with one of: api | ui | full-stack | cli | infra.
+
+This is the deterministic signal that downstream hooks key on (require-ui-tests, claim-vs-call-audit, /build's Step 3.2.5 wiring checkpoint, etc.). Removing or omitting the tag would bypass those gates.
+
+Add the tag near the top of the spec, after @status:
+  @status(...)
+  @layer(${suggested})
+
+Suggested value based on spec contents: @layer(${suggested}).
+Reference: skills/design/resources/gherkin-spec-reference.md for tag semantics.
 EOF
+exit 2

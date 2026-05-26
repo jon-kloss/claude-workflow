@@ -27,6 +27,10 @@ PASS=0
 FAIL=0
 TOTAL=0
 
+# Hooks now block via `exit 2 + stderr message` (not stdout JSON). Existing
+# test bodies pipe a payload into the hook and capture the output with 2>&1
+# (merge stderr into stdout), so the captured `$got` will contain BLOCKED on
+# blocking paths and {} on allow paths. The assert below checks both.
 assert() {
     local name="$1" expected="$2" got="$3"
     TOTAL=$((TOTAL+1))
@@ -37,7 +41,7 @@ assert() {
             echo "  FAIL  $name (expected BLOCK, got: ${got:0:120})"; FAIL=$((FAIL+1))
         fi
     elif [ "$expected" = "allow" ]; then
-        if [ "$got" = "{}" ]; then
+        if echo "$got" | grep -q '^{}$' || [ -z "$got" ]; then
             echo "  PASS  $name"; PASS=$((PASS+1))
         else
             echo "  FAIL  $name (expected ALLOW, got: ${got:0:120})"; FAIL=$((FAIL+1))
@@ -96,7 +100,7 @@ cat > specs/api-feature.md <<'EOF'
 EOF
 PAYLOAD=$(mkpayload_edit "$TMP/specs/api-feature.md" '@status(verified)')
 
-result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "api-spec with no handoffs blocks" block "$result"
 
 for h in product-owner application-architect security-architect qa-engineer backend-engineer devops-architect data-architect; do
@@ -109,18 +113,18 @@ for h in product-owner application-architect security-architect qa-engineer back
     esac
     write_handoff specs/handoffs "$step" api-feature "$h"
 done
-result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "api-spec with all 7 handoffs allows" allow "$result"
 
 # Schema violation: remove data-from-role from one handoff
 sed -i '' '/data-from-role/d' specs/handoffs/step-3.3-api-feature-security-architect.html
-result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "missing data-from-role schema violation blocks" block "$result"
 write_handoff specs/handoffs step-3.3 api-feature security-architect  # restore
 
 # Slug mismatch
 sed -i '' 's/data-spec-slug="api-feature"/data-spec-slug="wrong-slug"/' specs/handoffs/step-3.3-api-feature-security-architect.html
-result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "slug mismatch blocks" block "$result"
 write_handoff specs/handoffs step-3.3 api-feature security-architect  # restore
 
@@ -128,7 +132,7 @@ write_handoff specs/handoffs step-3.3 api-feature security-architect  # restore
 rm specs/handoffs/step-3.3-api-feature-security-architect.html
 PAYLOAD_SKIP=$(mkpayload_edit "$TMP/specs/api-feature.md" '@status(verified)
 @handoff-skip(security-architect: synthetic test no security surface)')
-result=$(printf '%s\n' "$PAYLOAD_SKIP" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD_SKIP" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "@handoff-skip allows when handoff missing" allow "$result"
 write_handoff specs/handoffs step-3.3 api-feature security-architect
 
@@ -139,7 +143,7 @@ cat > specs/trivial.md <<'EOF'
 @trivial
 EOF
 PAYLOAD_TRIV=$(mkpayload_edit "$TMP/specs/trivial.md" '@status(verified)')
-result=$(printf '%s\n' "$PAYLOAD_TRIV" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD_TRIV" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "@trivial bypasses all handoff requirements" allow "$result"
 
 # @layer(ui) without @touches-data — no data-architect required
@@ -164,25 +168,25 @@ for h in product-owner application-architect security-architect qa-engineer uiux
     write_handoff specs/handoffs "$step" ui-feature "$h"
 done
 PAYLOAD_UI=$(mkpayload_edit "$TMP/specs/ui-feature.md" '@status(verified)')
-result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "ui-spec (no @touches-data) allows without data-architect" allow "$result"
 
 # Now add @touches-data — should block until data-architect present
 sed -i '' '/^@layer(ui)/a\
 @touches-data
 ' specs/ui-feature.md
-result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "ui-spec + @touches-data blocks without data-architect" block "$result"
 
 write_handoff specs/handoffs step-3.3 ui-feature data-architect
-result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "ui-spec + @touches-data + data-architect allows" allow "$result"
 
 # Critical-blocking aside causes failure
 cat >> specs/handoffs/step-3.3-ui-feature-security-architect.html <<'EOF'
 <aside data-severity="critical" data-blocks-next-step="true"><p>do not proceed</p></aside>
 EOF
-result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh")
+result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "critical-blocking aside blocks" block "$result"
 
 echo ""
@@ -203,10 +207,10 @@ NONEPIC_ID=$(bd create --title="smoke non-epic" --description="smoke test, ignor
 if [ -z "$EPIC_ID" ] || [ -z "$NONEPIC_ID" ]; then
     echo "  SKIP  release-handoff tests (could not create synthetic bd issues)"
 else
-    result=$(printf '%s\n' "$(mkpayload_bash "bd close $NONEPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh")
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $NONEPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "non-epic bd close allows" allow "$result"
 
-    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh")
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "epic bd close without handoff blocks" block "$result"
 
     # Add a release handoff with PASS verdict — put it in workflow repo's specs/handoffs/
@@ -221,16 +225,16 @@ else
 <section data-role="open-questions"></section>
 <p>Verdict: READY-TO-CLOSE</p></body></html>
 EOF
-    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh")
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "epic bd close with PASS verdict allows" allow "$result"
 
     sed -i '' 's/READY-TO-CLOSE/BLOCKED/' "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
-    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh")
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "epic bd close with BLOCKED verdict blocks" block "$result"
 
     rm "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
     bd comments add "$EPIC_ID" "RELEASE-SKIP: smoke test override" > /dev/null 2>&1
-    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh")
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "RELEASE-SKIP bd comment override allows" allow "$result"
 
     # Cleanup
@@ -317,7 +321,7 @@ TOTAL=$((TOTAL+1))
 PAYLOAD=$(FILE="/proj/.claude/agent-memory/backend-engineer.md" \
           CONTENT="Token leaked: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" \
           python3 -c 'import json, os; print(json.dumps({"tool":{"name":"Edit","input":{"file_path":os.environ["FILE"],"new_string":os.environ["CONTENT"]}}}))')
-result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh")
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh" 2>&1)
 if echo "$result" | grep -q "BLOCKED" && echo "$result" | grep -q "JWT"; then
     echo "  PASS  guard-agent-memory-secrets blocks JWT-shaped content"
     PASS=$((PASS+1))
@@ -331,7 +335,7 @@ TOTAL=$((TOTAL+1))
 PAYLOAD=$(FILE="/proj/.claude/agent-memory/security-architect.md" \
           CONTENT="Secrets live in env vars. See devops-architect.md#pointer-secret-handling for details." \
           python3 -c 'import json, os; print(json.dumps({"tool":{"name":"Edit","input":{"file_path":os.environ["FILE"],"new_string":os.environ["CONTENT"]}}}))')
-result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh")
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh" 2>&1)
 if [ "$result" = "{}" ]; then
     echo "  PASS  guard-agent-memory-secrets allows pointer text"
     PASS=$((PASS+1))
@@ -345,7 +349,7 @@ TOTAL=$((TOTAL+1))
 PAYLOAD=$(FILE="/proj/.claude/agent-memory/qa-engineer.md" \
           CONTENT="Public test fixture: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test @memory-allow-secret(known-public test fixture)" \
           python3 -c 'import json, os; print(json.dumps({"tool":{"name":"Edit","input":{"file_path":os.environ["FILE"],"new_string":os.environ["CONTENT"]}}}))')
-result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh")
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh" 2>&1)
 if [ "$result" = "{}" ]; then
     echo "  PASS  @memory-allow-secret override allows the write"
     PASS=$((PASS+1))
@@ -364,6 +368,53 @@ else
     echo "  FAIL  expected 11 agents with Memory block, found $agents_with_memory"
     FAIL=$((FAIL+1))
 fi
+
+echo ""
+echo "=== hook output-shape regressions (catches the 2026-05-26 dogfood finding) ==="
+# Regression: every blocking hook must either exit 2 (with stderr message) OR
+# emit the modern hookSpecificOutput JSON schema with permissionDecision=deny.
+# The legacy stdout '{"error":"BLOCKED: ..."}' shape is ignored by current
+# Claude Code and was the root cause of the silent-allow finding from the
+# onboard dogfood.
+BLOCKING_HOOKS=(
+    "require-bead-description.sh"
+    "require-design-ui.sh"
+    "require-handoff-artifact.sh"
+    "require-investigation-findings.sh"
+    "require-layer-tag.sh"
+    "require-release-handoff.sh"
+    "require-ui-tests.sh"
+    "require-verifier-agents.sh"
+    "block-status-during-verification.sh"
+    "block-unread-edits.sh"
+    "claim-vs-call-audit.sh"
+    "guard-agent-memory-secrets.sh"
+    "guard-spec-bash-writes.sh"
+)
+for h in "${BLOCKING_HOOKS[@]}"; do
+    TOTAL=$((TOTAL+1))
+    path="$HOOK_DIR/$h"
+    if [ ! -f "$path" ]; then
+        echo "  FAIL  $h (file not found)"
+        FAIL=$((FAIL+1))
+        continue
+    fi
+    has_exit_2=$(grep -cE '^[[:space:]]*exit 2$' "$path")
+    has_modern_json=$(grep -cE '"permissionDecision"[[:space:]]*:[[:space:]]*"deny"' "$path")
+    has_legacy_error=$(grep -cE '"error"[[:space:]]*:[[:space:]]*"BLOCKED' "$path")
+    if [ "$has_exit_2" -gt 0 ] || [ "$has_modern_json" -gt 0 ]; then
+        if [ "$has_legacy_error" -gt 0 ]; then
+            echo "  FAIL  $h still contains legacy {\"error\":\"BLOCKED:...\"} stdout JSON — harness will ignore"
+            FAIL=$((FAIL+1))
+        else
+            echo "  PASS  $h uses exit 2 + stderr (or modern hookSpecificOutput)"
+            PASS=$((PASS+1))
+        fi
+    else
+        echo "  FAIL  $h has neither exit 2 nor modern hookSpecificOutput — won't actually block"
+        FAIL=$((FAIL+1))
+    fi
+done
 
 echo ""
 echo "=========================================="

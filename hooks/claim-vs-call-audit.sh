@@ -122,6 +122,18 @@ if [ -z "$missing_gates" ]; then
     exit 0
 fi
 
-cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but these /impeccable gates were not invoked via the Skill tool in this session for '${slug}': ${missing_gates}\n\ndesign-ui/SKILL.md:14: 'If you did not type Skill(impeccable, \"<gate> <slug>\"), the gate did not run.'\n\nThis hook reads ~/.claude/hooks/state/session-skills.log. Run the missing gates:\n$(for g in $missing_gates; do printf '  Skill(impeccable, \"%s %s\")\\n' "$g" "$slug"; done)\n\nThen retry the edit.\n\nTo skip a specific gate (rare, document the reason), add to the spec:\n  @gate-skip(<gate>: <concise reason>)\n  e.g. @gate-skip(adapt: covered by parent dashboard spec's adapt run)"}
+cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but these /impeccable gates were not invoked via the Skill tool in this session for '${slug}': ${missing_gates}
+
+design-ui/SKILL.md:14: 'If you did not type Skill(impeccable, "<gate> <slug>"), the gate did not run.'
+
+This hook reads ~/.claude/hooks/state/session-skills.log. Run the missing gates:
+$(for g in $missing_gates; do printf '  Skill(impeccable, "%s %s")\n' "$g" "$slug"; done)
+
+Then retry the edit.
+
+To skip a specific gate (rare, document the reason), add to the spec:
+  @gate-skip(<gate>: <concise reason>)
+  e.g. @gate-skip(adapt: covered by parent dashboard spec's adapt run)
 EOF
+exit 2

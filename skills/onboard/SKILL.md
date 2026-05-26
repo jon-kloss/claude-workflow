@@ -156,7 +156,7 @@ in frontmatter to HEAD."
 For each `.claude/agent-memory/<role>.md` produced:
 
 1. **Frontmatter present** — `agent`, `project-root`, `last-updated`, `last-commit-sha`, `schema-version`.
-2. **Required sections** — `## Summary`, `## Conventions`, `## Recent changes`, `## Known issues`, `## Pointers`. Role-specific sections vary (Component map, Routes, Tables, Tokens, etc.) — at least one role-specific section per memory.
+2. **Required sections** — vary by role. Always required across all roles: `## Summary`, `## Recent changes`, `## Pointers`. Roles that hold conventions also require `## Conventions` (everyone EXCEPT `product-owner`, whose equivalents are scope decisions + open questions). Roles that surface deferred items also require `## Known issues` (everyone EXCEPT `product-owner`, whose deferred items are documented in scope-decisions + open-questions sections). Look up each role's expected sections from its template at `skills/onboard/resources/memory-template-<role>.md` — that's the canonical schema per role. At least one role-specific primary section per memory (Component map / Routes / Tables / Tokens / Personas / etc.).
 3. **Word count** — total words ≤ 2000 (`wc -w`). Over cap → re-dispatch the agent with "compress to ~1500 words" prompt.
 4. **No secret-shaped strings** — `guard-agent-memory-secrets.sh` enforces this on write, but also re-validate on read: `grep -E '(Bearer\s+eyJ|sk_live_|AKIA[0-9A-Z]{16}|-----BEGIN.*PRIVATE KEY)' .claude/agent-memory/*.md` returns empty.
 

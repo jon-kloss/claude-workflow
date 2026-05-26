@@ -70,10 +70,15 @@ case "$tool_name" in
         # If this spec has an in-flight verifier, block. If a different spec is
         # in flight, allow — that's a separate concern.
         if grep -q "|${slug}\$" "$INFLIGHT_FILE" 2>/dev/null; then
-            cat <<EOF
-{"error": "BLOCKED: Writing @status(verified) to specs/${slug}.md while a CONTINUOUS VERIFIER for this spec is in-flight (dispatched but not returned).\n\nIn-flight verifiers:\n${inflight_summary}\n\nWait for the verifier to return before updating status. If the verifier returns FAIL, do not write @status(verified) — fix the failure first."}
+            cat >&2 <<EOF
+BLOCKED: Writing @status(verified) to specs/${slug}.md while a CONTINUOUS VERIFIER for this spec is in-flight (dispatched but not returned).
+
+In-flight verifiers:
+${inflight_summary}
+
+Wait for the verifier to return before updating status. If the verifier returns FAIL, do not write @status(verified) — fix the failure first.
 EOF
-            exit 0
+            exit 2
         fi
         ;;
 
@@ -99,10 +104,15 @@ EOF
         done
 
         if [ -n "$blocked_ids" ]; then
-            cat <<EOF
-{"error": "BLOCKED: Cannot close or update --status on tasks with in-flight CONTINUOUS VERIFIER: ${blocked_ids}\n\nIn-flight verifiers:\n${inflight_summary}\n\nWait for the verifier to return before closing or updating status. Status writes before verification completes are the documented 'credit pressure' failure pattern this hook exists to catch."}
+            cat >&2 <<EOF
+BLOCKED: Cannot close or update --status on tasks with in-flight CONTINUOUS VERIFIER: ${blocked_ids}
+
+In-flight verifiers:
+${inflight_summary}
+
+Wait for the verifier to return before closing or updating status. Status writes before verification completes are the documented 'credit pressure' failure pattern this hook exists to catch.
 EOF
-            exit 0
+            exit 2
         fi
         ;;
 esac
