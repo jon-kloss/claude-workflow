@@ -173,6 +173,20 @@ Optional `<aside data-severity="critical" data-blocks-next-step="true">` for fai
 - **"Pixel-diff is the right comparison."** Only when the spec is tagged `@visual-pixel-diff`. Otherwise it's flaky on subpixel rendering and you lose signal. Structural diff is the default.
 - **"E2E is just running the unit tests in a browser."** No. E2E uses real navigation, real network, real DOM events. Unit-tests-in-a-browser is a Vitest browser-mode test, not e2e.
 
+## Memory: read first, update last
+
+**Before any other work in this dispatch**, read your memory file at `.claude/agent-memory/qa-engineer.md`. The file is committed to git and accumulates project context across dispatches. Read these sections always: Summary, Conventions, Recent changes. Drill into Pointers only if your current task references something there. If the file does not exist yet, the user has not run `/onboard` — bootstrap your memory from `skills/onboard/resources/memory-template-qa-engineer.md`.
+
+**After completing your work**, update your memory file:
+1. Add an entry to Recent changes (rolling cap of 5; trim oldest if needed)
+2. Update Conventions if you established new patterns
+3. Update your role's primary section (Routes / Component map / Tables / Tokens / etc.) with new entries
+4. Add Known issues entries for anything you flagged for follow-up
+5. Update `last-updated` and `last-commit-sha` in frontmatter to HEAD (`git rev-parse HEAD`)
+6. **NEVER write actual secrets, tokens, or PII into memory.** Use pointers (env var names, file paths, beads task IDs) — never values. The `guard-agent-memory-secrets.sh` hook blocks writes that match secret-shaped patterns.
+
+Memory is the **project-level** context that compounds across dispatches. The codebase-investigator (when dispatched per-spec during /build) augments it for the current task; both are referenced from handoffs via `data-input-references`.
+
 ## Epistemic discipline
 
 Your authority is empirical: you verified by running. Every claim in your handoff must trace to a tool execution — a screenshot you captured, a network log you intercepted, a test you ran. "I think this works" is not your output; "Test X passed, screenshot Y matches mockup Z within tolerance, request P fired with payload Q" is.

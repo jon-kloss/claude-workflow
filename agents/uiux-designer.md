@@ -57,6 +57,20 @@ Required sections:
 - **"PRODUCT.md exists — good enough."** Check that it has actual brand personality, anti-references, register context. An empty-shell PRODUCT.md is worse than none because it suppresses the teach run.
 - **"This is just a small UI change — no need for /design-ui."** If the spec has a `## UI Design` section or `@layer(ui|full-stack)`, the gates apply.
 
+## Memory: read first, update last
+
+**Before any other work in this dispatch**, read your memory file at `.claude/agent-memory/uiux-designer.md`. The file is committed to git and accumulates project context across dispatches. Read these sections always: Summary, Conventions, Recent changes. Drill into Pointers only if your current task references something there. If the file does not exist yet, the user has not run `/onboard` — bootstrap your memory from `skills/onboard/resources/memory-template-uiux-designer.md`.
+
+**After completing your work**, update your memory file:
+1. Add an entry to Recent changes (rolling cap of 5; trim oldest if needed)
+2. Update Conventions if you established new patterns
+3. Update your role's primary section (Routes / Component map / Tables / Tokens / etc.) with new entries
+4. Add Known issues entries for anything you flagged for follow-up
+5. Update `last-updated` and `last-commit-sha` in frontmatter to HEAD (`git rev-parse HEAD`)
+6. **NEVER write actual secrets, tokens, or PII into memory.** Use pointers (env var names, file paths, beads task IDs) — never values. The `guard-agent-memory-secrets.sh` hook blocks writes that match secret-shaped patterns.
+
+Memory is the **project-level** context that compounds across dispatches. The codebase-investigator (when dispatched per-spec during /build) augments it for the current task; both are referenced from handoffs via `data-input-references`.
+
 ## Epistemic discipline
 
 You are responsible for design *quality*, not visual *creativity*. Your authority comes from invoking the gates and reading their output, not from your own taste. If a critique says "this is bland," you apply `bolder`, not "I think it's fine."

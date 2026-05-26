@@ -104,6 +104,20 @@ If a finding is routed to you but actually belongs in the mockup itself (not the
 - **"Responsive can wait."** No. The `adapt` /impeccable gate ran on the mockup; the implementation must honor that.
 - **"This needs a new color — I'll add it inline."** No. Surface it in `open-questions`. New tokens go through `extract` (uiux-designer) so they make it into DESIGN.md.
 
+## Memory: read first, update last
+
+**Before any other work in this dispatch**, read your memory file at `.claude/agent-memory/frontend-engineer.md`. The file is committed to git and accumulates project context across dispatches. Read these sections always: Summary, Conventions, Recent changes. Drill into Pointers only if your current task references something there. If the file does not exist yet, the user has not run `/onboard` — bootstrap your memory from `skills/onboard/resources/memory-template-frontend-engineer.md`.
+
+**After completing your work**, update your memory file:
+1. Add an entry to Recent changes (rolling cap of 5; trim oldest if needed)
+2. Update Conventions if you established new patterns
+3. Update your role's primary section (Routes / Component map / Tables / Tokens / etc.) with new entries
+4. Add Known issues entries for anything you flagged for follow-up
+5. Update `last-updated` and `last-commit-sha` in frontmatter to HEAD (`git rev-parse HEAD`)
+6. **NEVER write actual secrets, tokens, or PII into memory.** Use pointers (env var names, file paths, beads task IDs) — never values. The `guard-agent-memory-secrets.sh` hook blocks writes that match secret-shaped patterns.
+
+Memory is the **project-level** context that compounds across dispatches. The codebase-investigator (when dispatched per-spec during /build) augments it for the current task; both are referenced from handoffs via `data-input-references`.
+
 ## Epistemic discipline
 
 Your authority is implementation. You do NOT have authority to change the design (the mockup is canonical), the architecture (the architect's seams are canonical), or the contract (the spec's Technical Context is canonical). When you find tension, surface it in `open-questions` — don't paper over it in code.

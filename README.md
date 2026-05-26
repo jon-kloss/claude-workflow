@@ -64,6 +64,22 @@ Auto-invoked by `/design` for UI-facing work. Also callable independently (e.g.,
 4. **Propose** — Drafts skill edits for recurring patterns, prose for one-offs
 5. **Save** — Persists key findings to memory for cross-session awareness
 
+### /onboard — Brownfield Bootstrap (experimental branch)
+
+Use when starting workflow on an existing codebase, OR when accumulated changes have outpaced agent memory. Seeds and refreshes per-agent memory files at `.claude/agent-memory/<role>.md` so role agents have project context before `/design` or `/build`.
+
+```
+/onboard                  # Full bootstrap — first time on a codebase
+/onboard --refresh        # Delta refresh — re-scan after manual changes since last update
+/onboard <role-slug>      # Single-agent refresh (e.g. /onboard frontend-engineer)
+```
+
+**Memory file structure (hierarchical):** YAML frontmatter (agent, project-root, last-commit-sha) + Summary + Conventions + role-specific section (Routes / Component map / Tables / Tokens / etc.) + Recent changes (rolling cap 5) + Known issues + Pointers (drill-down references to deeper docs or code paths). Cap ~2000 words per agent; agents prune when over.
+
+**Read at dispatch, write at end of dispatch.** Every role agent's prompt now has a "Memory: read first, update last" section. Phase 1 reads the memory file; the final phase appends/updates it. Memory references in handoff `data-input-references` make the audit trail include "this dispatch built on accumulated memory."
+
+**Security: memory is committed.** Per-project, `.claude/agent-memory/<role>.md` is committed to git so the team shares the memory. The `guard-agent-memory-secrets.sh` PreToolUse hook blocks writes containing JWT / AWS key / Stripe key / GitHub PAT / PEM private key / DB connection string with credentials / and ~10 other secret-shape patterns. Override (rare): `@memory-allow-secret(<reason>)` in the write content.
+
 ## Role-Agent System (experimental)
 
 > **Branch: `experiment/role-agents`.** The role-agent system is an opt-in layer that decomposes each SKILL.md's procedural text into 11 specialized agent personas. The orchestrator (the parent Claude session) dispatches role agents via the `Agent` tool; each agent produces a versioned HTML handoff at a predictable path that the next agent reads. This was added because single-Claude SKILL.md runs were skipping required steps under no-interactive-user constraints — moving the procedural detail into per-role prompts forces explicit dispatch and creates a checkable artifact per step.

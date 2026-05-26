@@ -279,6 +279,93 @@ else
 fi
 
 echo ""
+echo "=== /onboard skill + agent-memory regressions ==="
+
+# /onboard skill installed
+TOTAL=$((TOTAL+1))
+if [ -f "$HOME/.claude/skills/onboard/SKILL.md" ]; then
+    echo "  PASS  /onboard skill installed at ~/.claude/skills/onboard/SKILL.md"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  /onboard SKILL.md missing from install"
+    FAIL=$((FAIL+1))
+fi
+
+# All 11 memory templates exist in the repo
+TOTAL=$((TOTAL+1))
+template_count=$(ls "$WORKFLOW_DIR"/skills/onboard/resources/memory-template-*.md 2>/dev/null | wc -l | tr -d ' ')
+if [ "$template_count" -eq 11 ]; then
+    echo "  PASS  11 memory templates present in skills/onboard/resources/"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  expected 11 memory templates, found $template_count"
+    FAIL=$((FAIL+1))
+fi
+
+# _detect_memory_secrets.py symlinked
+TOTAL=$((TOTAL+1))
+if [ -f "$HOME/.claude/hooks/_detect_memory_secrets.py" ]; then
+    echo "  PASS  _detect_memory_secrets.py present in ~/.claude/hooks/"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  _detect_memory_secrets.py MISSING — secret-guard hook won't function"
+    FAIL=$((FAIL+1))
+fi
+
+# guard-agent-memory-secrets.sh blocks JWT in agent-memory write
+TOTAL=$((TOTAL+1))
+PAYLOAD=$(FILE="/proj/.claude/agent-memory/backend-engineer.md" \
+          CONTENT="Token leaked: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c" \
+          python3 -c 'import json, os; print(json.dumps({"tool":{"name":"Edit","input":{"file_path":os.environ["FILE"],"new_string":os.environ["CONTENT"]}}}))')
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh")
+if echo "$result" | grep -q "BLOCKED" && echo "$result" | grep -q "JWT"; then
+    echo "  PASS  guard-agent-memory-secrets blocks JWT-shaped content"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  guard-agent-memory-secrets did not block JWT"
+    FAIL=$((FAIL+1))
+fi
+
+# guard-agent-memory-secrets.sh allows benign pointer text
+TOTAL=$((TOTAL+1))
+PAYLOAD=$(FILE="/proj/.claude/agent-memory/security-architect.md" \
+          CONTENT="Secrets live in env vars. See devops-architect.md#pointer-secret-handling for details." \
+          python3 -c 'import json, os; print(json.dumps({"tool":{"name":"Edit","input":{"file_path":os.environ["FILE"],"new_string":os.environ["CONTENT"]}}}))')
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh")
+if [ "$result" = "{}" ]; then
+    echo "  PASS  guard-agent-memory-secrets allows pointer text"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  guard-agent-memory-secrets incorrectly blocked pointer text: ${result:0:120}"
+    FAIL=$((FAIL+1))
+fi
+
+# guard-agent-memory-secrets.sh allows @memory-allow-secret override
+TOTAL=$((TOTAL+1))
+PAYLOAD=$(FILE="/proj/.claude/agent-memory/qa-engineer.md" \
+          CONTENT="Public test fixture: eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ0ZXN0In0.test @memory-allow-secret(known-public test fixture)" \
+          python3 -c 'import json, os; print(json.dumps({"tool":{"name":"Edit","input":{"file_path":os.environ["FILE"],"new_string":os.environ["CONTENT"]}}}))')
+result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/guard-agent-memory-secrets.sh")
+if [ "$result" = "{}" ]; then
+    echo "  PASS  @memory-allow-secret override allows the write"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  @memory-allow-secret override did not work"
+    FAIL=$((FAIL+1))
+fi
+
+# All 11 agent prompts have the memory block
+TOTAL=$((TOTAL+1))
+agents_with_memory=$(grep -lE '^## Memory: read first, update last' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+if [ "$agents_with_memory" -eq 11 ]; then
+    echo "  PASS  all 11 agent prompts have the Memory section"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  expected 11 agents with Memory block, found $agents_with_memory"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
 echo "=========================================="
 echo "Total: $TOTAL  Pass: $PASS  Fail: $FAIL"
 echo "=========================================="

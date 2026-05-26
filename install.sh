@@ -135,18 +135,21 @@ mkdir -p "$CLAUDE_DIR/skills/design-ui"
 mkdir -p "$CLAUDE_DIR/skills/build"
 mkdir -p "$CLAUDE_DIR/skills/respec"
 mkdir -p "$CLAUDE_DIR/skills/workflow-retrospective"
+mkdir -p "$CLAUDE_DIR/skills/onboard"
 backup_and_link "$SCRIPT_DIR/skills/design/SKILL.md" "$CLAUDE_DIR/skills/design/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/design-arch/SKILL.md" "$CLAUDE_DIR/skills/design-arch/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/design-ui/SKILL.md" "$CLAUDE_DIR/skills/design-ui/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/build/SKILL.md" "$CLAUDE_DIR/skills/build/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/respec/SKILL.md" "$CLAUDE_DIR/skills/respec/SKILL.md"
 backup_and_link "$SCRIPT_DIR/skills/workflow-retrospective/SKILL.md" "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
+backup_and_link "$SCRIPT_DIR/skills/onboard/SKILL.md" "$CLAUDE_DIR/skills/onboard/SKILL.md"
 echo "  - /design linked"
 echo "  - /design-arch linked"
 echo "  - /design-ui linked"
 echo "  - /build linked"
 echo "  - /respec linked"
 echo "  - workflow-retrospective linked"
+echo "  - /onboard linked"
 
 # 2. Install agents
 echo "[2/6] Installing agents..."
@@ -184,6 +187,7 @@ echo "$CLAUDE_DIR/skills/design-ui/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/build/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/respec/SKILL.md" >> "$MANIFEST_FILE"
 echo "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md" >> "$MANIFEST_FILE"
+echo "$CLAUDE_DIR/skills/onboard/SKILL.md" >> "$MANIFEST_FILE"
 if [ -d "$SCRIPT_DIR/agents" ]; then
     for agent in "$SCRIPT_DIR"/agents/*.md; do
         [ -f "$agent" ] || continue
@@ -281,6 +285,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/require-handoff-artifact.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/guard-agent-memory-secrets.sh"
         }
       ]
     },
