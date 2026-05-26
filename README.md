@@ -74,7 +74,7 @@ Use when starting workflow on an existing codebase, OR when accumulated changes 
 /onboard <role-slug>      # Single-agent refresh (e.g. /onboard frontend-engineer)
 ```
 
-**Memory file structure (hierarchical):** YAML frontmatter (agent, project-root, last-commit-sha) + Summary + Conventions + role-specific section (Routes / Component map / Tables / Tokens / etc.) + Recent changes (rolling cap 5) + Known issues + Pointers (drill-down references to deeper docs or code paths). Cap ~2000 words per agent; agents prune when over.
+**Memory file structure (hierarchical):** YAML frontmatter (agent, project-root, last-commit-sha) + Summary + Conventions + role-specific section (Routes / Component map / Tables / Tokens / etc.) + Recent changes (rolling cap 5) + Known issues + Pointers (drill-down references to deeper docs or code paths). **Soft cap ~3,500 words; hard cap ~6,000 words.** Agents prune to the soft cap during normal updates. Above the hard cap, sections overflow into role-scoped sub-files under `.claude/agent-memory/<role>/<section>.md` — the main file holds a summary + link, sub-files hold the inventory. Designed for medium-to-large codebases where Routes/Components/Schema can each exceed 1k words on their own.
 
 **Read at dispatch, write at end of dispatch.** Every role agent's prompt now has a "Memory: read first, update last" section. Phase 1 reads the memory file; the final phase appends/updates it. Memory references in handoff `data-input-references` make the audit trail include "this dispatch built on accumulated memory."
 

@@ -44,7 +44,7 @@ MIXED:
         └── spec-sre-auditor.md
 ```
 
-Each file is committed. Each is ≤ ~2000 words; agents prune when over cap.
+Each file is committed. **Soft cap ~3,500 words; hard cap ~6,000 words.** Agents prune to the soft cap during normal updates. Above the hard cap, content overflows into sub-files under `.claude/agent-memory/<role>/` — see [Multi-file overflow](#multi-file-overflow) below.
 </quick_reference>
 
 <when_to_use>
@@ -132,7 +132,7 @@ CRITICAL constraints:
 - NEVER write actual secrets, tokens, API keys, passwords, PII, or real user data
 - Use pointers to where secrets live (env file names, secret manager keys) — never values
 - Memory is COMMITTED to git; treat every line as code review-visible by the team
-- Stay under ~2000 words total — use the Pointers section to link to deeper docs/code
+- Stay under ~3,500 words total (soft cap). If a section grows beyond that, prefer Pointers to existing docs/code over inline content. Hard cap is 6,000 words; above that, follow the multi-file overflow protocol below.
 
 Cap memory at ~500 words for Summary + Conventions + Component map. Pointers section can
 go to ~1500 words across all entries. If you have more to memorize than fits, prefer pointers
@@ -157,7 +157,7 @@ For each `.claude/agent-memory/<role>.md` produced:
 
 1. **Frontmatter present** — `agent`, `project-root`, `last-updated`, `last-commit-sha`, `schema-version`.
 2. **Required sections** — vary by role. Always required across all roles: `## Summary`, `## Recent changes`, `## Pointers`. Roles that hold conventions also require `## Conventions` (everyone EXCEPT `product-owner`, whose equivalents are scope decisions + open questions). Roles that surface deferred items also require `## Known issues` (everyone EXCEPT `product-owner`, whose deferred items are documented in scope-decisions + open-questions sections). Look up each role's expected sections from its template at `skills/onboard/resources/memory-template-<role>.md` — that's the canonical schema per role. At least one role-specific primary section per memory (Component map / Routes / Tables / Tokens / Personas / etc.).
-3. **Word count** — total words ≤ 2000 (`wc -w`). Over cap → re-dispatch the agent with "compress to ~1500 words" prompt.
+3. **Word count** — total words ≤ 3,500 soft cap (`wc -w`). 3,500–6,000 is a warning (prune on next update). Above 6,000 (hard cap) → re-dispatch the agent with "compress to ~3,000 words or move overflow content into sub-files under `.claude/agent-memory/<role>/` per the multi-file overflow protocol" prompt.
 4. **No secret-shaped strings** — `guard-agent-memory-secrets.sh` enforces this on write, but also re-validate on read: `grep -E '(Bearer\s+eyJ|sk_live_|AKIA[0-9A-Z]{16}|-----BEGIN.*PRIVATE KEY)' .claude/agent-memory/*.md` returns empty.
 
 ## Step 7: Present and offer commit
@@ -209,11 +209,47 @@ Memory and the investigator coexist with distinct scopes:
 
 The investigator's output gets folded into the relevant role agent's memory at the end of /build (the agent's "update memory" final phase reads the Investigation Findings and adds anything project-level to memory).
 
+## Multi-file overflow
+
+<a id="multi-file-overflow"></a>
+
+For agents working in medium-or-larger codebases, certain sections grow naturally beyond the soft 3,500-word cap:
+
+- `backend-engineer` Routes table — easily 50+ routes × ~25 words = 1,250+ words of just that section
+- `frontend-engineer` Component map — 30-50 components
+- `data-architect` Schema overview — 15-30 tables + indexes
+
+When the main `.claude/agent-memory/<role>.md` file approaches the 6,000-word hard cap, the agent splits content into role-scoped sub-files:
+
+```
+.claude/agent-memory/
+├── backend-engineer.md             # main: ≤ 3,500 words, TOC + Summary + Conventions + Recent + Pointers
+└── backend-engineer/
+    ├── routes.md                   # overflow: the full Routes inventory
+    └── middleware.md               # overflow: full middleware-stack detail
+```
+
+**Protocol when a section overflows:**
+
+1. Move the overflowing section's body into `.claude/agent-memory/<role>/<section>.md` (lowercase-hyphenated section name).
+2. In the main file, replace the body with a 1-paragraph summary + a pointer to the sub-file:
+
+   ```markdown
+   ## Routes
+
+   50 server routes across 8 feature areas (auth, lists, tasks, search, export, prefs, health, admin). Full inventory at [`backend-engineer/routes.md`](backend-engineer/routes.md). Add new routes there; update the count + feature-area list here.
+   ```
+
+3. Sub-files have their own short frontmatter (just `agent` + `last-updated`) so they're identifiable.
+4. The agent reads the main file at Phase 1 always; reads sub-files ONLY when the current task references that section's content (e.g., a route addition reads `routes.md`; a token change does not).
+
+**Why not split eagerly?** Small codebases don't need it; small files are easier to scan. Wait until a section legitimately exceeds the cap.
+
 </integration>
 
 <critical_rules>
 1. **Secrets and PII never go into memory.** Memory is committed; treat every line as if it's in a screenshot on Twitter. Use pointers to where secrets live (env var names, secret manager keys), not the values.
-2. **Memory is HIERARCHICAL, not exhaustive.** Summary + Conventions + Component-map cap at ~500 words. Drill-down content goes in Pointers as references to existing docs/code paths/beads tasks. If you find yourself writing a 3rd paragraph in Summary, you're doing memory wrong — push detail into pointers.
+2. **Memory is HIERARCHICAL, not exhaustive.** Summary + Conventions cap at ~500 words. Role-specific sections (Routes / Component map / Tables / Tokens) can grow toward the soft 3,500-word total cap. Beyond that, push detail into Pointers (links to existing docs/code/beads). Beyond the 6,000-word hard cap, follow the multi-file overflow protocol. If you find yourself writing a 3rd paragraph in Summary, you're doing memory wrong — push detail into pointers or overflow files.
 3. **Dispatch order matters in bootstrap.** application-architect must run before data-architect must run before backend-engineer must run before frontend-engineer. UIUX, security, devops, QA, PO, release can parallelize. Spec-sre-auditor is deferred.
 4. **Memory is committed by default.** The skill's final step offers commit; the secret-guard hook protects against bad-content commits. If the user wants memory NOT committed, they edit .gitignore — that's their call, not the skill's default.
 5. **Refresh mode is delta-only.** Don't rewrite memory from scratch on `--refresh`; preserve unrelated content and update only what the diff implicates.
@@ -227,7 +263,7 @@ Before declaring /onboard complete:
 - [ ] Each file has valid YAML frontmatter (agent, project-root, last-updated, last-commit-sha, schema-version)
 - [ ] Each file has the required sections (Summary, Conventions, Recent changes, Known issues, Pointers, plus ≥1 role-specific section)
 - [ ] No file contains secret-shaped strings (`grep` validation passes)
-- [ ] No file exceeds 2000 words
+- [ ] No file exceeds the 6,000-word hard cap; any over the 3,500-word soft cap has a follow-up to prune or split via multi-file overflow
 - [ ] `git diff .claude/agent-memory/` shows reviewable, sensible content (not garbage dumps)
 - [ ] User has been offered the commit option via AskUserQuestion
 </verification_checklist>
