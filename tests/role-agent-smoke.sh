@@ -370,6 +370,64 @@ else
 fi
 
 echo ""
+echo "=== /onboard regressions from 2026-05-26 SquashBuckler dogfood ==="
+
+# workflow-hkg: bootstrap prompt must document bootstrap-LAZY content per role
+# so qa-engineer doesn't eagerly write a per-spec test inventory.
+TOTAL=$((TOTAL+1))
+if grep -q 'Per-role bootstrap scope (eager vs lazy)' "$WORKFLOW_DIR/skills/onboard/SKILL.md" && \
+   grep -q 'Bootstrap-LAZY content for your role' "$WORKFLOW_DIR/skills/onboard/SKILL.md"; then
+    echo "  PASS  /onboard SKILL.md documents per-role bootstrap-LAZY scope"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  /onboard SKILL.md missing per-role bootstrap-LAZY scope guidance (workflow-hkg regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-hkg part 2: qa-engineer template must call out the lazy section explicitly
+TOTAL=$((TOTAL+1))
+if grep -q 'BOOTSTRAP SCOPE' "$WORKFLOW_DIR/skills/onboard/resources/memory-template-qa-engineer.md" && \
+   grep -q 'Test inventory (lazy' "$WORKFLOW_DIR/skills/onboard/resources/memory-template-qa-engineer.md"; then
+    echo "  PASS  qa-engineer template has Bootstrap-scope + lazy Test-inventory section"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  qa-engineer template missing lazy-scope guidance (workflow-hkg regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-1y5: dispatch prompt must specify seconds-precision timestamp
+TOTAL=$((TOTAL+1))
+if grep -q 'seconds precision' "$WORKFLOW_DIR/skills/onboard/SKILL.md" && \
+   grep -q 'date -u +%Y-%m-%dT%H:%M:%SZ' "$WORKFLOW_DIR/skills/onboard/SKILL.md"; then
+    echo "  PASS  /onboard SKILL.md specifies seconds-precision timestamp"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  /onboard SKILL.md missing seconds-precision timestamp guidance (workflow-1y5 regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-1y5 part 2: validator step must check for T00:00:00Z stubs
+TOTAL=$((TOTAL+1))
+if grep -q 'T00:00:00Z' "$WORKFLOW_DIR/skills/onboard/SKILL.md"; then
+    echo "  PASS  /onboard SKILL.md validator references T00:00:00Z stub timestamps"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  /onboard SKILL.md validator missing T00:00:00Z stub check (workflow-1y5 regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-1y5 part 3: every template should signal seconds-precision in its frontmatter placeholder
+TOTAL=$((TOTAL+1))
+templates_with_precision=$(grep -lE 'at seconds precision' "$WORKFLOW_DIR/skills/onboard/resources/"memory-template-*.md | wc -l | tr -d ' ')
+if [ "$templates_with_precision" -eq 11 ]; then
+    echo "  PASS  all 11 templates use seconds-precision timestamp placeholder"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  expected 11 templates with seconds-precision placeholder, found $templates_with_precision (workflow-1y5 regression)"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
 echo "=== require-ui-tests first-word blocklist (catches 2026-05-26 hook-enforcement dogfood finding) ==="
 # Bug: when a spec's first hyphen-split word is "test", "spec", "unit", "e2e",
 # or "integration", the first-word substitution matched every *.test.ts file

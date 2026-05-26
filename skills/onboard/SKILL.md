@@ -115,6 +115,19 @@ Order matters because later agents benefit from earlier agents' just-written mem
 
 **Dispatch parallelism.** Agents 1–4 must serialize (later ones read earlier memory). Agents 5–10 can run in parallel (independent surfaces). To dispatch in parallel, include MULTIPLE Agent tool calls in a SINGLE message (per the parallel-dispatch pattern in build/SKILL.md and design/SKILL.md).
 
+**Per-role bootstrap scope (eager vs lazy).**
+
+Some content is naturally bootstrap-eager (conventions, framework choices, topology) and stays in memory long-term. Other content is bootstrap-LAZY: it's tempting to capture at seed time but it goes stale fast AND isn't useful until the role is actually dispatched against a specific surface. Defer lazy content to first-use; populate it incrementally on real dispatches.
+
+| Role | Bootstrap-LAZY (defer to first dispatch — stub only) |
+|---|---|
+| `qa-engineer` | Per-spec / per-cluster test inventory tables (which tests cover which spec). The bootstrap captures **framework, conventions, suite shape, flakiness patterns, visual-fidelity helpers**; per-spec mappings populate during real QA dispatches. |
+| `backend-engineer` | Full route/method dispatch inventories beyond ~30 entries — capture the *namespace map* + ownership at bootstrap; per-method per-spec annotations populate during real implementer dispatches. |
+| `frontend-engineer` | Per-component prop-shape annotations beyond the component map itself. Capture the inventory + ownership conventions; detailed prop docs accrete during real implementer dispatches. |
+| `data-architect` | Per-table column-level annotations beyond ~20 tables. Capture the schema graph + migration conventions + index strategy; per-column constraints accrete during real data dispatches. |
+
+All other roles bootstrap eagerly — their natural cap is well below 3,500 words.
+
 **Dispatch prompt template:**
 
 ```
@@ -134,6 +147,14 @@ CRITICAL constraints:
 - Memory is COMMITTED to git; treat every line as code review-visible by the team
 - Stay under ~3,500 words total (soft cap). If a section grows beyond that, prefer Pointers to existing docs/code over inline content. Hard cap is 6,000 words; above that, follow the multi-file overflow protocol below.
 
+Bootstrap-LAZY content for your role (defer — stub-only at bootstrap, populate on real dispatch):
+<inserted per role from the table above. Empty for roles with nothing to defer.>
+
+Frontmatter timestamp precision: set `last-updated` to the CURRENT timestamp at seconds
+precision. Run `date -u +%Y-%m-%dT%H:%M:%SZ` (or equivalent) — do NOT write a date-stub
+like 2026-05-26T00:00:00Z. The seconds-precision stamp is what /onboard --refresh's delta
+detection compares against.
+
 Cap memory at ~500 words for Summary + Conventions + Component map. Pointers section can
 go to ~1500 words across all entries. If you have more to memorize than fits, prefer pointers
 to your existing docs/code over verbose summaries.
@@ -148,7 +169,8 @@ For refresh mode, the dispatch prompt instead says:
 "You are REFRESHING your memory at .claude/agent-memory/<role-slug>.md. Your current memory
 file is below. The git diff since your last-recorded-SHA (<sha>) is below. Update only the
 sections affected by the diff. Preserve unrelated content. Update last-updated and last-commit-sha
-in frontmatter to HEAD."
+in frontmatter to HEAD. Set last-updated to the CURRENT timestamp at seconds precision
+(date -u +%Y-%m-%dT%H:%M:%SZ) — never a date-stub like T00:00:00Z."
 ```
 
 ## Step 6: Validate each memory file
@@ -156,9 +178,11 @@ in frontmatter to HEAD."
 For each `.claude/agent-memory/<role>.md` produced:
 
 1. **Frontmatter present** — `agent`, `project-root`, `last-updated`, `last-commit-sha`, `schema-version`.
-2. **Required sections** — vary by role. Always required across all roles: `## Summary`, `## Recent changes`, `## Pointers`. Roles that hold conventions also require `## Conventions` (everyone EXCEPT `product-owner`, whose equivalents are scope decisions + open questions). Roles that surface deferred items also require `## Known issues` (everyone EXCEPT `product-owner`, whose deferred items are documented in scope-decisions + open-questions sections). Look up each role's expected sections from its template at `skills/onboard/resources/memory-template-<role>.md` — that's the canonical schema per role. At least one role-specific primary section per memory (Component map / Routes / Tables / Tokens / Personas / etc.).
-3. **Word count** — total words ≤ 3,500 soft cap (`wc -w`). 3,500–6,000 is a warning (prune on next update). Above 6,000 (hard cap) → re-dispatch the agent with "compress to ~3,000 words or move overflow content into sub-files under `.claude/agent-memory/<role>/` per the multi-file overflow protocol" prompt.
-4. **No secret-shaped strings** — `guard-agent-memory-secrets.sh` enforces this on write, but also re-validate on read: `grep -E '(Bearer\s+eyJ|sk_live_|AKIA[0-9A-Z]{16}|-----BEGIN.*PRIVATE KEY)' .claude/agent-memory/*.md` returns empty.
+2. **Frontmatter timestamp precision** — `last-updated` is a full ISO 8601 UTC timestamp at seconds precision (e.g. `2026-05-26T17:53:15Z`), NOT a date-stub (`2026-05-26T00:00:00Z`). Validate: `grep -L 'T00:00:00Z' .claude/agent-memory/*.md` should equal the full file list. Any file with `T00:00:00Z` → re-dispatch that single agent with "set last-updated to current `date -u +%Y-%m-%dT%H:%M:%SZ`" instruction. Rationale: `/onboard --refresh` delta detection compares timestamps, and a batch of files all stamped midnight UTC on the same day is indistinguishable from a manual edit.
+3. **Required sections** — vary by role. Always required across all roles: `## Summary`, `## Recent changes`, `## Pointers`. Roles that hold conventions also require `## Conventions` (everyone EXCEPT `product-owner`, whose equivalents are scope decisions + open questions). Roles that surface deferred items also require `## Known issues` (everyone EXCEPT `product-owner`, whose deferred items are documented in scope-decisions + open-questions sections). Look up each role's expected sections from its template at `skills/onboard/resources/memory-template-<role>.md` — that's the canonical schema per role. At least one role-specific primary section per memory (Component map / Routes / Tables / Tokens / Personas / etc.).
+4. **Word count** — total words ≤ 3,500 soft cap (`wc -w`). 3,500–6,000 is a warning (prune on next update). Above 6,000 (hard cap) → re-dispatch the agent with "compress to ~3,000 words or move overflow content into sub-files under `.claude/agent-memory/<role>/` per the multi-file overflow protocol" prompt.
+5. **Bootstrap-LAZY guard for qa-engineer** — if `qa-engineer.md` contains a multi-row "Test inventory" / "Per-spec coverage" / "Tests by cluster" table at bootstrap, that's eager-inventory creep. The table belongs in lazy content (populated by real QA dispatches). Re-dispatch with "replace eager per-spec test inventory with a stub section; per-spec mappings populate during real QA dispatches" instruction.
+6. **No secret-shaped strings** — `guard-agent-memory-secrets.sh` enforces this on write, but also re-validate on read: `grep -E '(Bearer\s+eyJ|sk_live_|AKIA[0-9A-Z]{16}|-----BEGIN.*PRIVATE KEY)' .claude/agent-memory/*.md` returns empty.
 
 ## Step 7: Present and offer commit
 
@@ -261,7 +285,9 @@ Before declaring /onboard complete:
 
 - [ ] `.claude/agent-memory/` directory exists with 10 files (spec-sre-auditor deferred)
 - [ ] Each file has valid YAML frontmatter (agent, project-root, last-updated, last-commit-sha, schema-version)
+- [ ] `last-updated` timestamps are seconds-precision (NOT `T00:00:00Z` date-stubs)
 - [ ] Each file has the required sections (Summary, Conventions, Recent changes, Known issues, Pointers, plus ≥1 role-specific section)
+- [ ] `qa-engineer.md` does NOT contain an eager per-spec / per-cluster test inventory table (bootstrap-lazy content)
 - [ ] No file contains secret-shaped strings (`grep` validation passes)
 - [ ] No file exceeds the 6,000-word hard cap; any over the 3,500-word soft cap has a follow-up to prune or split via multi-file overflow
 - [ ] `git diff .claude/agent-memory/` shows reviewable, sensible content (not garbage dumps)

@@ -1,7 +1,7 @@
 ---
 agent: backend-engineer
 project-root: <abs path to project root>
-last-updated: <ISO 8601 UTC>
+last-updated: <ISO 8601 UTC at seconds precision, e.g. 2026-05-26T17:53:15Z — never T00:00:00Z>
 last-commit-sha: <git HEAD at last write>
 schema-version: 1
 ---
