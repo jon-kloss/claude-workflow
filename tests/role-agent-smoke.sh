@@ -677,6 +677,138 @@ else
 fi
 
 echo ""
+echo "=== memory-update warn hooks (workflow-gq3 / 2026-05-27 user observation) ==="
+
+# Both hook files present
+for h in track-agent-memory-baseline.sh warn-agent-memory-not-updated.sh; do
+    TOTAL=$((TOTAL+1))
+    if [ -f "$HOOK_DIR/$h" ]; then
+        echo "  PASS  $h present"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  $h missing"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+# Both registered in install.sh
+for h in track-agent-memory-baseline.sh warn-agent-memory-not-updated.sh; do
+    TOTAL=$((TOTAL+1))
+    if grep -q "$h" "$WORKFLOW_DIR/install.sh"; then
+        echo "  PASS  $h registered in install.sh"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  $h not registered in install.sh"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+# Behavior tests — synthetic project with memory file
+MEM_TMP="$TMP/memory-warn-test"
+mkdir -p "$MEM_TMP/.claude/agent-memory" "$MEM_TMP/.claude/hooks/state"
+MEM_FILE="$MEM_TMP/.claude/agent-memory/backend-engineer.md"
+echo "# backend-engineer — project memory" > "$MEM_FILE"
+
+# Helper: build Agent payload
+mkpayload_agent() {
+    local subagent_type="$1" prompt="$2"
+    SUB="$subagent_type" P="$prompt" python3 -c '
+import json, os
+print(json.dumps({"tool":{"name":"Agent","input":{"subagent_type":os.environ["SUB"],"prompt":os.environ["P"]}}}))'
+}
+
+# Helper: run baseline + warn hook in isolated HOME with project as cwd
+run_baseline() {
+    local subagent_type="$1" prompt="$2"
+    mkpayload_agent "$subagent_type" "$prompt" | (cd "$MEM_TMP" && HOME="$MEM_TMP" bash "$HOOK_DIR/track-agent-memory-baseline.sh" 2>&1)
+}
+run_warn() {
+    local subagent_type="$1" prompt="$2"
+    mkpayload_agent "$subagent_type" "$prompt" | (cd "$MEM_TMP" && HOME="$MEM_TMP" bash "$HOOK_DIR/warn-agent-memory-not-updated.sh" 2>&1)
+}
+
+# Case 1: baseline records mtime
+run_baseline "backend-engineer" "test prompt" > /dev/null
+TOTAL=$((TOTAL+1))
+if [ -f "$MEM_TMP/.claude/hooks/state/agent-memory-baseline-backend-engineer.txt" ]; then
+    echo "  PASS  baseline hook records pre-dispatch mtime"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  baseline hook did not record mtime"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 2: memory unchanged → warn emits additionalContext
+got=$(run_warn "backend-engineer" "test prompt")
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q '"additionalContext"' && echo "$got" | grep -q "WARNING.*backend-engineer.*not modified"; then
+    echo "  PASS  warn hook emits additionalContext when memory unchanged"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  warn hook did not emit warning for unchanged memory (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 3: memory updated → no warning
+sleep 1  # ensure mtime can advance
+echo "## Recent changes" >> "$MEM_FILE"
+got=$(run_warn "backend-engineer" "test prompt")
+TOTAL=$((TOTAL+1))
+if [ "$got" = "{}" ]; then
+    echo "  PASS  warn hook is silent when memory was updated"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  warn hook emitted warning even though memory was updated (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 4: @memory-update-skip override suppresses warning
+run_baseline "backend-engineer" "trivial dispatch with @memory-update-skip(backend-engineer: spec is @trivial typo fix)" > /dev/null
+got=$(run_warn "backend-engineer" "trivial dispatch with @memory-update-skip(backend-engineer: spec is @trivial typo fix)")
+TOTAL=$((TOTAL+1))
+if [ "$got" = "{}" ]; then
+    echo "  PASS  @memory-update-skip(role: reason) override suppresses warning"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  @memory-update-skip override was not respected (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 5: non-role subagent_type ignored
+got=$(run_warn "general-purpose" "doing something")
+TOTAL=$((TOTAL+1))
+if [ "$got" = "{}" ]; then
+    echo "  PASS  non-role subagent_type (general-purpose) is ignored"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  hook fired on general-purpose subagent (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 6: memory file missing → no warning
+rm "$MEM_FILE"
+rm -f "$MEM_TMP/.claude/hooks/state/agent-memory-baseline-backend-engineer.txt"
+run_baseline "backend-engineer" "test" > /dev/null
+TOTAL=$((TOTAL+1))
+if [ ! -f "$MEM_TMP/.claude/hooks/state/agent-memory-baseline-backend-engineer.txt" ]; then
+    echo "  PASS  baseline hook skips when memory file does not exist"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  baseline hook recorded mtime for nonexistent file"
+    FAIL=$((FAIL+1))
+fi
+
+got=$(run_warn "backend-engineer" "test")
+TOTAL=$((TOTAL+1))
+if [ "$got" = "{}" ]; then
+    echo "  PASS  warn hook silent when memory file does not exist (pre-/onboard)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  warn hook fired with no memory file present (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
 echo "=== aside resolution-pointer validation (workflow-ax6 / 2026-05-27 bypass) ==="
 
 # Set up project root for resolution tests

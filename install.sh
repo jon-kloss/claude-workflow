@@ -341,6 +341,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/verifier-dispatch.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/track-agent-memory-baseline.sh"
         }
       ]
     }
@@ -365,6 +369,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/track-agents.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/warn-agent-memory-not-updated.sh"
         }
       ]
     },
