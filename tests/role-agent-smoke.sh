@@ -295,14 +295,14 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# All 11 memory templates exist in the repo
+# All 16 memory templates exist in the repo (11 original + 5 game-design)
 TOTAL=$((TOTAL+1))
 template_count=$(ls "$WORKFLOW_DIR"/skills/onboard/resources/memory-template-*.md 2>/dev/null | wc -l | tr -d ' ')
-if [ "$template_count" -eq 11 ]; then
-    echo "  PASS  11 memory templates present in skills/onboard/resources/"
+if [ "$template_count" -eq 16 ]; then
+    echo "  PASS  16 memory templates present in skills/onboard/resources/"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 11 memory templates, found $template_count"
+    echo "  FAIL  expected 16 memory templates, found $template_count"
     FAIL=$((FAIL+1))
 fi
 
@@ -358,14 +358,14 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# All 11 agent prompts have the memory block
+# All 16 agent prompts have the memory block (11 original + 5 game-design)
 TOTAL=$((TOTAL+1))
 agents_with_memory=$(grep -lE '^## Memory: read first, update last' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_memory" -eq 11 ]; then
-    echo "  PASS  all 11 agent prompts have the Memory section"
+if [ "$agents_with_memory" -eq 16 ]; then
+    echo "  PASS  all 16 agent prompts have the Memory section"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 11 agents with Memory block, found $agents_with_memory"
+    echo "  FAIL  expected 16 agents with Memory block, found $agents_with_memory"
     FAIL=$((FAIL+1))
 fi
 
@@ -419,11 +419,11 @@ fi
 # workflow-1y5 part 3: every template should signal seconds-precision in its frontmatter placeholder
 TOTAL=$((TOTAL+1))
 templates_with_precision=$(grep -lE 'at seconds precision' "$WORKFLOW_DIR/skills/onboard/resources/"memory-template-*.md | wc -l | tr -d ' ')
-if [ "$templates_with_precision" -eq 11 ]; then
-    echo "  PASS  all 11 templates use seconds-precision timestamp placeholder"
+if [ "$templates_with_precision" -eq 16 ]; then
+    echo "  PASS  all 16 templates use seconds-precision timestamp placeholder"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 11 templates with seconds-precision placeholder, found $templates_with_precision (workflow-1y5 regression)"
+    echo "  FAIL  expected 16 templates with seconds-precision placeholder, found $templates_with_precision (workflow-1y5 regression)"
     FAIL=$((FAIL+1))
 fi
 
@@ -493,35 +493,36 @@ got=$(mkpayload_edit "$FC_TRIVIAL_SPEC" "@layer(api) @trivial @status(verified)"
 assert "@trivial spec bypasses fix-cycle hook" "allow" "$got"
 
 # workflow-myr: every agent has the terminal Exit checklist section
+# Total agent count is now 16 (11 original + 5 game-design)
 TOTAL=$((TOTAL+1))
 agents_with_exit=$(grep -lE '^## Exit checklist \(run before returning\)' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_exit" -eq 11 ]; then
-    echo "  PASS  all 11 agents have terminal Exit checklist section"
+if [ "$agents_with_exit" -eq 16 ]; then
+    echo "  PASS  all 16 agents have terminal Exit checklist section"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 11 agents with Exit checklist, found $agents_with_exit (workflow-myr regression)"
+    echo "  FAIL  expected 16 agents with Exit checklist, found $agents_with_exit (workflow-myr regression)"
     FAIL=$((FAIL+1))
 fi
 
 # workflow-myr: exit checklist names handoff-write as terminal step
 TOTAL=$((TOTAL+1))
 agents_with_terminal_handoff=$(grep -lE 'TERMINAL|handoff file is NOT|verbal confirmation is NOT the deliverable' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_terminal_handoff" -ge 11 ]; then
+if [ "$agents_with_terminal_handoff" -ge 16 ]; then
     echo "  PASS  all agents emphasize handoff-as-deliverable in exit checklist"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  only $agents_with_terminal_handoff/11 agents emphasize terminal handoff-write"
+    echo "  FAIL  only $agents_with_terminal_handoff/16 agents emphasize terminal handoff-write"
     FAIL=$((FAIL+1))
 fi
 
 # workflow-1bo: sleep-poll anti-pattern guidance present in agent prompts
 TOTAL=$((TOTAL+1))
 agents_with_sleep_warn=$(grep -lE 'do not poll background tasks with .sleep' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_sleep_warn" -eq 11 ]; then
-    echo "  PASS  all 11 agents carry sleep-poll anti-pattern warning"
+if [ "$agents_with_sleep_warn" -eq 16 ]; then
+    echo "  PASS  all 16 agents carry sleep-poll anti-pattern warning"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 11 agents with sleep-poll warning, found $agents_with_sleep_warn (workflow-1bo regression)"
+    echo "  FAIL  expected 16 agents with sleep-poll warning, found $agents_with_sleep_warn (workflow-1bo regression)"
     FAIL=$((FAIL+1))
 fi
 
@@ -532,6 +533,146 @@ if grep -q 'Do not sleep-poll background work' "$WORKFLOW_DIR/skills/build/SKILL
     PASS=$((PASS+1))
 else
     echo "  FAIL  build/SKILL.md missing sleep-poll guidance in Step 3.3h"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
+echo "=== Game-design agents (workflow-5wm epic) ==="
+
+# All 5 new game agents exist
+for agent in game-designer level-designer narrative-designer systems-designer game-ui-designer; do
+    TOTAL=$((TOTAL+1))
+    if [ -f "$WORKFLOW_DIR/agents/${agent}.md" ]; then
+        echo "  PASS  agents/${agent}.md present"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  agents/${agent}.md missing"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+# All 5 new memory templates exist
+for agent in game-designer level-designer narrative-designer systems-designer game-ui-designer; do
+    TOTAL=$((TOTAL+1))
+    if [ -f "$WORKFLOW_DIR/skills/onboard/resources/memory-template-${agent}.md" ]; then
+        echo "  PASS  memory-template-${agent}.md present"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  memory-template-${agent}.md missing"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+# game-context template exists
+TOTAL=$((TOTAL+1))
+if [ -f "$WORKFLOW_DIR/skills/onboard/resources/game-context-template.md" ]; then
+    echo "  PASS  game-context-template.md present"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  game-context-template.md missing"
+    FAIL=$((FAIL+1))
+fi
+
+# require-layer-tag.sh accepts @layer(gameplay)
+LT_TMP="$TMP/layer-test/specs"
+mkdir -p "$LT_TMP"
+LT_SPEC="$LT_TMP/gameplay-spec.md"
+got=$(mkpayload_edit "$LT_SPEC" "@status(approved) @layer(gameplay) Feature: combat loop" | bash "$HOOK_DIR/require-layer-tag.sh" 2>&1 || true)
+assert "@layer(gameplay) accepted by require-layer-tag.sh" "allow" "$got"
+
+# require-layer-tag.sh still blocks without any layer
+got=$(mkpayload_edit "$LT_SPEC" "@status(approved) Feature: no layer" | bash "$HOOK_DIR/require-layer-tag.sh" 2>&1 || true)
+assert "spec without @layer still blocked" "block" "$got"
+
+# require-handoff-artifact.sh: game-context.md presence triggers game-designer expectation
+# Set up synthetic game project
+GP_TMP="$TMP/game-project"
+mkdir -p "$GP_TMP/specs/handoffs" "$GP_TMP/.claude"
+echo "# Game Context (test fixture)" > "$GP_TMP/.claude/game-context.md"
+GP_SPEC="$GP_TMP/specs/core-loop.md"
+echo "@layer(gameplay)" > "$GP_SPEC"
+
+# Without ANY handoffs, the verified write blocks (multiple missing including game-designer)
+got=$(mkpayload_edit "$GP_SPEC" "@layer(gameplay) @status(verified)" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "step-2.3-core-loop-game-designer.html"; then
+    echo "  PASS  require-handoff-artifact.sh expects step-2.3-<slug>-game-designer.html when .claude/game-context.md present"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-handoff-artifact.sh does NOT expect game-designer on game project (workflow-5wm regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# require-handoff-artifact.sh: NO game-context.md => no game handoffs expected
+NG_TMP="$TMP/non-game-project"
+mkdir -p "$NG_TMP/specs/handoffs"
+NG_SPEC="$NG_TMP/specs/regular-api.md"
+echo "@layer(api)" > "$NG_SPEC"
+
+got=$(mkpayload_edit "$NG_SPEC" "@layer(api) @status(verified)" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if ! echo "$got" | grep -q "game-designer\|level-designer\|narrative-designer\|systems-designer"; then
+    echo "  PASS  require-handoff-artifact.sh does NOT expect game handoffs on non-game project"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-handoff-artifact.sh incorrectly expects game handoffs without game-context.md"
+    FAIL=$((FAIL+1))
+fi
+
+# require-handoff-artifact.sh: @surface(game) routes to game-ui-designer instead of uiux-designer
+GUI_SPEC="$GP_TMP/specs/hud-spec.md"
+echo "@layer(ui)" > "$GUI_SPEC"
+got=$(mkpayload_edit "$GUI_SPEC" "@layer(ui) @surface(game) @status(verified)" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "step-2.85-hud-spec-game-ui-designer.html" && ! echo "$got" | grep -q "step-2.85-hud-spec-uiux-designer.html"; then
+    echo "  PASS  @surface(game) routes UI spec to game-ui-designer (not uiux-designer)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  @surface(game) routing incorrect"
+    FAIL=$((FAIL+1))
+fi
+
+# workflow-st3: require-release-handoff.sh title-line-only check (non-epic with epic parent allows)
+TOTAL=$((TOTAL+1))
+if grep -q 'title_line=' "$HOOK_DIR/require-release-handoff.sh" && \
+   grep -q 'head -n 1' "$HOOK_DIR/require-release-handoff.sh"; then
+    echo "  PASS  require-release-handoff.sh restricts [epic] check to title line (workflow-st3 fix)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-release-handoff.sh missing title-line restriction (workflow-st3 regression)"
+    FAIL=$((FAIL+1))
+fi
+
+# Onboard SKILL.md documents conditional game-agent dispatch
+TOTAL=$((TOTAL+1))
+if grep -q 'Game-design agents (conditional)' "$WORKFLOW_DIR/skills/onboard/SKILL.md" && \
+   grep -q 'game-context.md exists' "$WORKFLOW_DIR/skills/onboard/SKILL.md"; then
+    echo "  PASS  /onboard SKILL.md documents conditional game-agent dispatch"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  /onboard SKILL.md missing game-agent dispatch guidance"
+    FAIL=$((FAIL+1))
+fi
+
+# Design SKILL.md has Step 2.3 (game-designer) and Step 2.7 (parallel game design)
+TOTAL=$((TOTAL+1))
+if grep -q 'Step 2.3: Game Design' "$WORKFLOW_DIR/skills/design/SKILL.md" && \
+   grep -q 'Step 2.7: Per-spec Game Design' "$WORKFLOW_DIR/skills/design/SKILL.md"; then
+    echo "  PASS  /design SKILL.md has Step 2.3 + Step 2.7 game-design steps"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  /design SKILL.md missing game-design steps"
+    FAIL=$((FAIL+1))
+fi
+
+# Design SKILL.md Step 2.85 documents @surface(game) routing
+TOTAL=$((TOTAL+1))
+if grep -q '@surface(game)' "$WORKFLOW_DIR/skills/design/SKILL.md" && \
+   grep -q 'game-ui-designer' "$WORKFLOW_DIR/skills/design/SKILL.md"; then
+    echo "  PASS  /design SKILL.md Step 2.85 documents @surface(game) → game-ui-designer routing"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  /design SKILL.md Step 2.85 missing @surface(game) routing"
     FAIL=$((FAIL+1))
 fi
 

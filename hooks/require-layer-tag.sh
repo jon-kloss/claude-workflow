@@ -64,7 +64,7 @@ else
 fi
 
 # Pass if @layer tag is present with a valid value
-if echo "$spec_content" | grep -qE "@layer\((api|ui|full-stack|cli|infra)\)"; then
+if echo "$spec_content" | grep -qE "@layer\((api|ui|full-stack|cli|infra|gameplay)\)"; then
     echo '{}'
     exit 0
 fi
@@ -74,6 +74,13 @@ slug="${basename_file%.md}"
 # Suggest a likely value from heuristic signals (informational — agent must
 # still write the tag, not the hook).
 suggested="api"
+# Detect game project — presence of game-context indicates gameplay specs are likely
+project_root="$(dirname "$(dirname "$file_path")")"
+is_game_project="no"
+if [ -f "$project_root/.claude/game-context.md" ]; then
+    is_game_project="yes"
+fi
+
 if echo "$spec_content" | grep -q "^## UI Design"; then
     if echo "$spec_content" | grep -qE 'POST|GET|PUT|DELETE|PATCH'; then
         suggested="full-stack"
@@ -82,12 +89,15 @@ if echo "$spec_content" | grep -q "^## UI Design"; then
     fi
 elif echo "$spec_content" | grep -qE 'POST\s+/|GET\s+/|PUT\s+/|DELETE\s+/|PATCH\s+/'; then
     suggested="api"
+elif [ "$is_game_project" = "yes" ]; then
+    # Game projects without a UI Design section default to gameplay
+    suggested="gameplay"
 fi
 
 cat >&2 <<EOF
 BLOCKED: specs/${slug}.md does not have a @layer(...) tag, but the edit sets @status(approved|implemented|verified).
 
-Every spec must declare @layer with one of: api | ui | full-stack | cli | infra.
+Every spec must declare @layer with one of: api | ui | full-stack | cli | infra | gameplay.
 
 This is the deterministic signal that downstream hooks key on (require-ui-tests, claim-vs-call-audit, /build's Step 3.2.5 wiring checkpoint, etc.). Removing or omitting the tag would bypass those gates.
 

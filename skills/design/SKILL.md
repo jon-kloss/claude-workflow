@@ -159,6 +159,27 @@ When the agent returns, read its handoff. Verify:
 
 If acceptance is incomplete (open questions outstanding, vague answers), do NOT proceed to Step 2.5 — dispatch the product-owner again with the gaps surfaced.
 
+## Step 2.3: Game Design (when applicable)
+
+**Dispatch the game-designer role agent.** Run only when `.claude/game-context.md` exists — that's the deterministic signal this is a game project. Skip silently otherwise.
+
+```bash
+# Detect
+[ -f .claude/game-context.md ] && echo "GAME PROJECT — dispatch game-designer"
+```
+
+```
+Agent tool (subagent_type: game-designer, run_in_background: false):
+"You are running Step 2.3 (game design) for this session. Read .claude/game-context.md and
+specs/handoffs/step-2-<spec-slug>-product-owner.html. Produce the core loop, player verbs,
+win/loss conditions, ten fun things, and anti-features. Handoff at:
+  specs/handoffs/step-2.3-<spec-slug>-game-designer.html"
+```
+
+When the agent returns, verify the handoff exists and the core loop / verbs / ten fun things sections have substantive content. If `.claude/game-context.md` was missing and the agent created it via AskUserQuestion, confirm it was committed (or note as pending).
+
+**BLOCKING REQUIREMENT.** When `.claude/game-context.md` exists, the game-designer MUST run before Step 2.5. The application-architect's decomposition reads game-designer's verbs to slice the implementation.
+
 ## Step 2.5: Decompose
 
 **Dispatch the application-architect role agent.** This step is run by `agents/application-architect.md` — the independence test, seam scan, and decomposition heuristics live there.
@@ -177,6 +198,28 @@ When the agent returns, read its handoff. Verify:
 - The `data-input-references` meta tag points to the PO handoff.
 
 If the decomposition has issues (cycles, missing tags, unclear seams), dispatch again with the specific concern — do NOT proceed.
+
+## Step 2.7: Per-spec Game Design (when applicable)
+
+**Dispatch level-designer, narrative-designer, and systems-designer in PARALLEL** for each spec, when `.claude/game-context.md` exists. These three designers all read the game-designer handoff and produce orthogonal deliverables (space, story, math).
+
+```
+# Parallel: include multiple Agent tool calls in a SINGLE message
+Agent tool (subagent_type: level-designer): "Step 2.7 for spec <slug>: spatial layout, encounter pacing, difficulty curve. Read game-designer + narrative-designer (if available). Handoff at specs/handoffs/step-2.7-<slug>-level-designer.html"
+
+Agent tool (subagent_type: narrative-designer): "Step 2.7 for spec <slug>: story arc, characters, dialogue, branching, tone. Read game-designer handoff. Handoff at specs/handoffs/step-2.7-<slug>-narrative-designer.html"
+
+Agent tool (subagent_type: systems-designer): "Step 2.7 for spec <slug>: progression math, economy graph, drop tables, balance, anti-degenerate defenses. Read game-designer + level-designer (if available). Handoff at specs/handoffs/step-2.7-<slug>-systems-designer.html"
+```
+
+When all three return, read their handoffs. Verify:
+- Per-axis sections (topology / story-arc / progression-curves / etc.) are substantive — not placeholder text
+- Cross-references resolve (level-designer references game-designer's verbs; narrative-designer references game-designer's core loop)
+- `open-questions` from each are surfaced together — common tensions ("pacing wants combat, narrative wants dialogue") get a single resolution
+
+**BLOCKING REQUIREMENT.** When `.claude/game-context.md` exists AND the spec is not `@trivial`, all three must run before Step 2.75 / Step 2.85. The `require-handoff-artifact.sh` hook will block `@status(verified)` later if any are missing.
+
+**Skip when:** Spec is `@trivial`, OR `.claude/game-context.md` is absent (non-game project).
 
 ## Step 2.75: Validate Feasibility (when applicable)
 
@@ -199,21 +242,47 @@ Report: confirmed capabilities, limitations, and anything that contradicts the c
 
 ## Step 2.85: UI/UX Design (when applicable)
 
-**Dispatch the uiux-designer role agent.** This step is run by `agents/uiux-designer.md` — the agent owns `/design-ui` invocation, PRODUCT.md/DESIGN.md authoring, mockup generation, and the 5 `/impeccable` quality gates.
+**Dispatch the uiux-designer role agent — OR game-ui-designer when the spec carries `@surface(game)`.** This step is run by `agents/uiux-designer.md` (base discipline) or `agents/game-ui-designer.md` (game-UI extension — inherits uiux-designer's discipline + adds HUD / diegesis / input affordances / juice / accessibility-at-speed axes).
+
+**Routing decision per spec:**
+
+```bash
+# For each UI-bearing spec, check @surface(game)
+for spec in $(grep -lE '@layer\((ui|full-stack)\)' specs/*.md); do
+    if grep -q '@surface(game)' "$spec"; then
+        echo "ROUTE: game-ui-designer  $spec"
+    else
+        echo "ROUTE: uiux-designer     $spec"
+    fi
+done
+```
+
+For specs routed to **uiux-designer**:
 
 ```
 Agent tool (subagent_type: uiux-designer, run_in_background: false):
 "You are running Step 2.85 (UI/UX design) for the UI-facing specs in this decomposition. Read the
-application-architect handoff at specs/handoffs/step-2.5-<slug>-application-architect.html to identify
-which specs are @layer(ui) or @layer(full-stack). For each, ensure PRODUCT.md and DESIGN.md exist,
-generate mockups in specs/mockups/, invoke all 5 /impeccable gates per spec, and add ## UI Design
-sections. Produce your handoff at:
-  specs/handoffs/step-2.85-<spec-slug>-uiux-designer.html (one per UI-bearing spec)"
+application-architect handoff. For each, ensure PRODUCT.md and DESIGN.md exist, generate mockups
+in specs/mockups/, invoke all 5 /impeccable gates per spec, and add ## UI Design sections. Produce
+your handoff at:
+  specs/handoffs/step-2.85-<spec-slug>-uiux-designer.html"
 ```
 
-When the agent returns, verify each UI-facing spec has both a mockup file at `specs/mockups/<slug>/` (or `.html`) AND a `## UI Design` section listing the gate Skill invocations. `claim-vs-call-audit.sh` catches false claims at `@status(verified)` time; checking now saves a round-trip.
+For specs routed to **game-ui-designer**:
 
-**BLOCKING REQUIREMENT.** If any decomposition entry is `@layer(ui|full-stack)`, the uiux-designer agent MUST run before Step 3.
+```
+Agent tool (subagent_type: game-ui-designer, run_in_background: false):
+"You are running Step 2.85 (game UI design) for spec <slug> (@surface(game)). Read
+.claude/game-context.md and all four design handoffs (game-designer, level-designer,
+narrative-designer, systems-designer). Inherit uiux-designer discipline and add game-specific
+axes: HUD inventory, diegesis posture, input affordances, juice/feedback, readability at speed,
+accessibility commitments. Invoke all 5 /impeccable gates. Produce handoff at:
+  specs/handoffs/step-2.85-<slug>-game-ui-designer.html"
+```
+
+When agents return, verify each UI-facing spec has a mockup at `specs/mockups/<slug>/` (or `.html`) AND a `## UI Design` section listing the gate Skill invocations. `claim-vs-call-audit.sh` catches false claims at `@status(verified)` time; checking now saves a round-trip.
+
+**BLOCKING REQUIREMENT.** If any decomposition entry is `@layer(ui|full-stack)`, exactly one of uiux-designer OR game-ui-designer MUST run for that spec (chosen by `@surface(game)` tag) before Step 3.
 
 **Skip when:** `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results.
 

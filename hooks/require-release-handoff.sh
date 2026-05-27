@@ -61,10 +61,13 @@ if [ -z "$show_out" ]; then
     exit 0
 fi
 
-# Look for "[epic]" in the title line. bd show formats: "○ id · TITLE..."
-# Case-insensitive: bd emits [EPIC] in current versions but historical/lower
-# forms exist in older databases.
-if ! echo "$show_out" | grep -qiE '\[epic\]'; then
+# Look for "[epic]" in the title line ONLY. bd show formats:
+#   "○ id · TITLE   [PRIORITY · STATUS]"
+# DEPENDS ON / BLOCKS sections list parent/child titles which can also contain
+# "[EPIC]" — grepping the full multi-line output false-positives non-epic
+# tasks that depend on an epic. Restrict to the first line.
+title_line=$(echo "$show_out" | head -n 1)
+if ! echo "$title_line" | grep -qiE '\[epic\]'; then
     echo '{}'
     exit 0
 fi

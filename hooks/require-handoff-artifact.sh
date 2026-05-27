@@ -111,24 +111,62 @@ elif echo "$spec_content" | grep -qE "@layer\(cli\)"; then
     layer="cli"
 elif echo "$spec_content" | grep -qE "@layer\(infra\)"; then
     layer="infra"
+elif echo "$spec_content" | grep -qE "@layer\(gameplay\)"; then
+    layer="gameplay"
 fi
 
-# Build list of expected handoffs based on layer + data tag
+# Detect game project
+# A game project has .claude/game-context.md at the project root. Any spec in
+# such a project triggers the game-designer handoff requirement. UI specs that
+# additionally carry @surface(game) route through game-ui-designer instead of
+# uiux-designer.
+is_game_project="no"
+if [ -f "$project_root/.claude/game-context.md" ]; then
+    is_game_project="yes"
+fi
+
+is_game_ui_spec="no"
+if echo "$spec_content" | grep -qE "@surface\(game\)"; then
+    is_game_ui_spec="yes"
+fi
+
+# Build list of expected handoffs based on layer + data tag + game-context
 expected=()
 expected+=("step-2-${slug}-product-owner.html")
+
+# Game-designer slot at step-2.3 (after PO, before app-architect)
+# Required when the project is a game project.
+if [ "$is_game_project" = "yes" ]; then
+    expected+=("step-2.3-${slug}-game-designer.html")
+fi
+
 expected+=("step-2.5-${slug}-application-architect.html")
+
+# Level / narrative / systems designers at step-2.7 (parallel, after game-designer)
+# Required when the project is a game project AND the spec is not @trivial.
+if [ "$is_game_project" = "yes" ]; then
+    expected+=("step-2.7-${slug}-level-designer.html")
+    expected+=("step-2.7-${slug}-narrative-designer.html")
+    expected+=("step-2.7-${slug}-systems-designer.html")
+fi
+
 expected+=("step-3.3-${slug}-security-architect.html")
 expected+=("step-3.3-${slug}-devops-architect.html")
 expected+=("step-3.3-${slug}-qa-engineer.html")
 
 case "$layer" in
     "ui"|"full-stack")
-        expected+=("step-2.85-${slug}-uiux-designer.html")
+        # @surface(game) routes through game-ui-designer; default uiux-designer
+        if [ "$is_game_ui_spec" = "yes" ]; then
+            expected+=("step-2.85-${slug}-game-ui-designer.html")
+        else
+            expected+=("step-2.85-${slug}-uiux-designer.html")
+        fi
         expected+=("step-3.2-${slug}-frontend-engineer.html")
         ;;
 esac
 case "$layer" in
-    "api"|"full-stack"|"cli"|"infra")
+    "api"|"full-stack"|"cli"|"infra"|"gameplay")
         expected+=("step-3.2-${slug}-backend-engineer.html")
         ;;
 esac

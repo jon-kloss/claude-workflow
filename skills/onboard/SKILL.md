@@ -113,7 +113,20 @@ Order matters because later agents benefit from earlier agents' just-written mem
 11. spec-sre-auditor → DEFERRED (seed on first real audit, not at bootstrap)
 ```
 
-**Dispatch parallelism.** Agents 1–4 must serialize (later ones read earlier memory). Agents 5–10 can run in parallel (independent surfaces). To dispatch in parallel, include MULTIPLE Agent tool calls in a SINGLE message (per the parallel-dispatch pattern in build/SKILL.md and design/SKILL.md).
+**Game-design agents (conditional).** When `.claude/game-context.md` exists in the project root, seed an additional 5 memory files. If the context file does NOT exist, skip the game agents entirely (this is a non-game project).
+
+```
+Game agents (only when .claude/game-context.md exists):
+12. game-designer → core loop, verbs, win/loss, ten fun things, anti-features
+13. level-designer → zone archetypes, pacing principles, anti-patterns dodged
+14. narrative-designer → tone, lore-bible index, character voice index, branching shape
+15. systems-designer → progression axes, balance principles, established constants, economy shape
+16. game-ui-designer → diegesis posture, HUD pattern library, input model, accessibility commitments
+```
+
+If `.claude/game-context.md` is missing on a project the user identifies as a game, copy `skills/onboard/resources/game-context-template.md` to `.claude/game-context.md`, AskUserQuestion to confirm the fields, then proceed with the game-agent dispatches.
+
+**Dispatch parallelism.** Agents 1–4 must serialize (later ones read earlier memory). Agents 5–10 can run in parallel. Game agents 12–16 also parallelize after agent 11 (or alongside 5–10 — they're independent). To dispatch in parallel, include MULTIPLE Agent tool calls in a SINGLE message (per the parallel-dispatch pattern in build/SKILL.md and design/SKILL.md).
 
 **Per-role bootstrap scope (eager vs lazy).**
 
@@ -283,7 +296,7 @@ When the main `.claude/agent-memory/<role>.md` file approaches the 6,000-word ha
 <verification_checklist>
 Before declaring /onboard complete:
 
-- [ ] `.claude/agent-memory/` directory exists with 10 files (spec-sre-auditor deferred)
+- [ ] `.claude/agent-memory/` directory exists with 10 files (spec-sre-auditor deferred) — PLUS 5 game-design files (game-designer, level-designer, narrative-designer, systems-designer, game-ui-designer) when `.claude/game-context.md` exists
 - [ ] Each file has valid YAML frontmatter (agent, project-root, last-updated, last-commit-sha, schema-version)
 - [ ] `last-updated` timestamps are seconds-precision (NOT `T00:00:00Z` date-stubs)
 - [ ] Each file has the required sections (Summary, Conventions, Recent changes, Known issues, Pointers, plus ≥1 role-specific section)
