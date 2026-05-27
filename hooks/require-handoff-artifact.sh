@@ -184,8 +184,32 @@ if [ "$touches_data" = "yes" ]; then
     expected+=("step-3.3-${slug}-data-architect.html")
 fi
 
-# Collect skipped roles via @handoff-skip(role: reason)
-skipped_roles=$(echo "$spec_content" | grep -oE "@handoff-skip\([a-z-]+:" | sed 's/@handoff-skip(//; s/://' || true)
+# Collect skipped roles via @handoff-skip(role: reason); validate each reason
+# via the shared override-reason validator. A trivial reason like
+# "@handoff-skip(security-architect: n/a)" gets rejected.
+skipped_roles=""
+REASON_VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
+
+while IFS= read -r match; do
+    [ -z "$match" ] && continue
+    role_match=$(echo "$match" | sed -E "s/@handoff-skip\(([a-z-]+):.*/\1/")
+    reason_match=$(echo "$match" | sed -E "s/@handoff-skip\([a-z-]+:[[:space:]]*(.*)\)$/\1/")
+    if [ -f "$REASON_VALIDATOR" ]; then
+        if ! validation_error=$(python3 "$REASON_VALIDATOR" "require-handoff-artifact" "@handoff-skip" "$role_match" "$reason_match" 2>&1); then
+            cat >&2 <<EOF
+BLOCKED: @handoff-skip(${role_match}: ...) override reason failed quality validation.
+
+${validation_error}
+
+Provided reason: '${reason_match}'
+
+Override reasons must include a concrete artifact reference (commit SHA, beads ID, file path, URL, or user authorization). The skip persists in the spec as audit trail — make it auditable. Per docs/role-agent-handoff-schema.md, vague reasons like 'n/a' or 'covered elsewhere' are rejected.
+EOF
+            exit 2
+        fi
+    fi
+    skipped_roles="${skipped_roles}${role_match} "
+done < <(echo "$spec_content" | grep -oE "@handoff-skip\([a-z-]+:[^)]+\)" || true)
 
 # Check each expected handoff
 missing=()

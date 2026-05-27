@@ -88,8 +88,32 @@ slug="${basename_file%.md}"
 # Required gates
 required_gates=(critique audit harden clarify adapt)
 
-# Build a set of skipped gates from @gate-skip(<gate>: ...) tags
-skipped_gates=$(echo "$spec_content" | grep -oE "@gate-skip\([a-z]+:" | sed 's/@gate-skip(//; s/://' || true)
+# Build a set of skipped gates from @gate-skip(<gate>: ...) tags; validate each
+# reason via the shared override-reason validator. A trivial reason like
+# "@gate-skip(critique: n/a)" gets rejected.
+skipped_gates=""
+REASON_VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
+
+while IFS= read -r match; do
+    [ -z "$match" ] && continue
+    gate_match=$(echo "$match" | sed -E "s/@gate-skip\(([a-z]+):.*/\1/")
+    reason_match=$(echo "$match" | sed -E "s/@gate-skip\([a-z]+:[[:space:]]*(.*)\)$/\1/")
+    if [ -f "$REASON_VALIDATOR" ]; then
+        if ! validation_error=$(python3 "$REASON_VALIDATOR" "claim-vs-call-audit" "@gate-skip" "$gate_match" "$reason_match" 2>&1); then
+            cat >&2 <<EOF
+BLOCKED: @gate-skip(${gate_match}: ...) override reason failed quality validation.
+
+${validation_error}
+
+Provided reason: '${reason_match}'
+
+Override reasons must include a concrete artifact reference (commit SHA, beads ID, file path with extension, URL, or explicit user authorization). The skip persists in the spec as audit trail — make it auditable. Per docs/role-agent-handoff-schema.md, self-referential reasons like 'spec body' or 'spec scenarios' do not qualify.
+EOF
+            exit 2
+        fi
+    fi
+    skipped_gates="${skipped_gates}${gate_match} "
+done < <(echo "$spec_content" | grep -oE "@gate-skip\([a-z]+:[^)]+\)" || true)
 
 missing_gates=""
 for gate in "${required_gates[@]}"; do

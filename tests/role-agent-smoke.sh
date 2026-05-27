@@ -131,7 +131,7 @@ write_handoff specs/handoffs step-3.3 api-feature security-architect  # restore
 # @handoff-skip override
 rm specs/handoffs/step-3.3-api-feature-security-architect.html
 PAYLOAD_SKIP=$(mkpayload_edit "$TMP/specs/api-feature.md" '@status(verified)
-@handoff-skip(security-architect: synthetic test no security surface)')
+@handoff-skip(security-architect: synthetic test no security surface — see tests/role-agent-smoke.sh fixture)')
 result=$(printf '%s\n' "$PAYLOAD_SKIP" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "@handoff-skip allows when handoff missing" allow "$result"
 write_handoff specs/handoffs step-3.3 api-feature security-architect
@@ -871,6 +871,66 @@ if [ -z "$out" ]; then
     PASS=$((PASS+1))
 else
     echo "  FAIL  _validate_handoff rejected a quality data-resolution-skip (got: ${out:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Phase 2 rollout: @handoff-skip + @gate-skip now validated too
+# (workflow-ccw extension — driven by 2026-05-27 commit-details-panel audit)
+
+# require-handoff-artifact.sh: @handoff-skip with trivial reason should block
+HS_TMP="$TMP/handoff-skip-rollout"
+mkdir -p "$HS_TMP/specs/handoffs"
+HS_SPEC="$HS_TMP/specs/test-spec.md"
+bad_hs="@layer(api) @status(verified) @handoff-skip(security-architect: n/a)"
+got=$(mkpayload_edit "$HS_SPEC" "$bad_hs" | (cd "$HS_TMP" && bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1) || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "@handoff-skip(security-architect: ...) override reason failed quality validation"; then
+    echo "  PASS  require-handoff-artifact blocks trivial @handoff-skip reason"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-handoff-artifact accepted trivial @handoff-skip reason (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# require-handoff-artifact.sh: @handoff-skip with quality reason passes validator
+# (will still block on other missing handoffs but NOT on the override reason itself)
+good_hs="@layer(api) @status(verified) @handoff-skip(security-architect: spec is a UI text-only copy change verified by user authorization — see workflow-ccw and PRODUCT.md)"
+got=$(mkpayload_edit "$HS_SPEC" "$good_hs" | (cd "$HS_TMP" && bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1) || true)
+TOTAL=$((TOTAL+1))
+if ! echo "$got" | grep -q "override reason failed"; then
+    echo "  PASS  require-handoff-artifact accepts quality @handoff-skip reason (validator pass)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-handoff-artifact rejected a quality @handoff-skip reason (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# claim-vs-call-audit.sh: @gate-skip with trivial reason should block
+GS_TMP="$TMP/gate-skip-rollout"
+mkdir -p "$GS_TMP/specs"
+mkdir -p "$GS_TMP/state"
+GS_SPEC="$GS_TMP/specs/ui-test.md"
+# Bad reason: "spec body" (self-referential, no concrete artifact)
+bad_gs="@layer(ui) @status(verified) @gate-skip(critique: spec body)"
+got=$(mkpayload_edit "$GS_SPEC" "$bad_gs" | bash "$HOOK_DIR/claim-vs-call-audit.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "@gate-skip(critique: ...) override reason failed quality validation"; then
+    echo "  PASS  claim-vs-call-audit blocks self-referential @gate-skip reason"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  claim-vs-call-audit accepted self-referential @gate-skip reason (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# claim-vs-call-audit.sh: @gate-skip with quality reason passes validator
+good_gs="@layer(ui) @status(verified) @gate-skip(critique: design critique was captured in specs/mockups/ui-test.html during the original design phase — see commit 9c88227)"
+got=$(mkpayload_edit "$GS_SPEC" "$good_gs" | bash "$HOOK_DIR/claim-vs-call-audit.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if ! echo "$got" | grep -q "override reason failed"; then
+    echo "  PASS  claim-vs-call-audit accepts quality @gate-skip reason (validator pass)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  claim-vs-call-audit rejected a quality @gate-skip reason (got: ${got:0:200})"
     FAIL=$((FAIL+1))
 fi
 
