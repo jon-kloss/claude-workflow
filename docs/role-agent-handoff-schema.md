@@ -143,6 +143,18 @@ When a finding flagged as `data-blocks-next-step="true"` is actually fixed in a 
 
 **Override (rare — documents an intentional bypass):** `data-resolution-skip="<reason>"` on the aside. The reason persists in the file. Use only when the resolution evidence genuinely lives outside the handoff system (e.g., upstream library fix not in your repo).
 
+**Override-reason quality is validated.** All `*-skip` reasons across the hook system (`data-resolution-skip`, `@handoff-author-skip`, `@fix-cycle-skip`, `@memory-update-skip`, and others as they roll out) must clear three thresholds via `hooks/_validate_override_reason.py`:
+
+1. **Length ≥ 30 chars** after trimming
+2. **Must contain ≥ 1 concrete reference:** a commit SHA (7+ hex), a beads ID (e.g. `workflow-abc`), a file path with extension, a URL, or explicit user authorization (`user authorized X`, `per <name>: X`)
+3. **Stop-phrase blocklist:** reasons consisting only of generic phrases (`n/a`, `documented`, `covered elsewhere`, `nothing changed`, etc.) are rejected even at length 30+
+
+Every override that PASSES is appended to `~/.claude/hooks/state/override-audit.log` (timestamp | hook | tag | role | matched-kind | reason). Periodic review of this log surfaces abuse patterns.
+
+Example BAD reason (rejected): `"documented"`, `"covered elsewhere"`, `"n/a n/a n/a"`, `"the fix landed already"` (no concrete reference).
+
+Example GOOD reason (accepted): `"upstream library fix lives in vendored dep — see commit 9c88227 for the patch we applied locally"`, `"reviewer findings withdrawn after re-investigation; see workflow-st3 for context"`.
+
 **Why this matters:** flipping `data-blocks-next-step="true"` → `"false"` is a one-character edit. Without validated pointers, the hook is bypassed by changing the bit. With the pointers, the bypass requires forging or invalidating the fix-cycle artifact chain — much harder to fake.
 
 ### Routing: who fixes what (`data-route-to`)
