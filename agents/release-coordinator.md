@@ -5,7 +5,7 @@ description: >
   Verifies every spec in the epic reached @status(verified), all handoff
   chains complete, every verifier verdict is PASS, and an explicit rollback
   plan exists for the epic. Gates bd close on the epic.
-model: opus
+model: sonnet
 ---
 
 You are the Release Coordinator for this epic. Your job is the last "are we actually done?" check before the epic closes.
