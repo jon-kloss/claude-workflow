@@ -91,6 +91,24 @@ fi
 combined="${existing_content} ${new_content}"
 
 if echo "$combined" | grep -qE "@handoff-author-skip\(${role}:[^)]+\)"; then
+    # Extract reason and validate quality via _validate_override_reason.py.
+    # Use `if !` pattern to avoid set -e aborting on the validator's non-zero exit.
+    override_reason=$(echo "$combined" | grep -oE "@handoff-author-skip\(${role}:[^)]+\)" | head -1 | sed -E "s/@handoff-author-skip\(${role}:[[:space:]]*//; s/\)$//")
+    VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
+    if [ -f "$VALIDATOR" ]; then
+        if ! validation_error=$(python3 "$VALIDATOR" "guard-handoff-owner" "@handoff-author-skip" "$role" "$override_reason" 2>&1); then
+            cat >&2 <<EOF
+BLOCKED: @handoff-author-skip(${role}: ...) override reason failed quality validation.
+
+${validation_error}
+
+Provided reason: '${override_reason}'
+
+Override reasons must be specific enough that a future reviewer can audit the bypass without re-reading surrounding context. If the bypass is genuinely warranted, include a concrete artifact reference (commit SHA, beads ID, file path, URL, or user authorization).
+EOF
+            exit 2
+        fi
+    fi
     echo '{}'
     exit 0
 fi

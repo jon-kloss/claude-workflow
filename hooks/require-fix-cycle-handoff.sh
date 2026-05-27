@@ -101,8 +101,30 @@ if [ -z "$cycles" ]; then
     exit 0
 fi
 
-# Collect skipped cycles via @fix-cycle-skip(N: reason)
-skipped_cycles=$(echo "$spec_content" | grep -oE "@fix-cycle-skip\([0-9]+:" | sed 's/@fix-cycle-skip(//; s/://' || true)
+# Collect skipped cycles via @fix-cycle-skip(N: reason); validate each reason
+skipped_cycles=""
+VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
+
+while IFS= read -r match; do
+    [ -z "$match" ] && continue
+    n_match=$(echo "$match" | sed -E "s/@fix-cycle-skip\(([0-9]+):.*/\1/")
+    reason_match=$(echo "$match" | sed -E "s/@fix-cycle-skip\([0-9]+:[[:space:]]*(.*)\)$/\1/")
+    if [ -f "$VALIDATOR" ]; then
+        if ! validation_error=$(python3 "$VALIDATOR" "require-fix-cycle-handoff" "@fix-cycle-skip" "$n_match" "$reason_match" 2>&1); then
+            cat >&2 <<EOF
+BLOCKED: @fix-cycle-skip(${n_match}: ...) override reason failed quality validation.
+
+${validation_error}
+
+Provided reason: '${reason_match}'
+
+Override reasons must include a concrete artifact reference (commit SHA, beads ID, file path, URL, or user authorization). The skip persists in the spec as audit trail — make it auditable.
+EOF
+            exit 2
+        fi
+    fi
+    skipped_cycles="${skipped_cycles}${n_match} "
+done < <(echo "$spec_content" | grep -oE "@fix-cycle-skip\([0-9]+:[^)]+\)" || true)
 
 missing_pairs=()
 for n in $cycles; do

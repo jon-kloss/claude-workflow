@@ -94,7 +94,24 @@ if [ -z "$prompt" ]; then
 fi
 
 if echo "$prompt" | grep -qE "@memory-update-skip\(${subagent_type}:[^)]+\)"; then
-    # Documented skip
+    # Validate the override reason quality
+    override_reason=$(echo "$prompt" | grep -oE "@memory-update-skip\(${subagent_type}:[^)]+\)" | head -1 | sed -E "s/@memory-update-skip\(${subagent_type}:[[:space:]]*//; s/\)$//")
+    VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
+    if [ -f "$VALIDATOR" ]; then
+        if ! validation_error=$(python3 "$VALIDATOR" "warn-agent-memory-not-updated" "@memory-update-skip" "$subagent_type" "$override_reason" 2>&1); then
+            # WARN mode: don't block; surface the bad-override attempt as a warning
+            msg="WARNING: ${subagent_type} dispatch returned without updating memory AND the @memory-update-skip override reason did not meet quality requirements.
+
+Override validation error: ${validation_error}
+
+Provided reason: '${override_reason}'
+
+Either update the memory file per the Exit checklist, or re-dispatch with a more specific @memory-update-skip reason (must include a concrete artifact reference — beads ID, commit SHA, file path, URL, or user authorization)."
+            json_encode_context "$msg"
+            exit 0
+        fi
+    fi
+    # Documented skip with a valid reason
     echo '{}'
     exit 0
 fi

@@ -482,7 +482,7 @@ got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require
 assert "cycle 3 implementer-only (no re-verify) -> block" "block" "$got"
 
 # Case 6: @fix-cycle-skip(3: reason) override => allow
-FC_VERIFIED_SKIP="@layer(api) @status(verified) @fix-cycle-skip(3: reviewer findings withdrawn after re-investigation)"
+FC_VERIFIED_SKIP="@layer(api) @status(verified) @fix-cycle-skip(3: reviewer findings withdrawn after re-investigation — see workflow-st3 and commit 9c88227)"
 got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_SKIP" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
 assert "cycle 3 with @fix-cycle-skip(3: ...) -> allow" "allow" "$got"
 
@@ -677,6 +677,204 @@ else
 fi
 
 echo ""
+echo "=== override-reason quality validator (workflow-ccw / 2026-05-27 adversarial pressure) ==="
+
+# Validator file exists
+TOTAL=$((TOTAL+1))
+if [ -f "$HOOK_DIR/_validate_override_reason.py" ]; then
+    echo "  PASS  _validate_override_reason.py present"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  _validate_override_reason.py missing"
+    FAIL=$((FAIL+1))
+fi
+
+# Direct validator behavior tests
+VALIDATOR_PY="$HOOK_DIR/_validate_override_reason.py"
+
+vtest_pass() {
+    local name="$1" reason="$2"
+    TOTAL=$((TOTAL+1))
+    if python3 "$VALIDATOR_PY" "test" "@tag" "-" "$reason" >/dev/null 2>&1; then
+        echo "  PASS  validator accepts: $name"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  validator should accept '$name' but rejected"
+        FAIL=$((FAIL+1))
+    fi
+}
+
+vtest_fail() {
+    local name="$1" reason="$2" expected_substr="$3"
+    TOTAL=$((TOTAL+1))
+    out=$(python3 "$VALIDATOR_PY" "test" "@tag" "-" "$reason" 2>&1)
+    rc=$?
+    if [ $rc -ne 0 ] && echo "$out" | grep -q "$expected_substr"; then
+        echo "  PASS  validator rejects: $name"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  validator should reject '$name' with '$expected_substr' (rc=$rc, got: ${out:0:120})"
+        FAIL=$((FAIL+1))
+    fi
+}
+
+# Rejected cases
+vtest_fail "empty string"        "" "empty"
+vtest_fail "too short"           "ok fine" "minimum is 30"
+vtest_fail "stop phrase only"    "covered elsewhere covered elsewhere" "stop-phrase"
+vtest_fail "long but no anchor"  "the build is broken because of a temporary issue with the configuration" "concrete reference"
+vtest_fail "padded n/a"          "n/a n/a n/a n/a n/a n/a n/a n/a n/a" "stop-phrase"
+
+# Accepted cases (must include a concrete reference)
+vtest_pass "commit SHA reference"      "fix landed in commit 9c88227 — verified locally with running app"
+vtest_pass "beads ID reference"        "tracked in workflow-abc1; this hook can't see across project boundary"
+vtest_pass "file path reference"       "evidence is in tests/role-agent-smoke.sh case 4 — verified passing"
+vtest_pass "URL reference"             "see https://github.com/jon-kloss/claude-workflow/pull/2 for full context"
+vtest_pass "user authorization"        "user authorized this bypass after reviewing the diff manually"
+vtest_pass "per-name citation"         "per jon: deferred until after the release cut on 2026-06-01"
+
+# Audit log gets a line on PASS
+AUDIT_LOG_PATH="$HOME/.claude/hooks/state/override-audit.log"
+TOTAL=$((TOTAL+1))
+# Use unique marker reason so we don't false-positive on prior runs
+unique_marker="audit-test-$(date +%s%N)"
+unique_reason="audit log entry verification ${unique_marker} via commit 9c88227"
+python3 "$VALIDATOR_PY" "smoke-test" "@audit-tag" "smoke-role" "$unique_reason" >/dev/null 2>&1
+if [ -f "$AUDIT_LOG_PATH" ] && grep -q "$unique_marker" "$AUDIT_LOG_PATH"; then
+    echo "  PASS  audit log appended on validation pass"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  audit log entry not found for marker $unique_marker"
+    FAIL=$((FAIL+1))
+fi
+
+# Integration: guard-handoff-owner.sh enforces validator on @handoff-author-skip
+# Re-use the GHO_TMP/state set up earlier — at this point gho-test has the
+# guard-handoff-owner state and the file path conventions. Build fresh tmp.
+OR_TMP="$TMP/override-test"
+mkdir -p "$OR_TMP/specs/handoffs" "$OR_TMP/.claude/hooks/state"
+
+# Empty session log; no dispatch logged for frontend-engineer
+HANDOFF_PATH="$OR_TMP/specs/handoffs/step-3.2-myslug-frontend-engineer.html"
+# Bad reason ("documented")
+content_bad='<html data-handoff-version="1"></html><!-- @handoff-author-skip(frontend-engineer: documented) -->'
+got=$(mkpayload_edit "$HANDOFF_PATH" "$content_bad" | (cd "$OR_TMP" && HOME="$OR_TMP" bash "$HOOK_DIR/guard-handoff-owner.sh" 2>&1) || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "override reason failed quality validation"; then
+    echo "  PASS  guard-handoff-owner blocks trivial @handoff-author-skip reason"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  guard-handoff-owner accepted trivial override reason (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Good reason with file-path reference
+content_good='<html data-handoff-version="1"></html><!-- @handoff-author-skip(frontend-engineer: subagent inline-synthesis fallback per docs/role-agent-handoff-schema.md — no Agent tool available) -->'
+got=$(mkpayload_edit "$HANDOFF_PATH" "$content_good" | (cd "$OR_TMP" && HOME="$OR_TMP" bash "$HOOK_DIR/guard-handoff-owner.sh" 2>&1) || true)
+assert "guard-handoff-owner accepts quality override reason" "allow" "$got"
+
+# Integration: require-fix-cycle-handoff.sh enforces validator on @fix-cycle-skip
+FC_SPEC2="$OR_TMP/specs/cycle-test.md"
+mkdir -p "$OR_TMP/specs/handoffs"
+touch "$OR_TMP/specs/handoffs/step-3.3-cycle-test-qa-engineer-cycle-1.html"
+echo "@layer(api)" > "$FC_SPEC2"
+# Bad reason
+bad_skip_content="@layer(api) @status(verified) @fix-cycle-skip(1: n/a)"
+got=$(mkpayload_edit "$FC_SPEC2" "$bad_skip_content" | (cd "$OR_TMP" && bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1) || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "override reason failed quality validation"; then
+    echo "  PASS  require-fix-cycle-handoff blocks trivial @fix-cycle-skip reason"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-fix-cycle-handoff accepted trivial reason (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Good reason
+good_skip_content="@layer(api) @status(verified) @fix-cycle-skip(1: reviewer findings were withdrawn after re-investigation in commit 9c88227 — see workflow-ccw)"
+got=$(mkpayload_edit "$FC_SPEC2" "$good_skip_content" | (cd "$OR_TMP" && bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1) || true)
+# Expected: the cycle is now skipped (validator passed), but cycle 1 has reviewer
+# handoff but no implementer => normal asymmetry block, NOT the validator block
+TOTAL=$((TOTAL+1))
+if ! echo "$got" | grep -q "override reason failed"; then
+    echo "  PASS  require-fix-cycle-handoff accepts quality @fix-cycle-skip reason (validator pass)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  require-fix-cycle-handoff rejected a quality reason (got: ${got:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Integration: _validate_handoff.py enforces validator on data-resolution-skip
+RV_TMP="$TMP/override-resolve-test"
+mkdir -p "$RV_TMP/specs/handoffs"
+RV_HOFF="$RV_TMP/specs/handoffs/step-3.3-test-spec-devops-architect.html"
+# Build minimal handoff with trivial data-resolution-skip
+cat > "$RV_HOFF" <<HOFF
+<!DOCTYPE html>
+<html lang="en" data-handoff-version="1">
+<head>
+<meta charset="utf-8">
+<meta data-from-role="devops-architect">
+<meta data-spec-slug="test-spec">
+<meta data-step="3.3">
+<meta data-produced-at="2026-05-27T00:00:00Z">
+<meta data-input-references="(none)">
+<title>devops-architect handoff</title>
+</head>
+<body>
+<section data-role="summary"><p>summary</p></section>
+<section data-role="findings">
+<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolution-skip="documented"><h2>Bad override</h2></aside>
+</section>
+<section data-role="acceptance-criteria"><dl><dt data-id="ac-1">x</dt><dd>x</dd></dl></section>
+<section data-role="open-questions"><ul></ul></section>
+</body>
+</html>
+HOFF
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$RV_HOFF" "test-spec" "devops-architect" 2>&1)
+if echo "$out" | grep -q "data-resolution-skip reason failed quality check"; then
+    echo "  PASS  _validate_handoff rejects trivial data-resolution-skip reason"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  _validate_handoff accepted trivial data-resolution-skip (got: ${out:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Good data-resolution-skip
+cat > "$RV_HOFF" <<HOFF
+<!DOCTYPE html>
+<html lang="en" data-handoff-version="1">
+<head>
+<meta charset="utf-8">
+<meta data-from-role="devops-architect">
+<meta data-spec-slug="test-spec">
+<meta data-step="3.3">
+<meta data-produced-at="2026-05-27T00:00:00Z">
+<meta data-input-references="(none)">
+<title>devops-architect handoff</title>
+</head>
+<body>
+<section data-role="summary"><p>summary</p></section>
+<section data-role="findings">
+<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolution-skip="upstream library fix landed in vendored dep — see commit 9c88227 for the patch we applied locally"><h2>Documented bypass</h2></aside>
+</section>
+<section data-role="acceptance-criteria"><dl><dt data-id="ac-1">x</dt><dd>x</dd></dl></section>
+<section data-role="open-questions"><ul></ul></section>
+</body>
+</html>
+HOFF
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$RV_HOFF" "test-spec" "devops-architect" 2>&1)
+if [ -z "$out" ]; then
+    echo "  PASS  _validate_handoff accepts quality data-resolution-skip reason"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  _validate_handoff rejected a quality data-resolution-skip (got: ${out:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
 echo "=== memory-update warn hooks (workflow-gq3 / 2026-05-27 user observation) ==="
 
 # Both hook files present
@@ -763,8 +961,8 @@ else
 fi
 
 # Case 4: @memory-update-skip override suppresses warning
-run_baseline "backend-engineer" "trivial dispatch with @memory-update-skip(backend-engineer: spec is @trivial typo fix)" > /dev/null
-got=$(run_warn "backend-engineer" "trivial dispatch with @memory-update-skip(backend-engineer: spec is @trivial typo fix)")
+run_baseline "backend-engineer" "trivial dispatch with @memory-update-skip(backend-engineer: spec is @trivial typo fix in workflow-test123 — no memory delta needed)" > /dev/null
+got=$(run_warn "backend-engineer" "trivial dispatch with @memory-update-skip(backend-engineer: spec is @trivial typo fix in workflow-test123 — no memory delta needed)")
 TOTAL=$((TOTAL+1))
 if [ "$got" = "{}" ]; then
     echo "  PASS  @memory-update-skip(role: reason) override suppresses warning"
@@ -909,7 +1107,7 @@ fi
 
 # Case 5: data-resolution-skip override allows the bypass
 TARGET5="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-override.html"
-write_handoff "$TARGET5" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolution-skip="upstream library fix lives in vendored dep — no fix-cycle artifact in this repo"><h2>Bypassed for documented reason</h2></aside>'
+write_handoff "$TARGET5" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolution-skip="upstream library fix lives in vendored dep — see commit 9c88227 for the patch we applied locally"><h2>Bypassed for documented reason</h2></aside>'
 TOTAL=$((TOTAL+1))
 out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET5" "test-spec" "devops-architect" 2>&1)
 if [ -z "$out" ]; then
@@ -973,7 +1171,7 @@ got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
 assert "wrong-role dispatch -> block" "block" "$got"
 
 # Case 4: @handoff-author-skip override allows
-got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html><!-- @handoff-author-skip(frontend-engineer: subagent inline-synthesis without Agent tool) -->")
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html><!-- @handoff-author-skip(frontend-engineer: subagent inline-synthesis fallback per docs/role-agent-handoff-schema.md — no Agent tool available in this dispatch context) -->")
 assert "@handoff-author-skip override -> allow" "allow" "$got"
 
 # Case 5: non-handoff file path is ignored

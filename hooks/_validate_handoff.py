@@ -12,6 +12,17 @@ import os
 import sys
 import re
 
+# Reuse the shared override-reason validator. Same-directory import.
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+try:
+    from _validate_override_reason import validate_reason as _validate_reason
+    from _validate_override_reason import log_override as _log_override
+except ImportError:
+    _validate_reason = None
+    _log_override = None
+
 if len(sys.argv) != 4:
     print("usage error")
     sys.exit(0)
@@ -126,8 +137,26 @@ for m in aside_open.finditer(content):
         continue
 
     # blocks-next-step is "false" (or other non-true value) — validate resolution
-    if _attr(tag_attrs, "data-resolution-skip"):
-        # Explicit override; preserved as audit trail in the file
+    skip_reason = _attr(tag_attrs, "data-resolution-skip")
+    if skip_reason is not None:
+        # Override path — but only valid if the reason passes quality
+        # validation. Prevents the "data-resolution-skip='documented'" bypass.
+        if _validate_reason is not None:
+            ok, info = _validate_reason(skip_reason)
+            if not ok:
+                errors.append(
+                    f"data-resolution-skip reason failed quality check: {info}. Reason was: '{skip_reason[:200]}'"
+                )
+                continue
+            if _log_override is not None:
+                _log_override(
+                    "_validate_handoff",
+                    "data-resolution-skip",
+                    "-",
+                    skip_reason,
+                    matched_kind=info,
+                )
+        # Valid override; preserved as audit trail in the file
         continue
 
     resolved_in = _attr(tag_attrs, "data-resolved-in")
