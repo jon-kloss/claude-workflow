@@ -677,6 +677,185 @@ else
 fi
 
 echo ""
+echo "=== aside resolution-pointer validation (workflow-ax6 / 2026-05-27 bypass) ==="
+
+# Set up project root for resolution tests
+AX_TMP="$TMP/aside-test"
+mkdir -p "$AX_TMP/specs/handoffs"
+
+# Helper: write minimal valid handoff with caller-controlled <aside>
+write_handoff() {
+    local outpath="$1"
+    local from_role="$2"
+    local slug="$3"
+    local extra="$4"
+    cat > "$outpath" <<HOFF
+<!DOCTYPE html>
+<html lang="en" data-handoff-version="1">
+<head>
+<meta charset="utf-8">
+<meta data-from-role="${from_role}">
+<meta data-spec-slug="${slug}">
+<meta data-step="3.3">
+<meta data-produced-at="2026-05-27T00:00:00Z">
+<meta data-input-references="(none)">
+<title>${from_role} handoff</title>
+</head>
+<body>
+<section data-role="summary"><p>summary</p></section>
+<section data-role="findings">
+<h1>Findings</h1>
+${extra}
+</section>
+<section data-role="acceptance-criteria"><dl><dt data-id="ac-1">test</dt><dd>n/a</dd></dl></section>
+<section data-role="open-questions"><ul></ul></section>
+</body>
+</html>
+HOFF
+}
+
+# Case 1: aside flipped to false with NO pointers => validator emits error
+TARGET="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect.html"
+write_handoff "$TARGET" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false"><h2>Resolved without proof</h2></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET" "test-spec" "devops-architect" 2>&1)
+if echo "$out" | grep -q "missing data-resolved-in"; then
+    echo "  PASS  validator flags aside flipped to false with no data-resolved-in"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  validator did not catch missing data-resolved-in (got: ${out:0:120})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 2: pointer present but points to non-existent file
+TARGET2="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-cycle-1.html"
+write_handoff "$TARGET2" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/does-not-exist.html" data-re-verified-in="specs/handoffs/also-missing.html"><h2>Orphan pointers</h2></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET2" "test-spec" "devops-architect" 2>&1)
+if echo "$out" | grep -q "does not exist on disk"; then
+    echo "  PASS  validator flags data-resolved-in pointing to non-existent file"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  validator did not catch orphan data-resolved-in pointer (got: ${out:0:120})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 3: pointers valid AND re-verify is clean => allow
+# Build fix-cycle implementer handoff
+FIX_HOFF="$AX_TMP/specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html"
+write_handoff "$FIX_HOFF" "backend-engineer" "test-spec" '<p>Fix applied at file:line</p>'
+# Build re-verify handoff with NO unresolved critical aside
+REVERIFY_HOFF="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-cycle-1.html"
+write_handoff "$REVERIFY_HOFF" "devops-architect" "test-spec" '<p>Re-verified clean</p>'
+# Original handoff points to both
+TARGET3="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect.html"
+write_handoff "$TARGET3" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html" data-resolved-by="commit:abc123" data-re-verified-in="specs/handoffs/step-3.3-test-spec-devops-architect-cycle-1.html"><h2>Cleanly resolved</h2></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET3" "test-spec" "devops-architect" 2>&1)
+if [ -z "$out" ]; then
+    echo "  PASS  validator allows aside with valid pointers + clean re-verify"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  validator wrongly flagged clean resolution (got: ${out:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 4: re-verify file still has an unresolved critical on same route => block
+REVERIFY_DIRTY="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-cycle-2.html"
+write_handoff "$REVERIFY_DIRTY" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="true"><h2>Same problem still present</h2></aside>'
+TARGET4="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-fakerev.html"
+write_handoff "$TARGET4" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html" data-re-verified-in="specs/handoffs/step-3.3-test-spec-devops-architect-cycle-2.html"><h2>Claims resolved but reviewer says no</h2></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET4" "test-spec" "devops-architect" 2>&1)
+if echo "$out" | grep -q "still contains an unresolved critical-blocking aside"; then
+    echo "  PASS  validator catches re-verify file with persisting critical on same route"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  validator did not catch dirty re-verify (got: ${out:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+# Case 5: data-resolution-skip override allows the bypass
+TARGET5="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-override.html"
+write_handoff "$TARGET5" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolution-skip="upstream library fix lives in vendored dep — no fix-cycle artifact in this repo"><h2>Bypassed for documented reason</h2></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET5" "test-spec" "devops-architect" 2>&1)
+if [ -z "$out" ]; then
+    echo "  PASS  data-resolution-skip override allows the bypass"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  data-resolution-skip override was not respected (got: ${out:0:200})"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
+echo "=== guard-handoff-owner.sh (workflow-g7o / 2026-05-27 orchestrator-synthesis bypass) ==="
+
+# guard-handoff-owner.sh exists and is executable
+TOTAL=$((TOTAL+1))
+if [ -x "$HOOK_DIR/guard-handoff-owner.sh" ]; then
+    echo "  PASS  guard-handoff-owner.sh present and executable"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  guard-handoff-owner.sh missing or not executable"
+    FAIL=$((FAIL+1))
+fi
+
+# Registered in install.sh
+TOTAL=$((TOTAL+1))
+if grep -q 'guard-handoff-owner.sh' "$WORKFLOW_DIR/install.sh"; then
+    echo "  PASS  guard-handoff-owner.sh registered in install.sh"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  guard-handoff-owner.sh not registered in install.sh"
+    FAIL=$((FAIL+1))
+fi
+
+# Behavior tests — isolate session log via env override
+GHO_TMP="$TMP/gho-test"
+mkdir -p "$GHO_TMP/specs/handoffs" "$GHO_TMP/state"
+GHO_AGENTS_LOG="$GHO_TMP/state/session-agents.log"
+
+# Run hook with HOME pointed at our temp dir so it reads our session log.
+# IMPORTANT: HOME must be exported to the bash invocation that runs the hook,
+# not just to mkpayload_edit upstream of the pipe. Use a subshell to scope it.
+run_gho_hook() {
+    local file="$1" content="$2"
+    mkpayload_edit "$file" "$content" | (HOME="$GHO_TMP" bash "$HOOK_DIR/guard-handoff-owner.sh" 2>&1) || true
+}
+mkdir -p "$GHO_TMP/.claude/hooks/state"
+
+# Case 1: writing handoff with NO dispatch logged => block
+GHO_HANDOFF="$GHO_TMP/specs/handoffs/step-3.2-myslug-frontend-engineer.html"
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
+assert "no dispatch logged for frontend-engineer -> block" "block" "$got"
+
+# Case 2: dispatch logged for frontend-engineer => allow
+echo "2026-05-27T00:00:00Z|frontend-engineer|test dispatch" > "$GHO_TMP/.claude/hooks/state/session-agents.log"
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
+assert "dispatch logged for frontend-engineer -> allow" "allow" "$got"
+
+# Case 3: dispatch logged for backend-engineer but not frontend => block frontend handoff
+echo "2026-05-27T00:00:00Z|backend-engineer|test dispatch" > "$GHO_TMP/.claude/hooks/state/session-agents.log"
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
+assert "wrong-role dispatch -> block" "block" "$got"
+
+# Case 4: @handoff-author-skip override allows
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html><!-- @handoff-author-skip(frontend-engineer: subagent inline-synthesis without Agent tool) -->")
+assert "@handoff-author-skip override -> allow" "allow" "$got"
+
+# Case 5: non-handoff file path is ignored
+NON_HOFF="$GHO_TMP/specs/some-spec.md"
+got=$(run_gho_hook "$NON_HOFF" "@status(verified)")
+assert "non-handoff file -> allow (hook ignores)" "allow" "$got"
+
+# Case 6: handoff with cycle suffix correctly parses role (fix-cycle naming)
+CYCLE_HOFF="$GHO_TMP/specs/handoffs/step-3.2-myslug-backend-engineer-fix-cycle-1.html"
+# backend-engineer IS in the log from case 3
+got=$(run_gho_hook "$CYCLE_HOFF" "<html data-handoff-version='1'></html>")
+assert "fix-cycle-N suffix correctly parsed -> allow when dispatched" "allow" "$got"
+
+echo ""
 echo "=== require-ui-tests first-word blocklist (catches 2026-05-26 hook-enforcement dogfood finding) ==="
 # Bug: when a spec's first hyphen-split word is "test", "spec", "unit", "e2e",
 # or "integration", the first-word substitution matched every *.test.ts file

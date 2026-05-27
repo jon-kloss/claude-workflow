@@ -292,6 +292,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         },
         {
           "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/guard-handoff-owner.sh"
+        },
+        {
+          "type": "command",
           "command": "bash ${HOME}/.claude/hooks/guard-agent-memory-secrets.sh"
         }
       ]

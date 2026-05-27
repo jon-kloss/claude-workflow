@@ -117,6 +117,34 @@ Required `<section data-role>` blocks (all four must be present, even if empty):
 
 `<aside data-severity>` values: `critical | important | suggestion`. The `data-blocks-next-step="true"` flag (only valid on `critical`) signals that the next role-agent dispatch must be paused for user intervention.
 
+### Resolving a critical-blocking aside
+
+When a finding flagged as `data-blocks-next-step="true"` is actually fixed in a later fix-cycle, the aside is updated in place — **not deleted, not silently flipped**. The update must satisfy these attributes (validated by `_validate_handoff.py`):
+
+```html
+<aside data-severity="critical"
+       data-route-to="backend-engineer"
+       data-blocks-next-step="false"
+       data-resolved-in="specs/handoffs/step-3.2-<slug>-backend-engineer-fix-cycle-1.html"
+       data-resolved-by="commit:<sha>"
+       data-re-verified-in="specs/handoffs/step-3.3-<slug>-devops-architect-fix-cycle-1.html">
+  <h2>CRITICAL — Original finding title (RESOLVED in fix-cycle 1)</h2>
+  <p>Original finding body preserved...</p>
+</aside>
+```
+
+**Required when flipping `data-blocks-next-step` from `"true"` to `"false"`:**
+
+- `data-resolved-in` — path to the implementer's fix-cycle handoff that addressed it (file must exist)
+- `data-re-verified-in` — path to the reviewer's re-verify handoff confirming the fix (file must exist)
+- The re-verify handoff must NOT contain its own unresolved critical-blocking aside on the same `data-route-to`. If the same critical re-appears in re-verify, the issue was not actually fixed.
+
+`data-resolved-by` (commit SHA, PR ref, or beads ID) is recommended but not enforced.
+
+**Override (rare — documents an intentional bypass):** `data-resolution-skip="<reason>"` on the aside. The reason persists in the file. Use only when the resolution evidence genuinely lives outside the handoff system (e.g., upstream library fix not in your repo).
+
+**Why this matters:** flipping `data-blocks-next-step="true"` → `"false"` is a one-character edit. Without validated pointers, the hook is bypassed by changing the bit. With the pointers, the bypass requires forging or invalidating the fix-cycle artifact chain — much harder to fake.
+
 ### Routing: who fixes what (`data-route-to`)
 
 When a reviewer agent (QA, security-architect, devops-architect, data-architect, sre-auditor, code-reviewer) finds an issue, it does NOT fix the issue itself — the finder verifies and the implementer fixes. Each `<aside data-severity="critical|important">` and each row of a findings table SHOULD carry a `data-route-to="<role>"` attribute naming the agent responsible for the fix.

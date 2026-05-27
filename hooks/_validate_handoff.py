@@ -8,6 +8,7 @@ Usage: _validate_handoff.py <path> <expected-slug> <expected-role>
 Prints a pipe-separated list of errors to stdout (empty stdout = pass).
 Exit code is always 0 — the calling hook reads stdout to decide.
 """
+import os
 import sys
 import re
 
@@ -89,6 +90,112 @@ if critical_blockers:
     errors.append(
         f"contains {len(critical_blockers)} unresolved critical-blocking <aside> — handoff says next step must not proceed"
     )
+
+
+# 7. Resolution-pointer validation for asides flipped to blocks-next-step="false"
+#
+# 2026-05-27 dogfood caught: orchestrator flipped data-blocks-next-step="true"
+# to "false" on a critical aside to bypass section 6, adding data-resolved-in /
+# data-resolved-by / data-re-verified-in pointers that may or may not refer to
+# real files. This section validates those pointers actually exist on disk and
+# that the re-verify file doesn't carry its own unresolved critical-blocker on
+# the same route.
+#
+# Override path: data-resolution-skip="<reason>" attribute on the aside.
+def _attr(tag_str, attr):
+    m = re.search(r"\b" + re.escape(attr) + r"\s*=\s*[\"']([^\"']*)[\"']", tag_str, re.I)
+    return m.group(1) if m else None
+
+
+# Resolve project root: handoff lives at <root>/specs/handoffs/<file>.html
+abs_handoff = os.path.abspath(path)
+project_root = os.path.dirname(os.path.dirname(os.path.dirname(abs_handoff)))
+
+# Match every <aside ...> opening tag (not just the regex from section 6 which
+# only matches blocks-next-step=true)
+aside_open = re.compile(r"<aside\b([^>]*?)>", re.I)
+for m in aside_open.finditer(content):
+    tag_attrs = m.group(0)
+    severity = _attr(tag_attrs, "data-severity")
+    if not severity or severity.lower() != "critical":
+        continue
+    blocks = _attr(tag_attrs, "data-blocks-next-step")
+    if not blocks or blocks.lower() == "true":
+        # blocks-next-step="true" already handled by section 6; missing attribute
+        # is ambiguous — leave it alone.
+        continue
+
+    # blocks-next-step is "false" (or other non-true value) — validate resolution
+    if _attr(tag_attrs, "data-resolution-skip"):
+        # Explicit override; preserved as audit trail in the file
+        continue
+
+    resolved_in = _attr(tag_attrs, "data-resolved-in")
+    re_verified_in = _attr(tag_attrs, "data-re-verified-in")
+    route = _attr(tag_attrs, "data-route-to") or ""
+
+    if not resolved_in:
+        errors.append(
+            "critical aside flipped to data-blocks-next-step='false' is missing data-resolved-in pointer (cannot verify resolution)"
+        )
+        continue
+    if not re_verified_in:
+        errors.append(
+            "critical aside flipped to data-blocks-next-step='false' is missing data-re-verified-in pointer (cannot verify the fix was reviewed)"
+        )
+        continue
+
+    resolved_path = (
+        resolved_in
+        if os.path.isabs(resolved_in)
+        else os.path.join(project_root, resolved_in)
+    )
+    if not os.path.isfile(resolved_path):
+        errors.append(
+            f"data-resolved-in='{resolved_in}' does not exist on disk (orphan pointer)"
+        )
+        continue
+
+    rv_path = (
+        re_verified_in
+        if os.path.isabs(re_verified_in)
+        else os.path.join(project_root, re_verified_in)
+    )
+    if not os.path.isfile(rv_path):
+        errors.append(
+            f"data-re-verified-in='{re_verified_in}' does not exist on disk (orphan pointer)"
+        )
+        continue
+
+    # Re-verify file MUST NOT contain its own unresolved critical-blocker on
+    # the same route. (Different routes = different findings = OK.)
+    try:
+        with open(rv_path, "r", encoding="utf-8") as rf:
+            rv_content = rf.read()
+    except Exception as e:
+        errors.append(
+            f"data-re-verified-in='{re_verified_in}' is unreadable: {e}"
+        )
+        continue
+
+    rv_unresolved = False
+    for rv_m in aside_open.finditer(rv_content):
+        rv_tag = rv_m.group(0)
+        if _attr(rv_tag, "data-severity") != "critical":
+            continue
+        rv_blocks = _attr(rv_tag, "data-blocks-next-step")
+        if not rv_blocks or rv_blocks.lower() != "true":
+            continue
+        rv_route = _attr(rv_tag, "data-route-to") or ""
+        # Match if same route (or either side has no route)
+        if not route or not rv_route or rv_route == route:
+            rv_unresolved = True
+            break
+
+    if rv_unresolved:
+        errors.append(
+            f"data-re-verified-in='{re_verified_in}' still contains an unresolved critical-blocking aside on route '{route or '(any)'}' — the fix was not actually re-verified"
+        )
 
 if errors:
     print("|".join(errors))
