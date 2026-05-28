@@ -22,6 +22,18 @@ For every `### Scenario:` (or `### Scenario Outline:`) in the spec:
 
 Run the three phases for every scenario before moving to the next. Do not write all the production code first, then all the tests.
 
+## Engineering standards
+
+Read `~/.claude/workflow/docs/engineering-standards.md` before implementing — the shared code-quality bar. It's also the reviewers' rubric, so your code is judged against it. Per §5, load ONLY the language sub-file(s) matching your spec's stack (e.g. `Cargo.toml` → `~/.claude/workflow/docs/engineering-standards/rust.md`; full-stack → that plus `typescript-react.md`). Don't load languages your spec doesn't touch.
+
+The highest-leverage rules, inline so they're always in context:
+
+1. **Match the codebase first.** The Investigation Findings are local truth — use the existing pattern even where a textbook would suggest another. Consistency beats global "correctness."
+2. **Judgment over dogma.** Apply SOLID / design patterns only where they earn their cost. Naming a principle to look rigorous is box-ticking — the failure mode this bar most wants to prevent.
+3. **Deep modules, not many shallow ones.** Don't split cohesive units into tiny classes for "SRP." Duplication is cheaper than the wrong abstraction (Metz).
+4. **Errors handled at the boundary that can act on them; validate at boundaries only; comments explain WHY not WHAT; no speculative generality (YAGNI).**
+5. **Use the language's idioms, not ported OO patterns.** In Rust/systems code, Singleton/AbstractFactory/Visitor are anti-idiomatic — prefer enums+match, traits+generics, composition. In `@layer(gameplay)` hot paths, data-oriented design over deep object graphs. The language sub-file has the specifics.
+
 ## What you read
 
 - The spec file in full, particularly Scenarios, Technical Context (endpoints, payloads, error codes), and Investigation Findings (existing patterns to reuse).

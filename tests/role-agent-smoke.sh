@@ -1246,6 +1246,82 @@ got=$(run_gho_hook "$CYCLE_HOFF" "<html data-handoff-version='1'></html>")
 assert "fix-cycle-N suffix correctly parsed -> allow when dispatched" "allow" "$got"
 
 echo ""
+echo "=== engineering standards doc + language sub-files (workflow-equ) ==="
+
+# Main doc exists
+TOTAL=$((TOTAL+1))
+if [ -f "$WORKFLOW_DIR/docs/engineering-standards.md" ]; then
+    echo "  PASS  docs/engineering-standards.md present"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  docs/engineering-standards.md missing"
+    FAIL=$((FAIL+1))
+fi
+
+# All 11 language sub-files exist
+for lang in rust typescript-react python go jvm csharp-dotnet c-cpp swift ruby sql shell; do
+    TOTAL=$((TOTAL+1))
+    if [ -f "$WORKFLOW_DIR/docs/engineering-standards/${lang}.md" ]; then
+        echo "  PASS  engineering-standards/${lang}.md present"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  engineering-standards/${lang}.md missing"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+# §5 index references each sub-file
+TOTAL=$((TOTAL+1))
+missing_refs=""
+for lang in rust typescript-react python go jvm csharp-dotnet c-cpp swift ruby sql shell; do
+    grep -q "engineering-standards/${lang}.md" "$WORKFLOW_DIR/docs/engineering-standards.md" || missing_refs="$missing_refs $lang"
+done
+if [ -z "$missing_refs" ]; then
+    echo "  PASS  §5 index references all 11 language sub-files"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  §5 index missing sub-file references:$missing_refs"
+    FAIL=$((FAIL+1))
+fi
+
+# Both engineers reference the standards doc
+for agent in backend-engineer frontend-engineer; do
+    TOTAL=$((TOTAL+1))
+    if grep -q 'engineering-standards.md' "$WORKFLOW_DIR/agents/${agent}.md" && \
+       grep -qi 'engineering standards' "$WORKFLOW_DIR/agents/${agent}.md"; then
+        echo "  PASS  ${agent} has Engineering standards section referencing the doc"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  ${agent} missing Engineering standards reference"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+# Both engineers instruct selective language loading (don't load all)
+for agent in backend-engineer frontend-engineer; do
+    TOTAL=$((TOTAL+1))
+    if grep -qi 'load ONLY' "$WORKFLOW_DIR/agents/${agent}.md"; then
+        echo "  PASS  ${agent} instructs selective (ONLY) language-sub-file loading"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  ${agent} missing selective-load instruction"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+# Both reviewers reference the standards doc as a rubric
+for agent in security-architect spec-sre-auditor; do
+    TOTAL=$((TOTAL+1))
+    if grep -q 'engineering-standards.md' "$WORKFLOW_DIR/agents/${agent}.md"; then
+        echo "  PASS  ${agent} references engineering-standards.md as review rubric"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  ${agent} missing engineering-standards rubric reference"
+        FAIL=$((FAIL+1))
+    fi
+done
+
+echo ""
 echo "=== require-ui-tests first-word blocklist (catches 2026-05-26 hook-enforcement dogfood finding) ==="
 # Bug: when a spec's first hyphen-split word is "test", "spec", "unit", "e2e",
 # or "integration", the first-word substitution matched every *.test.ts file

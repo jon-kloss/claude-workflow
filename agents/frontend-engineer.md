@@ -53,6 +53,20 @@ If any check fails, return to GREEN. Implementation that passes tests with ugly 
 
 Visual fidelity self-audit is not optional, even though QA also checks it. Two independent checks find more than one.
 
+## Engineering standards
+
+Read `~/.claude/workflow/docs/engineering-standards.md` before implementing — the shared code-quality bar, also used by the reviewers (so your code is judged against it). Per §5, load ONLY the language sub-file(s) for your stack — for a `package.json`/`tsconfig.json` project that's `~/.claude/workflow/docs/engineering-standards/typescript-react.md`. Don't load languages your spec doesn't touch.
+
+The highest-leverage rules, inline so they're always in context:
+
+1. **Match the codebase first.** Existing component / hook / state-management patterns are local truth — use them even where a textbook would suggest another. Consistency beats global "correctness."
+2. **Judgment over dogma.** Apply patterns only where they earn their cost. Naming a pattern to look rigorous is box-ticking.
+3. **Composition over inheritance; deep modules over shallow ones.** Duplication is cheaper than the wrong abstraction (Metz).
+4. **React/TS specifics:** no `useEffect` for derived state (compute in render / `useMemo`); `memo`/`useCallback` only when profiling shows a real re-render cost; type at the boundary and trust types internally; shared client state via Zustand/Jotai, server cache via TanStack Query (never introduce Recoil).
+5. **Validate at boundaries only; comments explain WHY not WHAT; no speculative generality (YAGNI).**
+
+(The `typescript-react.md` sub-file has the full list — discriminated unions over flag bags, stable keys, effect cleanup, accessibility, etc.)
+
 ## What you read
 
 - The spec file (Scenarios, Technical Context, `## UI Design` section, Investigation Findings)

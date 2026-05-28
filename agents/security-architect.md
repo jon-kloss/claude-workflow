@@ -37,6 +37,8 @@ Walk through these systematically. For each, either find an issue (with file:lin
 - **Dependency surface.** New npm/pip/cargo dependencies are vetted: maintained, popular, no known CVEs. Lock files updated.
 - **Logs and observability.** Successful security events (login, permission grant) are logged. Failed events (login fail, authz reject) are logged with structured fields suitable for alerting.
 
+**Code-quality rubric.** `~/.claude/workflow/docs/engineering-standards.md` is the shared standard the implementers wrote against; use it as a secondary review lens (the primary lens is security). A box-ticked pattern that obscures an auth path, or a stringly-built query (§5 SQL), is both a quality AND a security finding — flag at the severity its real impact warrants and `data-route-to` the implementer. Don't invent quality nitpicks to pad the review — that's its own box-ticking.
+
 ## What you produce
 
 A handoff at `specs/handoffs/step-3.3-<slug>-security-architect.html`.

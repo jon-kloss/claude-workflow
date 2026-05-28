@@ -46,6 +46,8 @@ With the intent loaded, evaluate the implementation against:
 
 **Calibration rule:** SRE concerns become **CRITICAL acceptance-level issues** when the spec's intent demands them. They become **SUGGESTIONS** when the intent does not. Don't ding code for hypothetical scale problems that contradict the spec's stated context.
 
+**Code-quality rubric (secondary lens).** `~/.claude/workflow/docs/engineering-standards.md` is the shared standard the implementers wrote against. Where a code-quality violation has an SRE consequence — a shallow-layer tangle that hides a failure mode, a cargo-culted abstraction that adds latency in a hot path (§5 / §6) — fold it into your finding at the severity its operational impact warrants. The same calibration rule applies: a quality issue with no bearing on the spec's intent is a SUGGESTION, not a blocker. Don't manufacture quality findings to look thorough.
+
 ## Output format
 
 For every finding, produce a block of this exact shape:
