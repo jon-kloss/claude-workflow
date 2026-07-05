@@ -5,16 +5,16 @@
 - [x] T0.2 Subagent AskUserQuestion experiment → unavailable, hard error (E3 protocol required)
 - [x] T0.3 Harness field-shape checks (nested headless sessions) → docs/harness-behavior.md (v2.1.201)
 - [x] T0.4 Decision record → docs/decisions/0001-enforcement-architecture.md (E1–E6)
-- [ ] T1.1 Commit Mount-Map rollout + untracked hook + dogfood specs; fresh-clone install test
-- [ ] T1.2 .gitignore, delete package-lock.json, resolve vendor/ (needs D7, D8)
-- [ ] T2.1 Author docs/registry.md (step IDs, filenames, verdicts, severities, tags, routing)
-- [ ] T2.2 tools/lint-consistency.sh — must initially FAIL reproducing M3/M4/M7
+- [x] T1.1 Committed (ef982f9 Mount-Map, 77d6195 dogfood specs); fresh-clone test lives in tests/install-roundtrip.sh
+- [x] T1.2 Hygiene done (1d2e602): gitignore, package-lock deleted, vendor/hyperpowers deleted per D7 (install warns if plugin absent)
+- [x] T2.1 docs/registry.md authored (040a040)
+- [x] T2.2 tools/lint-consistency.sh — initial RED: 62 violations (R1:45 R4:17) reproducing M1/M3/M4/M7/M13/H4; that list = Phase 4 worklist
 
 ## Next (after Now)
-- [ ] T1.3 install.sh: resources/ linking, bd check, --yes, is_our_file fix, settings-merge hardening
-- [ ] T1.4 Manifest-driven uninstall rewrite + round-trip test
-- [ ] T1.5 Agent memory/bootstrap path sweep (absolute paths)
-- [ ] T2.3 Shared agent-protocol.md boilerplate extraction (+ generator if frontmatter hooks chosen)
+- [x] T1.3 install.sh reworked (71b2291); reinstalled against real HOME — resources resolve, manifest written (60 links, 32 settings tuples)
+- [x] T1.4 Manifest-driven uninstall + tests/install-roundtrip.sh (21/21 green, verified independently)
+- [x] T1.5 Agent paths absolute (d74e490)
+- [x] T2.3 docs/agent-protocol.md extraction (d74e490): agents 1910→1694 lines; smoke 151/151 after re-pointing 3 shape checks
 - [ ] T3.1 Enforcement architecture per decision record (A2/H1)
 - [ ] T3.2 Verifier state machine: template markers + session-keyed state + compact retention
 - [ ] T3.3 Per-hook correctness fixes (one commit per hook; smoke test each: block/allow/override)
