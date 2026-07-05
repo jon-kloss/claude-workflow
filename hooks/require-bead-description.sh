@@ -40,6 +40,12 @@ if ! echo "$command" | grep -qE '(^|[;&|(])[[:space:]]*bd[[:space:]]+create([[:s
     exit 0
 fi
 
+# Help lookups are not creations — never gate them.
+if echo "$command" | grep -qE 'bd[[:space:]]+create[[:space:]]+(-h|--help)([[:space:]]|$)'; then
+    echo '{}'
+    exit 0
+fi
+
 # Check if --description is present
 if echo "$command" | grep -q -- '--description'; then
     echo '{}'

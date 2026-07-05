@@ -1,31 +1,99 @@
 #!/usr/bin/env bash
 # Smoke test for the role-agent hook system.
 #
-# What this DOES test:
-#   - require-handoff-artifact.sh fires correctly per spec @layer
-#   - require-release-handoff.sh blocks/allows bd close epic
-#   - Handoff schema validation (missing meta, missing section, slug mismatch)
-#   - @handoff-skip and @release-skip overrides
-#   - Phase B agent expected-handoffs (devops, data) per @layer + @touches-data
+# SANDBOX GUARANTEE
+#   Every run is fully self-contained under a throwaway $SANDBOX directory:
+#     - $HOME is redirected to $SANDBOX/home for the entire suite, so every
+#       hook invocation writes its state — including the override-audit
+#       ledger at ~/.claude/hooks/state/override-audit.log — inside the
+#       sandbox, never into the real ~/.claude.
+#     - bd-backed checks run in a scratch project ($SANDBOX/proj) against a
+#       throwaway database created by `bd init` there. The workflow repo's
+#       own .beads is never written to. If bd (or its init) is unavailable,
+#       those checks are SKIPped with a reason instead of touching anything.
+#     - Fixture mini-projects live under $SANDBOX/tmp.
+#     - The sandbox (including its scratch dolt server) is torn down on exit.
+#   Known caveat: bd v0.60 `bd init` performs machine-wide orphan
+#   housekeeping and may stop OTHER projects' idle dolt sql-servers (bd
+#   restarts them transparently on next use; no issue data is affected).
+#   This is bd behavior the suite cannot disable, not a sandbox leak.
 #
-# What this does NOT test:
-#   - That real role agents produce well-formed handoffs (requires real Agent dispatch)
-#   - That the SKILL.md text correctly orchestrates the agents (requires fresh session)
-#   - That `/impeccable` Skill invocations are tracked correctly (requires Skill tool)
+# HOOKS UNDER TEST are always the REPO's own hooks (HOOK_DIR below), never
+# the ~/.claude symlinks — a clean checkout needs no prior install.sh run.
 #
-# Usage:  bash tests/role-agent-smoke.sh
-# Exit:   0 if all pass, non-zero with count of failures otherwise.
+# FLAGS
+#   --installed   Additionally assert the installed form under the real
+#                 $HOME/.claude (install.sh symlinked *.py helpers, /onboard
+#                 skill, secret detector). Default OFF so a clean checkout /
+#                 CI passes; when off those 3 checks are counted as SKIP.
+#
+# CHECK COUNT is dynamic: the summary prints Total/Pass/Fail/Skip and
+# Total == Pass + Fail + Skip on every run.
+#
+# COVERAGE GAPS (honest inventory, 2026-07-05):
+#   - Shape-checks only (source greps, no behavior test):
+#       guard-spec-bash-writes.sh, require-verifier-agents.sh
+#   - Partial: claim-vs-call-audit.sh (only the @gate-skip validator paths;
+#     the core claim-vs-call tracking is not behavior-tested)
+#   - Zero coverage: beads-auto-resume.sh, molecule-autoclose-warn.sh,
+#     remind-integration-tests.sh, track-reads.sh (its state format is
+#     exercised only via hand-written fixtures), track-skills.sh
+#   - Not testable here: real role agents producing handoffs (needs Agent
+#     dispatch), SKILL.md orchestration (needs a fresh session), /impeccable
+#     Skill invocation tracking (needs the Skill tool).
+#
+# Usage:  bash tests/role-agent-smoke.sh [--installed]
+# Exit:   0 if no failures, 1 otherwise (skips never fail the run).
 
 set -uo pipefail
 
 WORKFLOW_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+# The hooks under test — always the repo's own hooks/, never ~/.claude.
 HOOK_DIR="$WORKFLOW_DIR/hooks"
-TMP="$(mktemp -d -t role-smoke.XXXXXX)"
-trap 'rm -rf "$TMP"' EXIT
+
+RUN_INSTALLED=0
+for arg in "$@"; do
+    case "$arg" in
+        --installed) RUN_INSTALLED=1 ;;
+        *) echo "usage: bash tests/role-agent-smoke.sh [--installed]" >&2; exit 64 ;;
+    esac
+done
+
+# ---- sandbox ---------------------------------------------------------------
+REAL_HOME="$HOME"
+SANDBOX="$(mktemp -d -t role-smoke.XXXXXX)"
+HOME="$SANDBOX/home"
+export HOME
+mkdir -p "$HOME"
+TMP="$SANDBOX/tmp"     # fixture mini-projects
+PROJ="$SANDBOX/proj"   # scratch project for bd-backed checks
+mkdir -p "$TMP" "$PROJ/specs/handoffs"
+
+cleanup() {
+    # Stop the scratch project's dolt server (if bd started one), then
+    # remove the sandbox. Never touches anything outside $SANDBOX.
+    if [ -f "$PROJ/.beads/dolt-server.pid" ]; then
+        kill "$(cat "$PROJ/.beads/dolt-server.pid" 2>/dev/null)" 2>/dev/null || true
+    fi
+    rm -rf "$SANDBOX"
+}
+trap cleanup EXIT
 
 PASS=0
 FAIL=0
+SKIP=0
 TOTAL=0
+
+# skip <name> <reason> — counted separately; skips never fail the run.
+skip() {
+    TOTAL=$((TOTAL+1)); SKIP=$((SKIP+1))
+    echo "  SKIP  $1 ($2)"
+}
+
+# sed -i differs between BSD and GNU sed — always edit through this instead.
+sed_inplace() {  # <sed-script> <file>
+    sed "$1" "$2" > "$2.sedtmp" && mv "$2.sedtmp" "$2"
+}
 
 # Hooks now block via `exit 2 + stderr message` (not stdout JSON). Existing
 # test bodies pipe a payload into the hook and capture the output with 2>&1
@@ -87,10 +155,14 @@ import json, os
 print(json.dumps({"hook_event_name":os.environ["EV"],"session_id":os.environ["SID"],"cwd":os.environ["CW"],"tool_name":"Agent","tool_input":{"subagent_type":os.environ["SUB"],"prompt":os.environ["P"]}}))'
 }
 
+# write_handoff <outpath> <role> <slug> [step] [findings_extra]
+# The single fixture writer for schema-valid handoffs (the suite used to
+# carry a second, shadowing definition — now unified). Reviewer/coordinator
+# roles get the required <meta data-verdict> (registry §4, enforced by
+# _validate_handoff.py since T3.4). findings_extra is injected verbatim into
+# the findings section (used by the aside/resolution-pointer tests).
 write_handoff() {
-    local dir="$1" step="$2" slug="$3" role="$4"
-    # Reviewer/coordinator roles must carry <meta data-verdict> (registry §4,
-    # enforced by _validate_handoff.py since T3.4)
+    local outpath="$1" role="$2" slug="$3" step="${4:-3.3}" extra="${5:-}"
     local verdict_meta=""
     case "$role" in
         security-architect|devops-architect|data-architect|qa-engineer|spec-sre-auditor)
@@ -98,7 +170,8 @@ write_handoff() {
         release-coordinator)
             verdict_meta='<meta data-verdict="READY-TO-CLOSE">' ;;
     esac
-    cat > "${dir}/${step}-${slug}-${role}.html" <<EOF
+    [ -n "$extra" ] || extra='<p>x</p>'
+    cat > "$outpath" <<EOF
 <!DOCTYPE html><html lang="en" data-handoff-version="1"><head>
 <meta charset="utf-8">
 <meta data-from-role="${role}">
@@ -107,9 +180,9 @@ write_handoff() {
 <meta data-produced-at="2026-05-25T18:00:00Z">
 <meta data-input-references="">
 ${verdict_meta}
-<title>x</title></head><body>
+<title>${role} handoff</title></head><body>
 <section data-role="summary"><p>x</p></section>
-<section data-role="findings"><p>x</p></section>
+<section data-role="findings">${extra}</section>
 <section data-role="acceptance-criteria"><dl><dt data-id="a">x</dt><dd data-check="x">PASS</dd></dl></section>
 <section data-role="open-questions"><ul></ul></section>
 </body></html>
@@ -145,22 +218,22 @@ for h in product-owner application-architect security-architect qa-engineer back
         security-architect|devops-architect|data-architect) step=step-3.3 ;;
         qa-engineer)           step=step-3.3 ;;
     esac
-    write_handoff specs/handoffs "$step" api-feature "$h"
+    write_handoff "specs/handoffs/${step}-api-feature-${h}.html" "$h" api-feature "$step"
 done
 result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "api-spec with all 7 handoffs allows" allow "$result"
 
 # Schema violation: remove data-from-role from one handoff
-sed -i '' '/data-from-role/d' specs/handoffs/step-3.3-api-feature-security-architect.html
+sed_inplace '/data-from-role/d' specs/handoffs/step-3.3-api-feature-security-architect.html
 result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "missing data-from-role schema violation blocks" block "$result"
-write_handoff specs/handoffs step-3.3 api-feature security-architect  # restore
+write_handoff specs/handoffs/step-3.3-api-feature-security-architect.html security-architect api-feature step-3.3  # restore
 
 # Slug mismatch
-sed -i '' 's/data-spec-slug="api-feature"/data-spec-slug="wrong-slug"/' specs/handoffs/step-3.3-api-feature-security-architect.html
+sed_inplace 's/data-spec-slug="api-feature"/data-spec-slug="wrong-slug"/' specs/handoffs/step-3.3-api-feature-security-architect.html
 result=$(printf '%s\n' "$PAYLOAD" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "slug mismatch blocks" block "$result"
-write_handoff specs/handoffs step-3.3 api-feature security-architect  # restore
+write_handoff specs/handoffs/step-3.3-api-feature-security-architect.html security-architect api-feature step-3.3  # restore
 
 # @handoff-skip override
 rm specs/handoffs/step-3.3-api-feature-security-architect.html
@@ -168,7 +241,7 @@ PAYLOAD_SKIP=$(mkpayload_edit "$TMP/specs/api-feature.md" '@status(verified)
 @handoff-skip(security-architect: synthetic test no security surface — see tests/role-agent-smoke.sh fixture)')
 result=$(printf '%s\n' "$PAYLOAD_SKIP" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "@handoff-skip allows when handoff missing" allow "$result"
-write_handoff specs/handoffs step-3.3 api-feature security-architect
+write_handoff specs/handoffs/step-3.3-api-feature-security-architect.html security-architect api-feature step-3.3
 
 # @trivial bypass
 cat > specs/trivial.md <<'EOF'
@@ -199,20 +272,28 @@ for h in product-owner application-architect security-architect qa-engineer uiux
         security-architect|devops-architect) step=step-3.3 ;;
         qa-engineer)           step=step-3.3 ;;
     esac
-    write_handoff specs/handoffs "$step" ui-feature "$h"
+    write_handoff "specs/handoffs/${step}-ui-feature-${h}.html" "$h" ui-feature "$step"
 done
 PAYLOAD_UI=$(mkpayload_edit "$TMP/specs/ui-feature.md" '@status(verified)')
 result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "ui-spec (no @touches-data) allows without data-architect" allow "$result"
 
 # Now add @touches-data — should block until data-architect present
-sed -i '' '/^@layer(ui)/a\
+# (regenerate the spec rather than sed-append: BSD/GNU `a\` syntax differs)
+cat > specs/ui-feature.md <<'EOF'
+@status(approved)
+@layer(ui)
 @touches-data
-' specs/ui-feature.md
+
+## Investigation Findings
+- src/a.tsx:1
+- src/b.tsx:2
+- decision
+EOF
 result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "ui-spec + @touches-data blocks without data-architect" block "$result"
 
-write_handoff specs/handoffs step-3.3 ui-feature data-architect
+write_handoff specs/handoffs/step-3.3-ui-feature-data-architect.html data-architect ui-feature step-3.3
 result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1)
 assert "ui-spec + @touches-data + data-architect allows" allow "$result"
 
@@ -224,26 +305,54 @@ result=$(printf '%s\n' "$PAYLOAD_UI" | bash "$HOOK_DIR/require-handoff-artifact.
 assert "critical-blocking aside blocks" block "$result"
 
 echo ""
-echo "=== require-release-handoff.sh ==="
+echo "=== require-release-handoff.sh (sandboxed bd db in \$SANDBOX/proj) ==="
 
-# We use the workflow repo's actual bd db, but with synthetic test issues.
-# Switch back to the workflow dir so `bd` works.
-cd "$WORKFLOW_DIR" || exit 1
+# All bd operations target a throwaway database created by `bd init` inside
+# the scratch project — NEVER the workflow repo's own .beads. cwd moves to
+# the scratch project so the hook's `bd show` / specs/ scans resolve there.
+# (This also makes the @release-skip in-spec tests deterministic: the hook
+# scans specs/ under cwd, and the scratch project's specs/ is empty — a real
+# spec carrying @release-skip can no longer unlock these fixtures.)
+BD_PREFIX="smoke"
+BD_OK=0
+if command -v bd >/dev/null 2>&1; then
+    ( cd "$PROJ" \
+        && { command -v git >/dev/null 2>&1 && git init -q . >/dev/null 2>&1; true; } \
+        && bd init -q --prefix "$BD_PREFIX" >/dev/null 2>&1 ) && BD_OK=1
+fi
 
-# Defensive: a crashed prior run may have left the @release-skip fixture spec
-# behind — it would unlock every epic-close block test below.
-rm -f specs/smoke-release-skip-fixture.md
-
-# Regression: build-test (2026-05-25) found that bd with --type=epic auto-displays [EPIC]
-# uppercase in bd show output, but require-release-handoff.sh's grep was case-sensitive
-# '[epic]'. The hook never matched → silent under-block. Use --type=epic here, NOT
-# --type=feature with [epic] in title (the latter doesn't reproduce the bug because
-# bd echoes the title verbatim).
-EPIC_ID=$(bd create --title="SMOKE TEST release hook (uppercase prefix)" --description="smoke test, ignore" --type=epic --priority=4 2>&1 | grep -oE 'workflow-[a-z0-9]+' | head -1)
-NONEPIC_ID=$(bd create --title="smoke non-epic" --description="smoke test, ignore" --type=task --priority=4 2>&1 | grep -oE 'workflow-[a-z0-9]+' | head -1)
+EPIC_ID=""
+NONEPIC_ID=""
+if [ "$BD_OK" -eq 1 ]; then
+    cd "$PROJ" || exit 1
+    # Regression: build-test (2026-05-25) found that bd with --type=epic
+    # auto-displays [EPIC] uppercase in bd show output, but the hook's grep
+    # was case-sensitive '[epic]' → silent under-block. Use --type=epic, NOT
+    # --type=feature with [epic] in the title (the latter doesn't reproduce
+    # the bug because bd echoes the title verbatim).
+    EPIC_ID=$(bd create --title="SMOKE TEST release hook (uppercase prefix)" --description="smoke test, ignore" --type=epic --priority=4 2>&1 | grep -oE "${BD_PREFIX}-[a-z0-9]+" | head -1)
+    NONEPIC_ID=$(bd create --title="smoke non-epic" --description="smoke test, ignore" --type=task --priority=4 2>&1 | grep -oE "${BD_PREFIX}-[a-z0-9]+" | head -1)
+fi
 
 if [ -z "$EPIC_ID" ] || [ -z "$NONEPIC_ID" ]; then
-    echo "  SKIP  release-handoff tests (could not create synthetic bd issues)"
+    for t in \
+        "non-epic bd close allows" \
+        "epic bd close without handoff blocks" \
+        "multi-id close with epic in 2nd position blocks (H9)" \
+        "cd prefix + epic close still gated (H9)" \
+        "echo-mention of bd close epic allows" \
+        "meta data-verdict=BLOCKED wins over READY-TO-CLOSE prose (H10)" \
+        "meta data-verdict=READY-TO-CLOSE allows" \
+        "legacy handoff (no meta) prose verdict allows" \
+        "epic bd close with BLOCKED verdict blocks" \
+        "garbage RELEASE-SKIP reason still blocks (validator)" \
+        "quality RELEASE-SKIP reason overrides BLOCKED verdict (H4)" \
+        "quality RELEASE-SKIP also covers missing-handoff branch" \
+        "garbage @release-skip in-spec reason blocks" \
+        "quality @release-skip in-spec reason allows"
+    do
+        skip "$t" "bd init unavailable in sandbox — the real db is never touched"
+    done
 else
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $NONEPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "non-epic bd close allows" allow "$result"
@@ -281,7 +390,7 @@ EOF
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "meta data-verdict=BLOCKED wins over READY-TO-CLOSE prose (H10)" block "$result"
 
-    sed -i '' 's/data-verdict="BLOCKED"/data-verdict="READY-TO-CLOSE"/' "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
+    sed_inplace 's/data-verdict="BLOCKED"/data-verdict="READY-TO-CLOSE"/' "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "meta data-verdict=READY-TO-CLOSE allows" allow "$result"
 
@@ -299,7 +408,7 @@ EOF
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "legacy handoff (no meta) prose verdict allows" allow "$result"
 
-    sed -i '' 's/READY-TO-CLOSE/BLOCKED/' "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
+    sed_inplace 's/READY-TO-CLOSE/BLOCKED/' "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "epic bd close with BLOCKED verdict blocks" block "$result"
 
@@ -319,7 +428,7 @@ EOF
 
     # @release-skip(<reason>) in-spec form (registry §7) — second epic with no
     # comments. Garbage reason blocks; quality reason allows.
-    EPIC2_ID=$(bd create --title="SMOKE TEST release hook (in-spec tag)" --description="smoke test, ignore" --type=epic --priority=4 2>&1 | grep -oE 'workflow-[a-z0-9]+' | head -1)
+    EPIC2_ID=$(bd create --title="SMOKE TEST release hook (in-spec tag)" --description="smoke test, ignore" --type=epic --priority=4 2>&1 | grep -oE "${BD_PREFIX}-[a-z0-9]+" | head -1)
     if [ -n "$EPIC2_ID" ]; then
         RS_FIXTURE="specs/smoke-release-skip-fixture.md"
         echo "# smoke fixture — deleted by tests/role-agent-smoke.sh" > "$RS_FIXTURE"
@@ -333,28 +442,37 @@ EOF
         assert "quality @release-skip in-spec reason allows" allow "$result"
         rm -f "$RS_FIXTURE"
         bd close "$EPIC2_ID" --reason="smoke test cleanup" > /dev/null 2>&1
+    else
+        skip "garbage @release-skip in-spec reason blocks" "could not create second synthetic epic in sandbox db"
+        skip "quality @release-skip in-spec reason allows" "could not create second synthetic epic in sandbox db"
     fi
 
-    # Cleanup
+    # Cleanup (scratch db only — the whole thing is deleted on exit anyway)
     bd close "$EPIC_ID" --reason="smoke test cleanup" > /dev/null 2>&1
     bd close "$NONEPIC_ID" --reason="smoke test cleanup" > /dev/null 2>&1
 fi
+cd "$WORKFLOW_DIR" || exit 1
 
 echo ""
-echo "=== installed-form regressions (require ~/.claude/hooks/ to reflect a real install) ==="
+echo "=== installed-form regressions (--installed: assert against the real ~/.claude) ==="
 # These tests catch the 2026-05-25 build-test regression: install.sh was only globbing
 # *.sh and skipping *.py helpers like _validate_handoff.py. The earlier smoke tests
 # all ran against the workflow repo's hooks/ directly, so they couldn't catch the
-# install-symlink path. These regressions check the installed form.
+# install-symlink path. Gated behind --installed (and checked under $REAL_HOME,
+# since $HOME points into the sandbox) so a clean checkout / CI passes by default.
 
-TOTAL=$((TOTAL+1))
-if [ -f "$HOME/.claude/hooks/_validate_handoff.py" ]; then
-    echo "  PASS  _validate_handoff.py present in ~/.claude/hooks/ (install.sh symlinked *.py)"
-    PASS=$((PASS+1))
+if [ "$RUN_INSTALLED" -eq 1 ]; then
+    TOTAL=$((TOTAL+1))
+    if [ -f "$REAL_HOME/.claude/hooks/_validate_handoff.py" ]; then
+        echo "  PASS  _validate_handoff.py present in ~/.claude/hooks/ (install.sh symlinked *.py)"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  _validate_handoff.py MISSING from ~/.claude/hooks/ — install.sh did not symlink *.py helpers"
+        echo "        (run: cd $WORKFLOW_DIR && bash install.sh)"
+        FAIL=$((FAIL+1))
+    fi
 else
-    echo "  FAIL  _validate_handoff.py MISSING from ~/.claude/hooks/ — install.sh did not symlink *.py helpers"
-    echo "        (run: cd $WORKFLOW_DIR && bash install.sh)"
-    FAIL=$((FAIL+1))
+    skip "_validate_handoff.py present in ~/.claude/hooks/" "--installed not set; run with --installed after bash install.sh"
 fi
 
 # Regression: require-handoff-artifact.sh must degrade gracefully when validator missing.
@@ -383,14 +501,18 @@ fi
 echo ""
 echo "=== /onboard skill + agent-memory regressions ==="
 
-# /onboard skill installed
-TOTAL=$((TOTAL+1))
-if [ -f "$HOME/.claude/skills/onboard/SKILL.md" ]; then
-    echo "  PASS  /onboard skill installed at ~/.claude/skills/onboard/SKILL.md"
-    PASS=$((PASS+1))
+# /onboard skill installed (installed-form check — gated behind --installed)
+if [ "$RUN_INSTALLED" -eq 1 ]; then
+    TOTAL=$((TOTAL+1))
+    if [ -f "$REAL_HOME/.claude/skills/onboard/SKILL.md" ]; then
+        echo "  PASS  /onboard skill installed at ~/.claude/skills/onboard/SKILL.md"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  /onboard SKILL.md missing from install"
+        FAIL=$((FAIL+1))
+    fi
 else
-    echo "  FAIL  /onboard SKILL.md missing from install"
-    FAIL=$((FAIL+1))
+    skip "/onboard skill installed at ~/.claude/skills/onboard/SKILL.md" "--installed not set"
 fi
 
 # All 16 memory templates exist in the repo (11 original + 5 game-design)
@@ -404,14 +526,18 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# _detect_memory_secrets.py symlinked
-TOTAL=$((TOTAL+1))
-if [ -f "$HOME/.claude/hooks/_detect_memory_secrets.py" ]; then
-    echo "  PASS  _detect_memory_secrets.py present in ~/.claude/hooks/"
-    PASS=$((PASS+1))
+# _detect_memory_secrets.py symlinked (installed-form check — gated behind --installed)
+if [ "$RUN_INSTALLED" -eq 1 ]; then
+    TOTAL=$((TOTAL+1))
+    if [ -f "$REAL_HOME/.claude/hooks/_detect_memory_secrets.py" ]; then
+        echo "  PASS  _detect_memory_secrets.py present in ~/.claude/hooks/"
+        PASS=$((PASS+1))
+    else
+        echo "  FAIL  _detect_memory_secrets.py MISSING — secret-guard hook won't function"
+        FAIL=$((FAIL+1))
+    fi
 else
-    echo "  FAIL  _detect_memory_secrets.py MISSING — secret-guard hook won't function"
-    FAIL=$((FAIL+1))
+    skip "_detect_memory_secrets.py present in ~/.claude/hooks/" "--installed not set"
 fi
 
 # guard-agent-memory-secrets.sh blocks JWT in agent-memory write
@@ -864,11 +990,12 @@ vtest_pass "URL reference"             "see https://github.com/jon-kloss/claude-
 vtest_pass "user authorization"        "user authorized this bypass after reviewing the diff manually"
 vtest_pass "per-name citation"         "per jon: deferred until after the release cut on 2026-06-01"
 
-# Audit log gets a line on PASS
+# Audit log gets a line on PASS. $HOME is the sandbox here, so this exercises
+# the ledger append WITHOUT touching the real ~/.claude/hooks/state ledger.
 AUDIT_LOG_PATH="$HOME/.claude/hooks/state/override-audit.log"
 TOTAL=$((TOTAL+1))
-# Use unique marker reason so we don't false-positive on prior runs
-unique_marker="audit-test-$(date +%s%N)"
+# Unique marker (macOS date lacks %N, so mix in pid + RANDOM instead)
+unique_marker="audit-test-$(date +%s).$$.$RANDOM"
 unique_reason="audit log entry verification ${unique_marker} via commit 9c88227"
 python3 "$VALIDATOR_PY" "smoke-test" "@audit-tag" "smoke-role" "$unique_reason" >/dev/null 2>&1
 if [ -f "$AUDIT_LOG_PATH" ] && grep -q "$unique_marker" "$AUDIT_LOG_PATH"; then
@@ -1209,48 +1336,12 @@ echo "=== aside resolution-pointer validation (workflow-ax6 / 2026-05-27 bypass)
 AX_TMP="$TMP/aside-test"
 mkdir -p "$AX_TMP/specs/handoffs"
 
-# Helper: write minimal valid handoff with caller-controlled <aside>
-write_handoff() {
-    local outpath="$1"
-    local from_role="$2"
-    local slug="$3"
-    local extra="$4"
-    local verdict_meta=""
-    case "$from_role" in
-        security-architect|devops-architect|data-architect|qa-engineer|spec-sre-auditor)
-            verdict_meta='<meta data-verdict="PASS">' ;;
-        release-coordinator)
-            verdict_meta='<meta data-verdict="READY-TO-CLOSE">' ;;
-    esac
-    cat > "$outpath" <<HOFF
-<!DOCTYPE html>
-<html lang="en" data-handoff-version="1">
-<head>
-<meta charset="utf-8">
-<meta data-from-role="${from_role}">
-<meta data-spec-slug="${slug}">
-<meta data-step="3.3">
-<meta data-produced-at="2026-05-27T00:00:00Z">
-<meta data-input-references="(none)">
-${verdict_meta}
-<title>${from_role} handoff</title>
-</head>
-<body>
-<section data-role="summary"><p>summary</p></section>
-<section data-role="findings">
-<h1>Findings</h1>
-${extra}
-</section>
-<section data-role="acceptance-criteria"><dl><dt data-id="ac-1">test</dt><dd>n/a</dd></dl></section>
-<section data-role="open-questions"><ul></ul></section>
-</body>
-</html>
-HOFF
-}
+# (Uses the single top-level write_handoff fixture writer — the section
+# used to redefine a shadowing variant here; the definitions are unified.)
 
 # Case 1: aside flipped to false with NO pointers => validator emits error
 TARGET="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect.html"
-write_handoff "$TARGET" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false"><h2>Resolved without proof</h2></aside>'
+write_handoff "$TARGET" "devops-architect" "test-spec" "3.3" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false"><h2>Resolved without proof</h2></aside>'
 TOTAL=$((TOTAL+1))
 out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET" "test-spec" "devops-architect" 2>&1)
 if echo "$out" | grep -q "missing data-resolved-in"; then
@@ -1263,7 +1354,7 @@ fi
 
 # Case 2: pointer present but points to non-existent file
 TARGET2="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-cycle-1.html"
-write_handoff "$TARGET2" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/does-not-exist.html" data-re-verified-in="specs/handoffs/also-missing.html"><h2>Orphan pointers</h2></aside>'
+write_handoff "$TARGET2" "devops-architect" "test-spec" "3.3" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/does-not-exist.html" data-re-verified-in="specs/handoffs/also-missing.html"><h2>Orphan pointers</h2></aside>'
 TOTAL=$((TOTAL+1))
 out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET2" "test-spec" "devops-architect" 2>&1)
 if echo "$out" | grep -q "does not exist on disk"; then
@@ -1277,13 +1368,13 @@ fi
 # Case 3: pointers valid AND re-verify is clean => allow
 # Build fix-cycle implementer handoff
 FIX_HOFF="$AX_TMP/specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html"
-write_handoff "$FIX_HOFF" "backend-engineer" "test-spec" '<p>Fix applied at file:line</p>'
+write_handoff "$FIX_HOFF" "backend-engineer" "test-spec" "3.2" '<p>Fix applied at file:line</p>'
 # Build re-verify handoff with NO unresolved critical aside
 REVERIFY_HOFF="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-cycle-1.html"
-write_handoff "$REVERIFY_HOFF" "devops-architect" "test-spec" '<p>Re-verified clean</p>'
+write_handoff "$REVERIFY_HOFF" "devops-architect" "test-spec" "3.3" '<p>Re-verified clean</p>'
 # Original handoff points to both
 TARGET3="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect.html"
-write_handoff "$TARGET3" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html" data-resolved-by="commit:abc123" data-re-verified-in="specs/handoffs/step-3.3-test-spec-devops-architect-cycle-1.html"><h2>Cleanly resolved</h2></aside>'
+write_handoff "$TARGET3" "devops-architect" "test-spec" "3.3" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html" data-resolved-by="commit:abc123" data-re-verified-in="specs/handoffs/step-3.3-test-spec-devops-architect-cycle-1.html"><h2>Cleanly resolved</h2></aside>'
 TOTAL=$((TOTAL+1))
 out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET3" "test-spec" "devops-architect" 2>&1)
 if [ -z "$out" ]; then
@@ -1296,9 +1387,9 @@ fi
 
 # Case 4: re-verify file still has an unresolved critical on same route => block
 REVERIFY_DIRTY="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-cycle-2.html"
-write_handoff "$REVERIFY_DIRTY" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="true"><h2>Same problem still present</h2></aside>'
+write_handoff "$REVERIFY_DIRTY" "devops-architect" "test-spec" "3.3" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="true"><h2>Same problem still present</h2></aside>'
 TARGET4="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-fakerev.html"
-write_handoff "$TARGET4" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html" data-re-verified-in="specs/handoffs/step-3.3-test-spec-devops-architect-cycle-2.html"><h2>Claims resolved but reviewer says no</h2></aside>'
+write_handoff "$TARGET4" "devops-architect" "test-spec" "3.3" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolved-in="specs/handoffs/step-3.2-test-spec-backend-engineer-fix-cycle-1.html" data-re-verified-in="specs/handoffs/step-3.3-test-spec-devops-architect-cycle-2.html"><h2>Claims resolved but reviewer says no</h2></aside>'
 TOTAL=$((TOTAL+1))
 out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET4" "test-spec" "devops-architect" 2>&1)
 if echo "$out" | grep -q "still contains an unresolved critical-blocking aside"; then
@@ -1311,7 +1402,7 @@ fi
 
 # Case 5: data-resolution-skip override allows the bypass
 TARGET5="$AX_TMP/specs/handoffs/step-3.3-test-spec-devops-architect-override.html"
-write_handoff "$TARGET5" "devops-architect" "test-spec" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolution-skip="upstream library fix lives in vendored dep — see commit 9c88227 for the patch we applied locally"><h2>Bypassed for documented reason</h2></aside>'
+write_handoff "$TARGET5" "devops-architect" "test-spec" "3.3" '<aside data-severity="critical" data-route-to="backend-engineer" data-blocks-next-step="false" data-resolution-skip="upstream library fix lives in vendored dep — see commit 9c88227 for the patch we applied locally"><h2>Bypassed for documented reason</h2></aside>'
 TOTAL=$((TOTAL+1))
 out=$(python3 "$WORKFLOW_DIR/hooks/_validate_handoff.py" "$TARGET5" "test-spec" "devops-architect" 2>&1)
 if [ -z "$out" ]; then
@@ -2070,6 +2161,7 @@ done
 
 echo ""
 echo "=========================================="
-echo "Total: $TOTAL  Pass: $PASS  Fail: $FAIL"
+echo "Total: $TOTAL  Pass: $PASS  Fail: $FAIL  Skip: $SKIP"
 echo "=========================================="
-exit $FAIL
+# NOT `exit $FAIL`: exit codes are mod 256, so 256 failures would wrap to 0.
+exit $((FAIL > 0 ? 1 : 0))
