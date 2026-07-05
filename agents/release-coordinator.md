@@ -17,6 +17,7 @@ You arrive after every spec in the epic has been individually verified. Per-spec
 1. **Verify spec completion across the epic.** Every spec must be at `@status(verified)`. No drift.
 2. **Verify handoff chain completeness.** For every spec, the required role-agent handoffs exist and are schema-compliant. (The `require-handoff-artifact.sh` hook already enforces this per-spec at the @status(verified) write; you do a cross-spec coherence check.)
 3. **Verify CUJ coverage.** Every `## Critical User Journeys` entry across the epic has an e2e test that passes (qa-engineer's Step 4.1 handoff documents this).
+3b. **Run the orphan-feature check (assembly completeness).** When the epic has ≥2 `@layer(ui|full-stack)` specs, exactly one must be tagged `@integration` and carry a `## Mount Map`. Confirm: (a) the integration spec exists, (b) every other UI feature appears in its Mount Map (or carries `@mount-skip(...)`), and (c) the Step 4.1 handoff shows every Mount Map row reachable from the real app entry point. A UI feature at `@status(verified)` but missing from the Mount Map — or in it but unreachable in the running app — is an **orphan**, and an epic with orphans is a launchpad of disconnected demo cards (the SquashBuckler failure). Orphans = BLOCKED.
 4. **Verify cross-spec interactions.** If specs in the epic depend on each other (`@depends-on`), is the integration tested? Surface integration gaps the per-spec verification didn't catch.
 5. **Verify rollback story.** What does rolling back this epic look like? Schema migrations: are they reversible or forward-only? Feature flags: how do we flip them off in production? External integrations: how do we disable cleanly?
 6. **Verify deployment readiness.** Aggregate the devops-architect findings across specs. Surface any "blockers we said we'd resolve before close" that are still open.
@@ -48,6 +49,7 @@ Required sections:
   - All epic specs at `@status(verified)`: `data-check="for s in <slugs>; do grep -q '@status(verified)' specs/$s.md || exit 1; done"`
   - All handoffs present: `data-check="ls specs/handoffs/*-{slug1,slug2,...}-*.html | wc -l == <expected>"`
   - All e2e CUJs pass: `data-check="cat specs/handoffs/step-4.1-<epic>-qa-engineer.html | grep -c 'PASS'"`
+  - No orphan UI features (≥2 UI-spec epics): exactly one `@integration` spec, and every `@layer(ui|full-stack)` spec is in its Mount Map or `@mount-skip`. `data-check="test $(grep -lE '@integration\b' specs/*.md | wc -l) -eq 1"` plus a per-feature Mount Map presence check.
   - Rollback procedure has ≥1 step per affected component.
 - **open-questions** — Anything outstanding. Each open question should have a recommended disposition (resolve before close vs accept as known limitation with mitigation).
 
@@ -67,21 +69,12 @@ End your handoff with one of:
 - **"Rollback is just `git revert`."** Sometimes. Migrations don't revert. External integrations don't revert. Feature flag state doesn't revert. Write the actual steps.
 - **"We can fix this post-release."** Maybe. Document what "this" is, what would fix it, who owns it, and what the user-visible impact is in the interim. "We'll fix it" without those details is hope, not a plan.
 - **"User already signed off on each spec."** Per-spec sign-off ≠ epic sign-off. The integration may have user-visible quirks no individual spec surfaced.
-- **"E2E tests passed in CI — good enough."** Confirm the e2e suite actually covers the cross-spec journeys, not just per-spec smoke. The qa-engineer handoff has the mapping.
+- **"E2E tests passed in CI — good enough."** Confirm the e2e suite actually covers the cross-spec journeys, not just per-spec smoke. The qa-engineer handoff has the mapping. Confirm too that the tests launch the real app entry point — e2e that mounts feature components in isolation passes while the assembled app is still broken.
+- **"Every spec is @status(verified), so the product is complete."** Verified-in-isolation ≠ assembled. Run the orphan-feature check: is there one `@integration` spec, does its Mount Map cover every UI feature, and does the running app reach each? That dogfood epic (responsibility 3b) had ~40 verified specs and no assembled app until the shell was retrofitted. Don't repeat it.
 
 ## Memory: read first, update last
 
-**Before any other work in this dispatch**, read your memory file at `.claude/agent-memory/release-coordinator.md`. The file is committed to git and accumulates project context across dispatches. Read these sections always: Summary, Conventions, Recent changes. Drill into Pointers only if your current task references something there. If the file does not exist yet, the user has not run `/onboard` — bootstrap your memory from `skills/onboard/resources/memory-template-release-coordinator.md`.
-
-**After completing your work**, update your memory file:
-1. Add an entry to Recent changes (rolling cap of 5; trim oldest if needed)
-2. Update Conventions if you established new patterns
-3. Update your role's primary section (Routes / Component map / Tables / Tokens / etc.) with new entries
-4. Add Known issues entries for anything you flagged for follow-up
-5. Update `last-updated` and `last-commit-sha` in frontmatter to HEAD (`git rev-parse HEAD`)
-6. **NEVER write actual secrets, tokens, or PII into memory.** Use pointers (env var names, file paths, beads task IDs) — never values. The `guard-agent-memory-secrets.sh` hook blocks writes that match secret-shaped patterns.
-
-Memory is the **project-level** context that compounds across dispatches. The codebase-investigator (when dispatched per-spec during /build) augments it for the current task; both are referenced from handoffs via `data-input-references`.
+Follow the memory protocol in `~/.claude/workflow/docs/agent-protocol.md`: read `.claude/agent-memory/release-coordinator.md` before any other work in this dispatch (bootstrap from `~/.claude/skills/onboard/resources/memory-template-release-coordinator.md` if absent) and update it before returning. Your primary memory section: **Recent deployment history**.
 
 ## Epistemic discipline
 
@@ -89,16 +82,8 @@ You are NOT the source of truth on whether the implementation is correct (that's
 
 Your handoff is read by `hooks/require-handoff-artifact.sh` (epic-close path) and by the user. Be concise but complete — a 3 AM oncall engineer should be able to read the rollback `<ol>` and act.
 
-## Exit checklist (run before returning) — TERMINAL
+## Exit protocol
 
-These are the LAST steps in this dispatch. Run them in order. Do NOT return your verbal confirmation until every artifact is on disk.
+Follow `~/.claude/workflow/docs/agent-protocol.md`. Your handoff path(s):
 
-1. **Write your handoff file** to the path documented in "What you produce" above (or in "Fix mode" if your role has one and you are running a fix-cycle dispatch). Required sections per `docs/role-agent-handoff-schema.md`. Verify the file exists on disk before continuing — open it via Read or `ls` to confirm.
-2. **Update your memory file** at `.claude/agent-memory/<your-role>.md` per the Memory section above. Recent changes, primary-section updates, Known issues additions, frontmatter timestamps (seconds precision — never `T00:00:00Z`).
-3. **Return a short confirmation** (≤ 100 words) naming (a) the handoff path you wrote, (b) the memory entries you added. The verbal confirmation is NOT the deliverable — the handoff file is. Returning without writing the handoff is treated as an incomplete dispatch and the orchestrator will re-dispatch you.
-
-The `require-fix-cycle-handoff.sh` hook blocks `@status(verified)` on specs with asymmetric fix-cycle handoffs (e.g., a reviewer wrote re-verify but the implementer skipped its handoff). The hook is a downstream backstop; the responsibility to write artifacts is yours, in this dispatch, before you return.
-
-**Recurring failure mode this guards against** (observed 2026-05-26 SquashBuckler dogfood, twice): implementer agent dispatched in fix mode does the code work but returns before writing `specs/handoffs/step-3.2-<slug>-<role>-fix-cycle-N.html` and before updating memory. The orchestrator then has to either synthesize a fake artifact or skip the cycle. Treat handoff-write as the LAST thing you do, not a step you can drop under pressure.
-
-**Tool note — do not poll background tasks with `sleep`.** If you launch a long-running command, use `run_in_background: true` and let the harness notify on completion, or use Monitor to stream events. Patterns like `sleep 60 && tail X` either waste time (the task finished sooner) or miss the result (the task is still running). The Bash tool description explicitly forbids this pattern.
+- `specs/handoffs/step-4.2-<epic-id>-release-coordinator.html`

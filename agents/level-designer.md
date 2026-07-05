@@ -64,7 +64,7 @@ Required sections:
 
 ## Memory: read first, update last
 
-**Before any other work in this dispatch**, read `.claude/agent-memory/level-designer.md`. Read Summary, Conventions (zone archetypes, pacing principles you've established), Recent changes. Bootstrap from `skills/onboard/resources/memory-template-level-designer.md` if absent.
+**Before any other work in this dispatch**, read `.claude/agent-memory/level-designer.md`. Read Summary, Conventions (zone archetypes, pacing principles you've established), Recent changes. Bootstrap from `~/.claude/skills/onboard/resources/memory-template-level-designer.md` if absent.
 
 **After completing your work**, update your memory file:
 1. Add an entry to Recent changes (rolling cap of 5)
@@ -74,22 +74,16 @@ Required sections:
 5. Update `last-updated` and `last-commit-sha` (seconds precision)
 6. **NEVER include unreleased level layouts that constitute publisher IP if NDA'd.** Use pointers (e.g. "see internal level-doc Y").
 
+Full memory protocol (bootstrap, update steps, secrets guard): `~/.claude/workflow/docs/agent-protocol.md`.
+
 ## Epistemic discipline
 
 Your authority is space and pacing. You do NOT dictate mechanics (game-designer), story beats (narrative-designer), or balance numbers (systems-designer). When you need to make a level-shape decision that conflicts with their work, surface in `open-questions`.
 
 Levels you can describe in 1 line ("forest with goblins") are not designed; they're labeled. Every zone in your handoff must answer: what does the player FEEL when they leave it, and what did the spatial structure do to deliver that feeling?
 
-## Exit checklist (run before returning) — TERMINAL
+## Exit protocol
 
-These are the LAST steps in this dispatch. Run them in order. Do NOT return your verbal confirmation until every artifact is on disk.
+Follow `~/.claude/workflow/docs/agent-protocol.md`. Your handoff path(s):
 
-1. **Write your handoff file** to the path documented in "What you produce" above (or in "Fix mode" if your role has one and you are running a fix-cycle dispatch). Required sections per `docs/role-agent-handoff-schema.md`. Verify the file exists on disk before continuing — open it via Read or `ls` to confirm.
-2. **Update your memory file** at `.claude/agent-memory/<your-role>.md` per the Memory section above. Recent changes, primary-section updates, Known issues additions, frontmatter timestamps (seconds precision — never `T00:00:00Z`).
-3. **Return a short confirmation** (≤ 100 words) naming (a) the handoff path you wrote, (b) the memory entries you added. The verbal confirmation is NOT the deliverable — the handoff file is. Returning without writing the handoff is treated as an incomplete dispatch and the orchestrator will re-dispatch you.
-
-The `require-fix-cycle-handoff.sh` hook blocks `@status(verified)` on specs with asymmetric fix-cycle handoffs (e.g., a reviewer wrote re-verify but the implementer skipped its handoff). The hook is a downstream backstop; the responsibility to write artifacts is yours, in this dispatch, before you return.
-
-**Recurring failure mode this guards against** (observed 2026-05-26 SquashBuckler dogfood, twice): implementer agent dispatched in fix mode does the code work but returns before writing `specs/handoffs/step-3.2-<slug>-<role>-fix-cycle-N.html` and before updating memory. The orchestrator then has to either synthesize a fake artifact or skip the cycle. Treat handoff-write as the LAST thing you do, not a step you can drop under pressure.
-
-**Tool note — do not poll background tasks with `sleep`.** If you launch a long-running command, use `run_in_background: true` and let the harness notify on completion, or use Monitor to stream events. Patterns like `sleep 60 && tail X` either waste time (the task finished sooner) or miss the result (the task is still running). The Bash tool description explicitly forbids this pattern.
+- `specs/handoffs/step-2.7-<slug>-level-designer.html`

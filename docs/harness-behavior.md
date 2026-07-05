@@ -1,0 +1,20 @@
+# Harness behavior — empirically verified
+
+Tested against **Claude Code v2.1.201** on 2026-07-04 (Phase 0 of workflow-8b2; method: in-session subagent probes + nested headless sessions with stdin-logging hooks in a scratch project). Re-verify this table when the installed version changes; several answers contradict the published docs of the same era.
+
+| # | Question | Answer (v2.1.201, observed) | Evidence |
+|---|---|---|---|
+| 1 | Do settings.json PreToolUse hooks fire for tool calls made **inside subagents**? | **YES.** A dispatched subagent's `Write` of `specs/canary-sub.md` with `@status(verified)` was blocked by `require-handoff-artifact.sh` with the identical message the parent session received. | Subagent probe, block message quoted in workflow-64t comment. Note: the subagents doc claimed settings hooks fire only on SubagentStart/Stop — observed behavior disagrees; trust this table. |
+| 2 | Is `AskUserQuestion` available inside subagents? | **NO.** Not in the loaded or deferred tool list; explicit invocation returns: `Error: No such tool available: AskUserQuestion. AskUserQuestion is not available inside subagents. Complete the task with the tools provided and return findings to the orchestrator.` | Subagent probe, verbatim error. |
+| 3 | Is the `Skill` tool available inside subagents? | **YES** (probe invoked `gitsum` successfully). | Subagent probe. |
+| 4 | UserPromptSubmit payload field for the prompt text | **`prompt`** (keys: `cwd, hook_event_name, permission_mode, prompt, prompt_id, session_id, transcript_path`). There is **no `text` field** — hooks reading `.text` receive nothing. | logs/ups.jsonl capture. |
+| 5 | Are `matcher` values honored on UserPromptSubmit entries? | **NO — ignored.** A hook registered with `"matcher": "wwiwo"` fired on a prompt that did not contain "wwiwo". UserPromptSubmit hooks run on **every** prompt; prompt filtering must happen inside the script. | logs/ups-matcher.jsonl has entries from both test runs. |
+| 6 | How is hook-emitted context delivered to the model? | Only via **`{"hookSpecificOutput": {"hookEventName": ..., "additionalContext": ...}}`**. A top-level `{"additionalContext": ...}` object is **silently dropped** — the model saw canary `CANARY-WRAPPED-52807` and never saw `CANARY-TOPLEVEL-73194`. | Nested-session canary test. `_common.sh` currently emits the dropped form; every advisory hook is therefore mute until fixed (T3.3). |
+| 7 | PreToolUse input field | **`tool_input`** (plus `tool_name`, `tool_use_id`, `effort`). No `tool.input` nesting. | logs/pre.jsonl. |
+| 8 | PostToolUse result field | **`tool_response`** (for Bash: a dict `{stdout, stderr, interrupted, isImage, noOutputExpected}`). None of `tool_result` / `tool.result` / `result` / `output` exist — the four names `molecule-autoclose-warn.sh` and `verifier-return.sh` currently try. Note it is a **dict**, so `json_get`'s scalar `print()` yields a Python repr; extract subfields explicitly. | logs/post.jsonl. |
+| 9 | Is a session identifier available to hooks? | **YES — `session_id`** is present in every payload (UserPromptSubmit, PreToolUse, PostToolUse), plus `cwd`. Session-and-project-keyed state (T3.2) can be built directly from these. | All log captures. |
+| 10 | Does one session's SessionStart wipe another session's hook state? | **YES — observed live.** Running two nested headless sessions truncated the parent session's `session-reads.txt` and `session-agents.log` to 0 bytes (five same-day agent dispatches erased). Confirms evaluation finding H5. | `wc -l ~/.claude/hooks/state/*` immediately after the nested runs. |
+
+Additional incidental observations:
+- Hook block messages containing literal `\n` sequences render as raw backslash-n text in the error the model sees (`require-handoff-artifact.sh` message) — use real newlines.
+- `require-handoff-artifact.sh` demanded a data-architect handoff for a plain `@layer(api)` spec with no data surface — live confirmation of evaluation finding M10 (resolved by decision D2: gate on `@touches-data`).

@@ -492,37 +492,39 @@ echo "@layer(api) @trivial" > "$FC_TRIVIAL_SPEC"
 got=$(mkpayload_edit "$FC_TRIVIAL_SPEC" "@layer(api) @trivial @status(verified)" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
 assert "@trivial spec bypasses fix-cycle hook" "allow" "$got"
 
-# workflow-myr: every agent has the terminal Exit checklist section
-# Total agent count is now 16 (11 original + 5 game-design)
+# workflow-myr (updated for T2.3 boilerplate extraction): every agent carries the
+# shared Exit protocol section pointing at docs/agent-protocol.md
 TOTAL=$((TOTAL+1))
-agents_with_exit=$(grep -lE '^## Exit checklist \(run before returning\)' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+agents_with_exit=$(grep -lE '^## Exit protocol' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
 if [ "$agents_with_exit" -eq 16 ]; then
-    echo "  PASS  all 16 agents have terminal Exit checklist section"
+    echo "  PASS  all 16 agents have the Exit protocol section"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 16 agents with Exit checklist, found $agents_with_exit (workflow-myr regression)"
+    echo "  FAIL  expected 16 agents with Exit protocol section, found $agents_with_exit (workflow-myr regression)"
     FAIL=$((FAIL+1))
 fi
 
-# workflow-myr: exit checklist names handoff-write as terminal step
+# workflow-myr: the shared protocol doc exists and names handoff-write as the deliverable
 TOTAL=$((TOTAL+1))
-agents_with_terminal_handoff=$(grep -lE 'TERMINAL|handoff file is NOT|verbal confirmation is NOT the deliverable' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_terminal_handoff" -ge 16 ]; then
-    echo "  PASS  all agents emphasize handoff-as-deliverable in exit checklist"
+if [ -f "$WORKFLOW_DIR/docs/agent-protocol.md" ] \
+   && grep -qE 'handoff.*deliverable|deliverable.*handoff' "$WORKFLOW_DIR/docs/agent-protocol.md" \
+   && grep -q 'fix-cycle-N' "$WORKFLOW_DIR/docs/agent-protocol.md"; then
+    echo "  PASS  agent-protocol.md exists with handoff-as-deliverable + fix-cycle naming"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  only $agents_with_terminal_handoff/16 agents emphasize terminal handoff-write"
+    echo "  FAIL  docs/agent-protocol.md missing or lacks handoff-as-deliverable / fix-cycle naming (workflow-myr regression)"
     FAIL=$((FAIL+1))
 fi
 
-# workflow-1bo: sleep-poll anti-pattern guidance present in agent prompts
+# workflow-1bo: sleep-poll anti-pattern guidance lives in the shared protocol doc,
+# and every agent points at that doc from its Exit protocol section
 TOTAL=$((TOTAL+1))
-agents_with_sleep_warn=$(grep -lE 'do not poll background tasks with .sleep' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_sleep_warn" -eq 16 ]; then
-    echo "  PASS  all 16 agents carry sleep-poll anti-pattern warning"
+agents_with_pointer=$(grep -lF 'docs/agent-protocol.md' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+if grep -qiE 'sleep' "$WORKFLOW_DIR/docs/agent-protocol.md" 2>/dev/null && [ "$agents_with_pointer" -eq 16 ]; then
+    echo "  PASS  sleep-poll rule in agent-protocol.md; all 16 agents reference the doc"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 16 agents with sleep-poll warning, found $agents_with_sleep_warn (workflow-1bo regression)"
+    echo "  FAIL  sleep-poll rule missing from agent-protocol.md or only $agents_with_pointer/16 agents reference it (workflow-1bo regression)"
     FAIL=$((FAIL+1))
 fi
 
@@ -1338,6 +1340,60 @@ else
 fi
 
 echo ""
+echo "=== require-feature-mounted.sh (workflow-0v4 / 2026-05-31 SquashBuckler disconnected-demo-cards) ==="
+# Anti-orphan gate: a @layer(ui|full-stack) feature in a >=2-UI-spec epic
+# cannot reach @status(verified) unless it is in an @integration spec's
+# Mount Map (or imported by the app entry). Fixtures live in their own specs/.
+FM="$TMP/fmproj/specs"
+mkdir -p "$FM"
+# Integration spec with a Mount Map naming widget-alpha
+cat > "$FM/shell.md" <<'EOF'
+@status(approved)
+@integration
+@layer(ui)
+# Feature: App Shell
+## Mount Map
+| Feature | Mounts as | Where |
+| widget-alpha | AlphaPanel | sidebar |
+EOF
+printf '@status(approved)\n@layer(ui)\n# Widget Alpha\n' > "$FM/widget-alpha.md"
+printf '@status(approved)\n@layer(ui)\n# Widget Beta\n'  > "$FM/widget-beta.md"
+printf '@status(approved)\n@layer(api)\n# Backend Svc\n' > "$FM/backend-svc.md"
+
+# A: orphan UI feature (not in Mount Map, not imported) -> BLOCK
+got=$(mkpayload_edit "$FM/widget-beta.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted blocks orphan UI feature" block "$got"
+
+# B: UI feature listed in Mount Map -> ALLOW
+got=$(mkpayload_edit "$FM/widget-alpha.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted allows feature in Mount Map" allow "$got"
+
+# C: @mount-skip override on orphan -> ALLOW
+got=$(mkpayload_edit "$FM/widget-beta.md" "@status(verified) @layer(ui) @mount-skip(rendered inside widget-alpha)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted honors @mount-skip" allow "$got"
+
+# D: the @integration spec itself -> ALLOW (it is the host, not a mountee)
+got=$(mkpayload_edit "$FM/shell.md" "@status(verified) @integration @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted exempts the integration spec" allow "$got"
+
+# E: backend (@layer api) spec -> ALLOW (not user-facing)
+got=$(mkpayload_edit "$FM/backend-svc.md" "@status(verified) @layer(api)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted ignores non-UI specs" allow "$got"
+
+# F: no @integration spec in a >=2-UI-spec epic -> BLOCK (NO integration spec)
+FM2="$TMP/fmproj2/specs"; mkdir -p "$FM2"
+printf '@status(approved)\n@layer(ui)\n# Alpha\n' > "$FM2/alpha.md"
+printf '@status(approved)\n@layer(ui)\n# Beta\n'  > "$FM2/beta.md"
+got=$(mkpayload_edit "$FM2/beta.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted blocks when no integration spec exists" block "$got"
+
+# G: single-UI-spec epic (scope exempt) -> ALLOW
+FM3="$TMP/fmproj3/specs"; mkdir -p "$FM3"
+printf '@status(approved)\n@layer(ui)\n# Solo\n' > "$FM3/solo.md"
+printf '@status(approved)\n@layer(api)\n# Api\n'  > "$FM3/api.md"
+got=$(mkpayload_edit "$FM3/solo.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted exempts single-UI-spec epic" allow "$got"
+
 echo "=== hook output-shape regressions (catches the 2026-05-26 dogfood finding) ==="
 # Regression: every blocking hook must either exit 2 (with stderr message) OR
 # emit the modern hookSpecificOutput JSON schema with permissionDecision=deny.
@@ -1350,6 +1406,7 @@ BLOCKING_HOOKS=(
     "require-handoff-artifact.sh"
     "require-investigation-findings.sh"
     "require-layer-tag.sh"
+    "require-feature-mounted.sh"
     "require-release-handoff.sh"
     "require-ui-tests.sh"
     "require-verifier-agents.sh"

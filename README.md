@@ -122,6 +122,10 @@ New tags introduced by the role-agent system, documented fully in [skills/design
 | `@layer(api\|ui\|full-stack\|cli\|infra)` | Deterministic skip signal — drives which role agents apply per spec | Required on every spec |
 | `@trivial` | Typo/rename/config-only change — permits skipping architecture docs + feasibility research | Optional |
 | `@touches-data` | Spec adds/modifies/migrates persistent data — triggers `data-architect` even on UI specs | Optional |
+| `@integration` | Marks the one spec that assembles all features into the running product. Carries a `## Mount Map`. Required when an epic has ≥2 `@layer(ui\|full-stack)` specs | Conditional |
+| `@mounts-in(<integration-slug>)` | On a UI feature: declares which `@integration` spec mounts it | Required on UI features in ≥2-UI-spec epics |
+| `@mount-skip(reason)` | Override: this UI feature is mounted by another feature (not the shell), or otherwise legitimately not in the Mount Map | Optional |
+| `@integration-skip(reason)` | Override: this epic legitimately has no single assembly owner despite ≥2 UI specs | Optional |
 
 ### Parallel-dispatch pattern
 
@@ -195,6 +199,7 @@ bash tests/role-agent-smoke.sh
 │   ├── require-design-ui.sh            # Blocks @status(approved) on UI specs without mockups
 │   ├── require-handoff-artifact.sh     # Blocks @status(verified) without required role-agent handoffs
 │   ├── require-investigation-findings.sh # Blocks @status(implemented) without ## Investigation Findings
+│   ├── require-feature-mounted.sh      # Blocks UI-feature verification when not in the @integration Mount Map (anti-orphan)
 │   ├── require-layer-tag.sh            # Blocks @status(approved|implemented|verified) without @layer(...)
 │   ├── require-release-handoff.sh      # Blocks bd close <epic> without release-coordinator handoff
 │   ├── require-ui-tests.sh             # Blocks UI-spec verification without a referencing test file
@@ -387,6 +392,7 @@ Hooks are organized by event. Most are deterministic gates that block on missing
 | `require-verifier-agents.sh` | Blocks `@status(verified)` without a `hyperpowers:code-reviewer` Agent dispatch in this session referencing the spec slug. Override: `@verifier-skip(reason)`. |
 | `block-status-during-verification.sh` | Blocks status edits + `bd close` while a Continuous Verifier is in-flight |
 | `require-ui-tests.sh` | Blocks `@status(verified)` on UI specs without a test file referencing the slug. Auto-detects Playwright/Cypress/Detox/Vitest/Jest-RTL/XCUITest. Override: `@ui-test-skip(reason)`. |
+| `require-feature-mounted.sh` | Blocks `@status(verified)` on a `@layer(ui\|full-stack)` feature in a ≥2-UI-spec epic unless it is in an `@integration` spec's `## Mount Map` (or imported by the app entry). Prevents the disconnected-demo-cards failure. Override: `@mount-skip(reason)` / `@integration-skip(reason)`. |
 | `require-handoff-artifact.sh` | (experimental branch) Blocks `@status(verified)` without the role-agent handoff chain present + schema-compliant. Override: `@handoff-skip(role: reason)`. Auto-allows `@trivial`. |
 | `claim-vs-call-audit.sh` | Blocks `@status(verified)` on UI-bearing specs unless all 5 `/impeccable` gates fired via the Skill tool in this session for that slug. Override: `@gate-skip(<gate>: reason)`. |
 
