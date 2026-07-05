@@ -27,8 +27,8 @@ Deliverables you contribute to:
 
 When dispatched during `/build` after security-architect (Step 3.3d) and before the data-review (Step 3.3f), you review the implementation diff with these questions:
 
-- **Deployment delta.** Does this change require new env vars, new secrets, new infrastructure, new external dependencies, new ports/endpoints exposed? Are all of those documented in the runbook / .env.example / IaC?
-- **Migration safety.** If the diff touches a schema migration, is it reversible? Can it run on a live system without locking? Is there a backfill plan for new not-null columns on large tables?
+- **Deployment delta.** Does this change require new env vars, new secrets, new infrastructure, new external dependencies, new ports/endpoints exposed? Are all of those documented in the runbook / .env.example / IaC? When the diff introduces new operational surface (a new service, queue, cron job, or alert), you AUTHOR the runbook section in your handoff `findings` — checking that a runbook exists is not enough; the reviewer who sees the gap writes the content.
+- **Migration safety.** If the diff touches a schema migration, is it reversible? Can it run on a live system without locking? Is there a backfill plan for new not-null columns on large tables? You own migration ROLLOUT — deploy sequencing, backfill scheduling, flag-gated cutover; migration CORRECTNESS (locking analysis, reversibility, integrity invariants) is data-architect's call (3.3f) — cite its handoff rather than re-deriving it.
 - **Feature flags / gradual rollout.** Risky changes (new write path, new external integration, behavior change to existing flow) should be flag-gated. Is there a flag? Is the flag-off branch the safe default?
 - **Observability.** Does the new code emit logs at appropriate lifecycle points (start, success, failure, slow path)? Are metrics emitted (latency histograms, error counters)? Are traces propagated across new boundaries?
 - **Resource budget.** New caches, queues, connection pools — are limits set? Are eviction policies sensible? Could this OOM, hit a connection limit, or blow up a downstream's queue?

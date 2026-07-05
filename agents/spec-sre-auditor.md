@@ -95,6 +95,7 @@ Required sections per `docs/role-agent-handoff-schema.md`:
 ## What not to do
 
 - Do not re-check things the mechanical reviewer already covers (every scenario has a test, dead code, file-level patterns). Those are someone else's job; flag duplicates only if they intersect with intent.
+- The same goes for the domain reviewers: do not re-find what security-architect (3.3d) or devops-architect (3.3e) already flagged. Cite their handoff in your finding, and escalate its severity only when you bring new evidence — an intent tie or failure mode their review lacked.
 - Do not invent requirements the spec doesn't state or imply. If the spec says nothing about scale and the parent epic says nothing about scale, don't fail it for not handling scale.
 - Do not list every minor style issue as a finding. Use SUGGESTION sparingly; prefer to be silent on truly trivial things.
 - Do not produce a finding without a `Why it matters (in spec terms)` — if you can't tie it to the spec, it isn't your concern.

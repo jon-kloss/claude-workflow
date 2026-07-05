@@ -1,10 +1,10 @@
 ---
 name: workflow-retrospective
-description: Use after completing an epic or periodically to analyze workflow effectiveness - queries beads for incident logs and metrics, triages incidents by pattern frequency, drafts actual skill file edits for recurring patterns, saves findings to memory
+description: Use after completing an epic or periodically to analyze workflow effectiveness - queries beads for incident logs and metrics, reads the gate override ledger, triages incidents by pattern frequency, drafts actual skill file edits for recurring patterns, saves findings to memory
 ---
 
 <skill_overview>
-Analyze workflow effectiveness by querying beads history for both incident logs and quantitative metrics. Triage incidents by pattern frequency — recurring patterns (2+ incidents of the same category+skill) get drafted skill file edits, one-offs get prose proposals. Data-driven feedback loop for continuous workflow improvement.
+Analyze workflow effectiveness from three data sources: beads history (closed epics, tasks, structured comments), `WORKFLOW INCIDENT:` / `VERIFICATION FAILURE:` comments, and the gate override ledger at `~/.claude/hooks/state/override-audit.log`. Triage incidents by pattern frequency — recurring patterns (2+ of the same category+skill) get drafted skill file edits, one-offs get prose proposals — and cluster overrides by gate: any gate overridden ≥3 times in the analysis window is automatically a finding. Data-driven feedback loop for continuous workflow improvement.
 </skill_overview>
 
 <rigidity_level>
@@ -14,27 +14,27 @@ HIGH FREEDOM - Adapt analysis depth to available data. The 5-step process (Gathe
 <quick_reference>
 | Step | Action | Output |
 |------|--------|--------|
-| 1. Gather | Query beads for closed epics, tasks, incident + verification comments | Raw data (metrics + incidents) |
-| 2. Analyze/Triage | Calculate metrics, triage incidents by category+skill frequency | Findings + triage results |
-| 3. Report | Present structured metrics report + incident triage | Dashboard + triage table |
+| 1. Gather | Query beads (epics, tasks, incident + verification comments) AND read the override ledger | Raw data |
+| 2. Analyze/Triage | Metrics, incident triage by category+skill, override clustering by hook+tag | Findings + triage results |
+| 3. Report | Structured metrics report + incident triage + override pressure | Dashboard + triage tables |
 | 4. Propose | Draft skill edits for recurring patterns, prose for one-offs | Drafted edits + proposals |
-| 5. Save | Persist key findings to auto-memory | Cross-session awareness |
+| 5. Save | `bd remember` durable insights + log the `RETROSPECTIVE:` marker comment | Cross-session awareness + next-retro baseline |
 
-**Metrics tracked:**
-- First-pass verification rate (target: >80%)
-- Rework rate (target: <20%)
-- Error type distribution (pattern, edge case, integration, stale assumption)
-- Phase effectiveness (which /build steps catch which errors)
+**Metrics (one line each):**
+- First-pass verification rate = epics with zero `VERIFICATION FAILURE:` comments ÷ closed epics. Target >80%.
+- Rework rate = implementation tasks with ≥1 fix-cycle or reopen ÷ closed `--type task` beads. Target <20%.
+- Error type distribution = `VERIFICATION FAILURE:` comments bucketed by `Category:`.
+- Step effectiveness = failures bucketed by `Source:` step (registry §2 IDs — see the attribution table in Step 2).
+- Override pressure = ledger lines in the window clustered by hook+tag; ≥3 for one gate = automatic finding.
 
-**Incident triage:**
-- Recurring (2+ same category+skill) → drafted SKILL.md edits
-- One-off → prose proposal + "monitor — may become a pattern"
+**Triage thresholds:**
+- Incidents: 2+ of same category+skill → RECURRING → drafted SKILL.md edit. 1 → ONE-OFF → prose + monitor.
+- Overrides: ≥3 of same hook+tag in the window → automatic finding (either the gate is wrong or the process is).
 </quick_reference>
 
 <when_to_use>
-- After completing any epic (as part of /build Phase 4: Close)
+- /build Phase 4 (Step 4.8: Retrospective Check) invokes this when EITHER (a) ≥3 epics have closed since the last retro — the `bd list --status closed --type epic` count vs. the closed-epic count recorded in the last `RETROSPECTIVE:` comment — or (b) ≥10 `WORKFLOW INCIDENT:` comments have accumulated since the last retro. Under `--auto`, /build does not run it: it notes the pending retro in its closing summary; run this skill manually then.
 - On demand when you want to review workflow effectiveness
-- Periodically during active use (suggested: weekly)
 - When noticing recurring error patterns across projects
 
 **Don't use when:**
@@ -47,41 +47,46 @@ HIGH FREEDOM - Adapt analysis depth to available data. The 5-step process (Gathe
 
 ## Step 1: Gather Data
 
-**Announce:** "I'm using the workflow-retrospective skill to analyze workflow effectiveness."
-
 ### Query beads for completed work and incidents
 
 ```bash
-# List all closed epics
+# Closed epics (bd list hides closed by default; --status closed shows them)
 bd list --status closed --type epic
 
-# For each epic, show details and comments
-bd show [epic-id]
-bd comments [epic-id]
+# For each epic: details and comments (WORKFLOW INCIDENT / VERIFICATION FAILURE / FIX CYCLE)
+bd show <epic-id>
+bd comments <epic-id>
 
-# List all closed tasks with their epic parents
-bd list --status closed --type feature
+# Closed work items. The pipeline creates TWO bead types — count both, correctly labeled:
+bd list --status closed --type task      # implementation tasks (/build Step 3.1) — the rework denominator
+bd list --status closed --type feature   # Tests-gate beads (/design, one per epic) — completeness check, NOT work items
 
-# Check for a workflow-incidents issue (incidents logged outside of epics)
-bd search "Workflow Incidents"
-# If found, read its comments too:
-bd comments [workflow-incidents-id]
+# The workflow-incidents issue (incidents logged with no active epic).
+# --status all is required: bd search excludes closed issues by default.
+bd search "Workflow Incidents" --status all
+bd comments <workflow-incidents-id>      # includes prior RETROSPECTIVE: markers
 ```
+
+### Read the override ledger
+
+`~/.claude/hooks/state/override-audit.log` records every validated gate override the system has allowed — pipe-delimited, one per line:
+
+```
+timestamp | hook | tag | role | matched-kind | reason
+```
+
+This is the highest-signal bypass record the system keeps: every line is a moment a deterministic gate was told "no" with a reason that passed validation. The log is global across projects by design (the hook layer lives in `~/.claude/hooks/`) — filter to the analysis window by timestamp, attribute lines to this project via the reason text and role field where possible, and note unattributable lines rather than silently dropping them.
 
 ### Data points to collect per epic
 
 For each closed epic, record:
 - **Epic ID and name**
-- **Task count** — how many tasks were created
+- **Task count** — implementation tasks created (plus the one Tests-gate bead)
 - **Verification failures** — count of `VERIFICATION FAILURE:` comments
 - **Workflow incidents** — count of `WORKFLOW INCIDENT:` comments, with full text
-- **Rework instances** — tasks that were reopened or had multiple fix-verify cycles
-- **Error types found** — categorize from review comments:
-  - Pattern mismatch (code doesn't match existing codebase conventions)
-  - Edge case (boundary conditions, null handling, error states)
-  - Integration failure (pieces don't connect correctly)
-  - Stale assumption (based on outdated information)
-- **Step that caught the error** — investigation, TDD, verification, code review
+- **Rework instances** — tasks reopened or with fix-cycle handoffs (`FIX CYCLE` comments / `-fix-cycle-<N>` handoff files)
+- **Error types found** — from the `Category:` field: test-failure, test-quality, code-review, spec-coverage, criteria-gap, integration, sre-intent-audit
+- **Step that caught the error** — from the `Source:` field, mapped to registry §2 step IDs (attribution table in Step 2)
 
 ### Parse incident comments
 
@@ -95,9 +100,10 @@ For each `WORKFLOW INCIDENT:` comment, extract the structured fields:
 
 ### Handle missing data gracefully
 
-- If no `WORKFLOW INCIDENT:` comments exist: note it — either no incidents occurred (good!) or incident logging wasn't active yet. Recommend using the detect-correction hook going forward.
-- If no `VERIFICATION FAILURE:` comments exist: either verification always passed first try or failures weren't logged.
-- If no comments at all: recommend enabling incident logging and verification failure comments.
+- No `WORKFLOW INCIDENT:` comments: either no corrections happened, or they weren't confirmed for logging. The `detect-correction.sh` hook only DETECTS correction-shaped user messages and prompts for logging — Claude writes the comment via `bd comments add` after the user confirms, so a declined prompt leaves no trace here.
+- No `VERIFICATION FAILURE:` comments: either verification always passed first try or failures weren't logged.
+- Empty override ledger for the window: no gate pressure — itself a data point (the gates aren't being fought).
+- No comments at all: recommend enabling incident logging and verification failure comments.
 
 ---
 
@@ -105,31 +111,37 @@ For each `WORKFLOW INCIDENT:` comment, extract the structured fields:
 
 ### Calculate quantitative metrics
 
-```markdown
-## Metrics Calculation
+One line each — see quick_reference for the formulas: first-pass verification rate (>80%), rework rate (<20%, denominator is `--type task` beads only — the Tests-gate `feature` beads never rework and inflate nothing but the illusion of health), error type distribution, step effectiveness, override pressure.
 
-**First-Pass Verification Rate:**
-= (epics with 0 verification failures) / (total closed epics) * 100
-Target: >80%
+### Step effectiveness — attribute to the current pipeline
 
-**Rework Rate:**
-= (tasks with rework) / (total closed tasks) * 100
-Target: <20%
+Bucket each failure by its `Source:` field using registry §2 step IDs, so errors are attributable to the role that caught them (and the roles that should have caught them earlier):
 
-**Error Type Distribution:**
-Count each error type across all epics. Present as percentage:
-- Pattern mismatch: X%
-- Edge cases: X%
-- Integration: X%
-- Stale assumptions: X%
+| Step | Name | Owner |
+|---|---|---|
+| 3.1 | investigation | codebase-investigator (+ data-architect when `@touches-data`) |
+| 3.2 | TDD | backend-engineer / frontend-engineer + continuous verifier |
+| 3.3a–3.3c | test-suite / test-effectiveness / code-review | hyperpowers mechanical agents |
+| 3.3d | security-review | security-architect |
+| 3.3e | devops-review | devops-architect |
+| 3.3f | data-review | data-architect |
+| 3.3g | qa-verification | qa-engineer |
+| 3.3h | sre-intent-audit | spec-sre-auditor |
+| 3.3i | fix-cycle | implementers + re-verifying reviewers |
+| 3.4 | user sign-off | user |
+| 4.1 | epic e2e | qa-engineer |
+| 4.2 | release coordination | release-coordinator |
 
-**Step Effectiveness:**
-For each error caught, which /build step caught it?
-- Step 3.1 (Investigate): X errors
-- Step 3.2 (TDD): X errors
-- Step 3.3 (Verify): X errors
-- Code Review Agent: X errors
-```
+"Verification" is not one bucket. A failure caught at 3.3g that 3.3b should have caught is attributable — say so. The point of per-step attribution is knowing which reviewer earns its dispatch and which upstream step is leaking.
+
+### Cluster the override ledger
+
+Group the window's ledger lines by hook+tag. **Any gate overridden ≥3 times in the analysis window is automatically a retro finding** — no judgment call. The reasons column usually tells you which diagnosis applies:
+
+- **Near-identical reasons** → the gate is wrong: it misfires on a legitimate pattern. Draft the hook/rule fix.
+- **Varied reasons** → the process is wrong: the legitimate path routinely requires a bypass. Draft the skill edit that makes the path legal without an override.
+
+Also flag any single spec or epic that accounts for most of the window's overrides — that's a work-item smell, not a gate smell.
 
 ### Triage incidents by pattern frequency
 
@@ -143,7 +155,6 @@ Group all `WORKFLOW INCIDENT:` comments by **category + skill** pair:
 | missing-rule + build | 3 | RECURRING | Draft skill edit |
 | edge-case + design | 2 | RECURRING | Draft skill edit |
 | skill-gap + build | 1 | ONE-OFF | Prose proposal + monitor |
-| process-violation + none | 1 | ONE-OFF | Prose proposal + monitor |
 ```
 
 **Classification rules:**
@@ -152,12 +163,11 @@ Group all `WORKFLOW INCIDENT:` comments by **category + skill** pair:
 
 ### Identify trends
 
-Look for:
-- **Improving metrics** — verification rate going up? Note what's working.
-- **Declining metrics** — rework rate increasing? Identify why.
+- **Improving/declining metrics** — verification rate and rework rate against the previous retro's numbers (in the last `RETROSPECTIVE:` marker and memory).
 - **Recurring incident patterns** — same category+skill keeps appearing? The skill needs updating.
-- **Step gaps** — if code review catches most errors, earlier steps need strengthening.
-- **Incident vs. metric correlation** — do incident categories match error type distribution?
+- **Step gaps** — if late steps (3.3g–3.3i, 4.1) catch most errors, earlier steps need strengthening.
+- **Override pressure trend** — a gate newly under pressure, or pressure that vanished after a fix, is direct evidence about a rule's fit.
+- **Incident vs. metric correlation** — do incident categories match the error type distribution?
 
 ---
 
@@ -169,7 +179,7 @@ Present findings in this structured format:
 ## Workflow Retrospective Report
 **Date:** [current date]
 **Project:** [project name]
-**Period:** [first closed epic date] to [last closed epic date]
+**Period:** [last RETROSPECTIVE: marker date (or first closed epic)] to [now]
 **Epics analyzed:** [count]
 
 ### Key Metrics
@@ -181,24 +191,35 @@ Present findings in this structured format:
 | Avg tasks per epic | X | - | - |
 | Most common error type | [type] | - | - |
 | Workflow incidents logged | X | - | - |
+| Gate overrides in window | X | - | - |
 
 ### Error Type Distribution
 
 | Error Type | Count | % | Trend |
 |-----------|-------|---|-------|
-| Pattern mismatch | X | X% | [UP/DOWN/STABLE] |
-| Edge cases | X | X% | [UP/DOWN/STABLE] |
-| Integration | X | X% | [UP/DOWN/STABLE] |
-| Stale assumptions | X | X% | [UP/DOWN/STABLE] |
+| [category from VERIFICATION FAILURE comments] | X | X% | [UP/DOWN/STABLE] |
 
 ### Step Effectiveness
 
-| Step | Errors Caught | % of Total |
-|------|--------------|------------|
-| Step 3.1: Investigate | X | X% |
-| Step 3.2: TDD | X | X% |
-| Step 3.3: Verify | X | X% |
-| Code Review Agent | X | X% |
+| Step | Owner | Errors Caught | % of Total |
+|------|-------|--------------|------------|
+| 3.1 investigation | codebase-investigator | X | X% |
+| 3.2 TDD | engineers + continuous verifier | X | X% |
+| 3.3a–3.3c mechanical | hyperpowers agents | X | X% |
+| 3.3d security-review | security-architect | X | X% |
+| 3.3e devops-review | devops-architect | X | X% |
+| 3.3f data-review | data-architect | X | X% |
+| 3.3g qa-verification | qa-engineer | X | X% |
+| 3.3h sre-intent-audit | spec-sre-auditor | X | X% |
+| 3.3i fix-cycle | implementers + re-verifiers | X | X% |
+| 4.1 epic e2e | qa-engineer | X | X% |
+| 4.2 release coordination | release-coordinator | X | X% |
+
+### Override Pressure
+
+| Hook + Tag | Count | Reason pattern | Diagnosis |
+|---|---|---|---|
+| [hook + tag] | X | [near-identical / varied — summarize] | [gate is wrong / process is wrong] |
 
 ### Incident Triage
 
@@ -217,28 +238,29 @@ Present findings in this structured format:
 
 ## Step 4: Propose Adjustments
 
-Based on the data, propose **specific, actionable** adjustments. Two tracks: **incident-driven** (from triage) and **metrics-driven** (from quantitative analysis).
+Based on the data, propose **specific, actionable** adjustments. Two tracks: **incident-driven** (from triage + override clustering) and **metrics-driven** (from quantitative analysis).
 
 ### Track 1: Incident-Driven Proposals (from triage)
 
 #### Recurring patterns (2+ incidents) → Draft actual skill edits
 
-For each RECURRING incident pattern, draft the actual text that would be added to the relevant skill file. Map the incident category to the type of edit:
+For each RECURRING incident pattern — and each gate at ≥3 overrides — draft the actual text that would be added to (or removed from) the relevant skill or hook. Map the incident category to the type of edit:
 
 | Category | Edit Type | Where in SKILL.md |
 |---|---|---|
 | skill-gap | New step, section, or guidance | `<the_process>` section |
-| missing-rule | New critical rule + rationalization | `<critical_rules>` section |
+| missing-rule | New critical rule | `<critical_rules>` section |
 | wrong-default | Modify existing behavior/rule | Relevant section |
 | edge-case | New edge case entry | `<edge_cases>` section |
-| process-violation | New rationalization or strengthened enforcement | `<critical_rules>` rationalizations |
+| process-violation | Strengthened enforcement (usually a hook change) | `<critical_rules>` / hook |
+| override pressure (≥3 on one gate) | Hook fix (gate is wrong) OR skill edit (process is wrong) | Per the Step 2 diagnosis |
 
 **Draft format:**
 
 ```markdown
 ### Drafted Edit: [skill]/SKILL.md — [section]
 
-**Based on:** [N] incidents of [category] for /[skill]
+**Based on:** [N] incidents of [category] for /[skill]  (or: [N] overrides of [tag] on [hook])
 **Incidents:**
 - [incident 1 short description]
 - [incident 2 short description]
@@ -248,14 +270,12 @@ For each RECURRING incident pattern, draft the actual text that would be added t
 [The actual text to add to the SKILL.md file]
 ```
 
-**Rationale:** [Why this addition addresses the recurring pattern]
+**Rationale:** [Why this addresses the recurring pattern]
 ```
 
 Present ALL drafts to the user for review before any changes are applied.
 
 #### One-off incidents → Prose proposals
-
-For each ONE-OFF incident, describe the incident and suggest monitoring:
 
 ```markdown
 ### One-Off: [short description]
@@ -271,11 +291,12 @@ For each ONE-OFF incident, describe the incident and suggest monitoring:
 |---------|-------------------|
 | Pattern mismatches >30% of errors | Strengthen investigation: require codebase-investigator for all specs |
 | Edge cases >30% of errors | Strengthen SRE refinement coverage |
-| Integration failures >20% of errors | Add integration test requirement to Tests task template |
-| Stale assumptions >10% of errors | Add memory verification step: check memory claims against current code before using |
-| First-pass verification <60% | TDD not catching enough: review test quality |
+| Integration failures >20% of errors | Strengthen connectivity/e2e coverage (3.3g matrices, 4.1 CUJs) |
+| Stale assumptions >10% of errors | Verify agent-memory claims against current code before use |
+| First-pass verification <60% | TDD not catching enough: review test quality (3.3b findings) |
 | Rework rate >30% | Tasks too vague: increase SRE refinement coverage |
-| Code review catches >50% of errors | Earlier steps need strengthening — errors should be caught sooner |
+| Late steps (3.3g–3.3i, 4.1) catch >50% of errors | Earlier steps are leaking — errors should die sooner; strengthen 3.1/3.2/3.3a–3.3c |
+| One gate overridden ≥3 times | Automatic finding: draft the hook fix or the skill edit — never "try harder next time" |
 | Verification always passes first try | Either process is excellent OR verification is too lenient — check test quality |
 
 ### Present combined proposals
@@ -283,7 +304,7 @@ For each ONE-OFF incident, describe the incident and suggest monitoring:
 ```markdown
 ## Proposed Adjustments
 
-### Priority 1: Drafted Skill Edits (Recurring Patterns)
+### Priority 1: Drafted Skill Edits (Recurring Patterns + Override Pressure)
 [Each drafted edit from Track 1, with full text]
 
 ### Priority 2: Metrics-Driven Adjustments
@@ -297,147 +318,48 @@ For each ONE-OFF incident, describe the incident and suggest monitoring:
 
 ---
 
-## Step 5: Save to Memory
+## Step 5: Save to Memory and Log the Marker
 
-Save key findings to auto-memory for cross-session awareness:
+**1. Persist durable insights** via `bd remember` (the SessionStart memory policy):
 
-```markdown
-# Memory entry: workflow-retrospective-[date]
-
-## What to save:
-- Current verification pass rate
-- Top error type and trend
-- Recurring incident patterns found (category+skill pairs)
-- Any approved workflow adjustments (drafted edits that user approved)
-
-## What NOT to save:
-- Raw data (query beads fresh next time)
-- Detailed metrics (recalculate from current data)
-- Unapproved proposals (may become stale)
-- One-off incidents (they're in beads comments — query fresh)
+```bash
+bd remember "<insight>"                      # auto-generated key
+bd remember "<insight>" --key <stable-key>   # when the next retro should update it in place
 ```
 
-Write to the auto-memory system:
-- Type: `project`
-- Name: `workflow-retrospective-[date]`
-- Description: "Workflow effectiveness analysis from [date] - [key finding]"
+Save: current verification pass rate + trend, top error type, recurring category+skill pairs, gates under override pressure, approved adjustments. Do NOT save: raw data, detailed metrics, unapproved proposals, one-off incidents — query fresh next time.
+
+**2. Log the `RETROSPECTIVE:` marker** — this is what /build Step 4.8 reads to decide when the next retro is due:
+
+```bash
+bd comments add <workflow-incidents-id> "RETROSPECTIVE: [date] — closed-epic count at retro: [M]; epics analyzed: [N]; incidents triaged: [K]; override findings: [J]"
+```
+
+If no `workflow-incidents` issue exists yet, create it first (the same issue the incident logger uses):
+
+```bash
+bd create --title="Workflow Incidents" --type=task --description="Collects workflow incidents when no epic is active. Retrospective reads these and logs RETROSPECTIVE: markers here."
+```
 
 </the_process>
 
 <examples>
 
 <example>
-<scenario>First retrospective with limited data (2 completed epics)</scenario>
+<scenario>Rework rate computed against the wrong denominator</scenario>
 
 <code>
-bd list --status closed --type epic
-# Returns: 2 closed epics
-
-Claude: "Only 2 completed epics. Metrics will have wide confidence intervals."
-# Skips trend analysis (not enough data points)
-# Still generates report with available data
-# Notes: "Insufficient data for trends. Run again after 5+ epics."
+bd list --status closed --type feature
+# Returns 3 beads — the one Tests-gate bead per epic. Rework rate: 0/3 = 0% → "MET"
+# Report ships: "TDD is working; no action needed."
 </code>
 
 <why_it_fails>
-This is actually correct behavior. The skill adapts to available data rather than
-fabricating trends from insufficient data points.
+The pipeline creates implementation work items with `--type task` (/build Step 3.1); `--type feature` matches only the one-per-epic Tests-gate beads, which never rework. The denominator is 3 gate beads instead of the ~20 implementation tasks, five of which went through multiple fix-cycles — so the metric reads 0% while the true rate is ~24%, and every downstream conclusion is built on a measurement of the wrong population. Bonus failure in the same session: `bd search "Workflow Incidents"` without `--status all` returned nothing because the issue had been closed, so the incident triage ran on zero incidents and reported "no patterns."
 </why_it_fails>
 
 <correction>
-No correction needed. This demonstrates the HIGH FREEDOM rigidity level -
-the 5-step process runs, but analysis depth adapts to data availability.
-Report clearly notes data limitations and recommends when to re-run.
-</correction>
-</example>
-
-<example>
-<scenario>Retrospective finds recurring missing-rule incidents for /build</scenario>
-
-<code>
-# Step 1: Gather — finds 3 WORKFLOW INCIDENT comments
-# All have Category: missing-rule, Skill: build
-
-# Step 2: Triage — groups as RECURRING (3 of same category+skill)
-
-# Step 4: Propose — drafts actual critical rule text:
-### Drafted Edit: build/SKILL.md — critical_rules
-
-**Based on:** 3 incidents of missing-rule for /build
-**Incidents:**
-- "Closed task while verification agents were still running"
-- "Updated @status before code review returned"
-- "Said 'I'll wait' then proceeded anyway"
-
-**Proposed addition:**
-14. **Never update status while verification is in flight** -> Do NOT update
-`@status` or close beads tasks while verification agents are still running.
-
-**Rationalization to add:**
-- "I'll update the status while waiting for verification" -> NO. Status
-updates depend on verification results. Wait.
-
-**Rationale:** All 3 incidents show the same pattern of acting before
-verification completes. A critical rule with rationalization prevents this.
-</code>
-
-<why_it_fails>
-N/A - this is the correct analysis. The recurring pattern is identified,
-actual rule text is drafted, and it's presented for user approval.
-</why_it_fails>
-
-<correction>
-No correction needed. The drafted edit is specific, the rationalization
-addresses the observed pattern, and the user reviews before application.
-</correction>
-</example>
-
-<example>
-<scenario>Retrospective finds a mix of recurring and one-off incidents</scenario>
-
-<code>
-# Step 2 Triage:
-# - missing-rule + build: 2 incidents → RECURRING
-# - edge-case + design: 2 incidents → RECURRING
-# - skill-gap + build: 1 incident → ONE-OFF
-
-# Step 4 output:
-## Priority 1: Drafted Skill Edits
-
-### Drafted Edit: build/SKILL.md — critical_rules
-**Based on:** 2 incidents of missing-rule for /build
-**Proposed addition:**
-15. **Always log investigation findings** -> Even if findings seem
-obvious, the log is for post-mortem later, not for you now.
-**Rationalization:**
-- "Investigation findings are obvious" -> The log is for future
-  retrospectives and session recovery, not for you in the moment.
-
-### Drafted Edit: design/SKILL.md — edge_cases
-**Based on:** 2 incidents of edge-case for /design
-**Proposed addition:**
-## Existing spec has mixed statuses
-When decomposing a spec that is partially implemented (@status(implemented)),
-assign status per-scenario: completed behaviors get @status(implemented),
-incomplete behaviors get @status(approved). Ask the user to confirm via
-AskUserQuestion before finalizing status assignments.
-
-## Priority 3: Monitor
-- skill-gap + build: "No guidance for handling flaky tests during
-  verification." Monitor — may become a pattern.
-  No skill edit yet (insufficient signal).
-</code>
-
-<why_it_fails>
-N/A - this correctly separates recurring patterns (draft edits) from
-one-offs (prose + monitor). The edge-case draft maps to the edge_cases
-section with concrete text, while the one-off gets only a prose note.
-</why_it_fails>
-
-<correction>
-No correction needed. The threshold of 2+ incidents before drafting edits
-prevents overreacting to one-time issues while still tracking them.
-Both critical_rules and edge_cases draft formats are demonstrated.
+Query both types, labeled: `bd list --status closed --type task` for implementation tasks (the rework denominator) and `bd list --status closed --type feature` for Tests gates (a per-epic completeness check, not a rework population). Recompute: 5/21 = 24% → ABOVE target → check which reviewers' findings drove the fix-cycles via the Step Effectiveness table. And always `bd search "Workflow Incidents" --status all` — closed issues are excluded by default.
 </correction>
 </example>
 
@@ -447,68 +369,58 @@ Both critical_rules and edge_cases draft formats are demonstrated.
 ## Rules That Have No Exceptions
 
 1. **All 5 steps must run** — Gather, Analyze/Triage, Report, Propose, Save. No skipping.
-2. **Data-driven only** — Every finding must reference specific beads data. No subjective assessments.
+2. **Data-driven only** — Every finding must reference specific beads data or ledger lines. No subjective assessments.
 3. **Don't modify skills directly** — Propose adjustments (including drafted edits) for user approval. Never auto-apply changes to /design, /build, or hook files.
 4. **Adapt to data availability** — Limited data = limited conclusions. Don't fabricate trends from 2 data points.
-5. **Save to memory** — Findings without persistence have no lasting impact.
-6. **No hardcoded paths** — Must work in any project with beads initialized.
-7. **Recurring = 2+ incidents** — Only draft skill edits for patterns with 2+ incidents of the same category+skill. One-offs get prose proposals only.
-8. **Read both incident types** — Always collect both `WORKFLOW INCIDENT:` and `VERIFICATION FAILURE:` comments. Also check for a `workflow-incidents` issue.
-9. **Drafted edits must be complete** — When drafting a skill edit, include the actual text, not just a description. "Add a rule about X" is not a drafted edit; the rule text itself is.
+5. **Recurring = 2+ incidents** — Only draft skill edits for patterns with 2+ incidents of the same category+skill (or a gate at ≥3 overrides). One-offs get prose proposals only.
+6. **Read all three sources** — `WORKFLOW INCIDENT:` comments (epics + the workflow-incidents issue), `VERIFICATION FAILURE:` comments, AND the override ledger. Skipping the ledger discards the system's most honest record of where its gates chafe.
+7. **Drafted edits must be complete** — Include the actual text, not just a description. "Add a rule about X" is not a drafted edit; the rule text is.
+8. **Always log the `RETROSPECTIVE:` marker** — Without it, /build Step 4.8 cannot compute "epics since last retro" and the trigger degrades to firing on every closed epic.
 
 ## Common Rationalizations
 
-- "Not enough data to run retrospective" → Run with available data, note limitations, set target for re-run.
-- "Everything seems fine, skip the analysis" → Metrics may reveal hidden issues. Run the numbers.
-- "I'll save to memory later" → Save now. Later doesn't happen.
-- "This adjustment is obviously right, I'll just apply it" → Propose, don't apply. User approves changes.
 - "One incident is enough to draft a rule" → No. One-offs get prose proposals. Wait for the pattern to recur.
-- "No incidents logged, so skip the triage" → Still run the triage step — note the absence and recommend enabling incident logging.
+- "This adjustment is obviously right, I'll just apply it" → Propose, don't apply. User approves changes.
+- "Not enough data to run retrospective" → Run with available data, note limitations, set a re-run target.
+- "The override ledger is mostly other projects' noise" → It is global by design. Filter by window and attribute lines; don't skip the read.
+- "No incidents logged, so skip the triage" → Run it anyway — note the absence and check whether detect-correction prompts are being declined.
 </critical_rules>
 
 <verification_checklist>
 Before completing retrospective:
 
-- [ ] Step 1: Queried beads for closed epics, tasks, and comments
-- [ ] Step 1: Collected all `WORKFLOW INCIDENT:` comments (from epics and workflow-incidents issue)
+- [ ] Step 1: Queried closed epics, `--type task` implementation tasks, AND `--type feature` Tests gates (labeled separately)
+- [ ] Step 1: Collected `WORKFLOW INCIDENT:` comments from epics and the workflow-incidents issue (`bd search "Workflow Incidents" --status all`)
 - [ ] Step 1: Collected all `VERIFICATION FAILURE:` comments
-- [ ] Step 2: Calculated quantitative metrics (pass rate, rework rate, error distribution, step effectiveness)
-- [ ] Step 2: Triaged incidents by category+skill frequency
-- [ ] Step 2: Classified as RECURRING (2+) or ONE-OFF
-- [ ] Step 3: Generated structured report with metrics tables AND incident triage table
-- [ ] Step 4: Drafted actual skill edit text for each recurring pattern
-- [ ] Step 4: Wrote prose proposals for one-off incidents
-- [ ] Step 4: Presented all proposals to user for approval (not auto-applied)
-- [ ] Step 5: Saved key findings to auto-memory
-- [ ] No subjective claims without data evidence
-- [ ] No direct modifications to skill files or hooks
-- [ ] Data limitations clearly noted if insufficient history
+- [ ] Step 1: Read the override ledger, filtered to the analysis window
+- [ ] Step 2: Calculated the five metrics; attributed failures to registry §2 steps/roles
+- [ ] Step 2: Triaged incidents by category+skill; clustered overrides by hook+tag (≥3 = automatic finding)
+- [ ] Step 3: Report includes metrics, step effectiveness, override pressure, and incident triage tables
+- [ ] Step 4: Drafted actual edit text for each recurring pattern and each over-pressured gate; prose for one-offs
+- [ ] Step 4: Presented all proposals for approval (not auto-applied)
+- [ ] Step 5: Saved insights via `bd remember`; logged the `RETROSPECTIVE:` marker comment
+- [ ] No subjective claims without data evidence; data limitations noted if history is thin
 </verification_checklist>
 
 <integration>
 **This skill is called by:**
-- /build Phase 4 (Close) — after epic completion
+- /build Phase 4 (Step 4.8: Retrospective Check) — when EITHER ≥3 epics have closed since the last `RETROSPECTIVE:` comment or ≥10 `WORKFLOW INCIDENT:` comments have accumulated. Under `--auto`, /build notes the pending retro in its closing summary instead of running it.
 - User on demand (periodic review)
 
 **This skill reads:**
-- `bd comments [epic-id]` — for `WORKFLOW INCIDENT:` and `VERIFICATION FAILURE:` comments
-- `bd search "Workflow Incidents"` — for incidents logged outside of epics
-- `bd list`, `bd show` — for quantitative data on closed epics and tasks
+- `bd comments <epic-id>` — `WORKFLOW INCIDENT:` and `VERIFICATION FAILURE:` comments
+- `bd search "Workflow Incidents" --status all` — the cross-epic incident issue (closed issues are excluded without `--status all`)
+- `bd list --status closed --type epic|task|feature`, `bd show` — quantitative data
+- `~/.claude/hooks/state/override-audit.log` — the gate override ledger
 
 **This skill proposes changes to:**
-- skills/design/SKILL.md (new rules, edge cases, steps)
-- skills/build/SKILL.md (new rules, rationalizations, edge cases)
-- skills/workflow-retrospective/SKILL.md (self-improvement)
-- Hook configurations (enforcement rules)
+- skills/design/SKILL.md, skills/build/SKILL.md, skills/workflow-retrospective/SKILL.md (self-improvement)
+- Hook configurations (enforcement rules — especially gates under override pressure)
 
 **Changes are PROPOSED, not applied.** User must approve before implementation.
 
 **This skill works with:**
-- `detect-correction.sh` hook — logs `WORKFLOW INCIDENT:` comments that this skill reads
-- /build skill — logs `VERIFICATION FAILURE:` comments that this skill reads
-
-**Recommended cadence:**
-- After every epic completion (lightweight, 5 min)
-- Weekly during active use (full analysis, 15 min)
-- Monthly for trend analysis across projects (comprehensive, 30 min)
+- `detect-correction.sh` hook — detects correction-shaped user messages and prompts; Claude logs the `WORKFLOW INCIDENT:` comment via `bd comments add` after the user confirms
+- /build skill — logs `VERIFICATION FAILURE:` comments and reads this skill's `RETROSPECTIVE:` markers in Step 4.8
+- The gate hooks + `hooks/_validate_override_reason.py` — append the override-ledger lines this skill clusters
 </integration>
