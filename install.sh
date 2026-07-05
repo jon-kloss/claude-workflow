@@ -272,6 +272,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         },
         {
           "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/require-feature-mounted.sh"
+        },
+        {
+          "type": "command",
           "command": "bash ${HOME}/.claude/hooks/require-investigation-findings.sh"
         },
         {

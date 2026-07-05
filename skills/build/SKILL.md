@@ -79,6 +79,8 @@ MIXED:
 12. Pause and direct to /respec if spec needs changes, or /design if new specs are needed
 13. VERIFICATION comment logged on epic before closing
 14. Playwright e2e tests for all CUJs before epic close (multi-spec UI epics)
+15. Feature mounted in the product: a `@layer(ui|full-stack)` spec cannot reach `@status(verified)` unless it is in the `@integration` spec's `## Mount Map` (or imported by the app entry). Enforced by `require-feature-mounted.sh`. Override: `@mount-skip(reason)` (≥2 UI-spec epics)
+16. Epic e2e drives the REAL app entry point and asserts every Mount Map row is reachable — no isolated-component or deep-link tests (Step 4.1)
 </quick_reference>
 
 <gherkin_spec_reference>
@@ -283,6 +285,8 @@ For each spec in build order (auto-iterates):
 | `infra` | backend-engineer | security + devops |
 
 For full-stack specs, `@status(verified)` requires BOTH layers implemented and wired. `require-handoff-artifact.sh` enforces this.
+
+For `@layer(ui|full-stack)` specs in an epic with ≥2 user-facing specs, `@status(verified)` ALSO requires the feature to be **mounted in the product** — listed in the `@integration` spec's `## Mount Map` (or imported by the app entry). A feature whose component exists and whose own tests pass but which the running app never mounts is a disconnected demo card, not a verified feature (the SquashBuckler failure). `require-feature-mounted.sh` enforces this at the `@status(verified)` write; the frontend-engineer must wire the feature into the shell as part of implementation, not leave it standalone. Override (sub-component mounted by another feature): `@mount-skip(reason)`.
 
 **Dispatch codebase-investigator:**
 
@@ -735,18 +739,24 @@ After all specs are `@status(verified)`:
 
 The agent collects every `## Critical User Journeys` row across the epic's specs, authors one e2e test per unique journey, runs the suite against the running app, and reports cross-spec coverage. Same framework detection logic as Step 3.3d.
 
+**The assembled-app rule.** Every e2e test MUST start from the application's **real entry point** (the integration spec's app shell / entry route) and reach each feature through **real navigation** — clicking the actual nav, opening the actual route. Tests that deep-link straight to a feature page or mount a feature component in isolation do NOT count: they re-verify the demo card, not the assembled product. This is the gap that let SquashBuckler ship 40 features that each passed in isolation while the app reached none of them. The QA agent must also assert **Mount Map reachability**: for the epic's `@integration` spec, every row in its `## Mount Map` is reachable from the entry point. Any Mount Map row that cannot be reached = CRITICAL orphan.
+
 ```
 Agent tool (subagent_type: qa-engineer, run_in_background: false):
 "You are running Step 4.1 (epic-level e2e for cross-spec CUJs) for this epic. Read every spec's
 ## Critical User Journeys table and build a master list of UNIQUE journeys spanning multiple specs.
 Read the per-spec QA handoffs at specs/handoffs/step-3.3-*-qa-engineer.html — those cover per-spec
-behavior; you cover the cross-spec wire-together. Author one e2e file per journey at
-tests/e2e/cuj-<journey-slug>.spec.ts. Spin up the dev server and run the suite. Produce handoff at:
+behavior; you cover the cross-spec wire-together. EVERY e2e test must launch the real app entry point
+(the @integration spec's shell) and navigate to features the way a user would — no deep-linking to
+feature pages, no isolated component mounts. Also read the @integration spec's ## Mount Map and add a
+'reachability' test asserting every mapped feature is reachable from the entry point via real nav.
+Author one e2e file per journey at tests/e2e/cuj-<journey-slug>.spec.ts plus
+tests/e2e/mount-map-reachability.spec.ts. Spin up the dev server and run the suite. Produce handoff at:
   specs/handoffs/step-4.1-<epic-id>-qa-engineer.html
-Any failing CUJ is CRITICAL — surface as a blocking <aside>."
+Any failing CUJ or unreachable Mount Map row is CRITICAL — surface as a blocking <aside>."
 ```
 
-When the agent returns, verify the handoff's `acceptance-criteria` confirm every CUJ has ≥1 e2e test and all pass.
+When the agent returns, verify the handoff's `acceptance-criteria` confirm every CUJ has ≥1 e2e test, every `## Mount Map` row is reachable from the app entry point, and all pass.
 
 Log a `E2E PLAYWRIGHT TESTS: CUJ Coverage ... Verdict: PASS|FAIL` bd comment on the epic with per-journey verdicts copied from the qa-engineer handoff.
 
@@ -758,14 +768,19 @@ Any failing CUJ is **CRITICAL** — the journey represents what real users do, a
 
 **REQUIRED SUB-SKILL:** Invoke `hyperpowers:verification-before-completion` via the Skill tool to gate epic closure on fresh verification evidence.
 
-**Dispatch the release-coordinator role agent.** It performs the cross-spec coherence check, verifies every spec reached `@status(verified)` with full handoff chains, aggregates devops findings, confirms CUJ coverage, and authors the explicit rollback plan that the epic needs before `bd close`.
+**Dispatch the release-coordinator role agent.** It performs the cross-spec coherence check, verifies every spec reached `@status(verified)` with full handoff chains, aggregates devops findings, confirms CUJ coverage, runs the **orphan-feature check**, and authors the explicit rollback plan that the epic needs before `bd close`.
+
+**Orphan-feature check (blocking).** When the epic has ≥2 `@layer(ui|full-stack)` specs, exactly one must be tagged `@integration` with a `## Mount Map`, and every other UI feature must appear in that Mount Map (or carry `@mount-skip(...)`). A UI feature `@status(verified)` but absent from the Mount Map is an orphan — the epic is NOT ready to close. This is the cross-spec backstop to the per-spec `require-feature-mounted.sh` hook: the hook gates each spec at `@status(verified)`; the release-coordinator confirms the assembled set has no holes.
 
 ```
 Agent tool (subagent_type: release-coordinator, run_in_background: false):
 "You are running Step 4.2 (final verification) for epic <epic-id>. Verify all specs in the epic reached
 @status(verified) with full handoff chains. Aggregate devops-architect findings across specs. Confirm
-the qa-engineer e2e CUJ coverage is complete and passing. Author a numbered rollback plan a 3 AM
-oncall engineer could execute. Produce handoff at:
+the qa-engineer e2e CUJ coverage is complete and passing, including the Mount Map reachability test.
+Run the orphan-feature check: if ≥2 UI/full-stack specs, confirm exactly one @integration spec exists,
+its ## Mount Map covers every UI feature, and the running app reaches each (per the Step 4.1 handoff);
+any orphan is a BLOCKED. Author a numbered rollback plan a 3 AM oncall engineer could execute. Produce
+handoff at:
   specs/handoffs/step-4.2-<epic-id>-release-coordinator.html
 End with one of three verdicts: READY-TO-CLOSE, READY-WITH-CAVEATS, or BLOCKED."
 ```
@@ -964,6 +979,7 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 24. **Follow the project's API client pattern** -> Components must use the API client pattern defined in the system spec or arch.md (centralized service layer, Supabase client, etc.). No ad-hoc fetch calls that bypass the established architecture.
 25. **UI tests must assert behavior, not just rendering** -> A test that only checks "button exists" is not a UI test. Every interactive element (button, form, toggle, nav) needs a behavior assertion: press triggers handler, submit dispatches data, toggle updates state. Render-only tests are insufficient for GREEN.
 26. **Dead UI scan before verification** -> Step 3.2.6 scans for buttons with no handlers, forms with no submission, empty onPress callbacks, and console.log placeholders. Any dead interactive element is CRITICAL. Mockup code carried into implementation without functionality is a broken feature.
+27. **A UI feature is not verified until it is mounted in the product** -> In an epic with ≥2 user-facing specs, `@status(verified)` on a `@layer(ui|full-stack)` spec requires the feature to be in the `@integration` spec's `## Mount Map` and reachable from the app entry — not just passing its own tests in isolation. Wiring the feature into the shell is part of implementation. `require-feature-mounted.sh` blocks orphans; the Step 4.1 e2e drives the real entry point; the release-coordinator runs the orphan check at close. SquashBuckler shipped ~40 features verified as isolated demo cards because none of these existed — a mockup is a build step, not a deliverable.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -997,6 +1013,9 @@ bd create --title="Workflow Incidents" --type=task --description="Collects workf
 - "API integration is a separate concern from the UI spec" -> No. If the spec scenario says "client starts a workout" and the button calls a TODO function, the scenario is NOT implemented. UI specs that imply backend persistence are not done until the API calls are real.
 - "Unit tests pass so the buttons work" -> Unit tests that don't assert API calls were made are testing the wrong thing. Green tests on stub implementations prove nothing. Step 3.3f catches exactly this.
 - "E2e tests are overkill — unit tests cover everything" -> Unit tests verify each feature in isolation. E2e tests verify the assembled application. FitConnect's launch had every unit test green but no feature actually worked end-to-end. Playwright CUJ tests are MANDATORY for multi-spec UI epics.
+- "The feature's tests pass and it looks right, so it's verified" -> Not if the running app never mounts it. A component that passes its own tests but isn't reachable from the app entry is a disconnected demo card. Wire it into the `@integration` spec's shell and add it to the Mount Map before `@status(verified)`. This is the SquashBuckler failure — 40 features verified, none assembled.
+- "The e2e test renders the feature component directly, that's enough" -> No. Mounting a component in a test harness re-verifies the demo card. The Step 4.1 e2e must launch the REAL app entry and navigate to the feature the way a user does. If you can't reach it that way, it isn't in the product.
+- "We'll build the app shell that ties it together at the end" -> The shell is the `@integration` spec and it must exist from decomposition so every feature declares `@mounts-in` it and wires into it during build. "At the end" is how SquashBuckler ended up retrofitting the shell under a separate slug after 40 features were already verified in isolation.
 - "I'll write e2e tests after the epic closes" -> No. E2e tests are a Phase 4 gate. The epic cannot close without passing Playwright CUJ tests. "After" means never.
 - "The API isn't ready so I can't test integration" -> If the API is in this epic, it should be built first (spec dependencies). If it's external, mock the API at the network layer (MSW), not in the component. Either way, the integration must be verified.
 - "The API tests pass so the spec is implemented" -> If the spec describes UI scenarios ("client taps Start Workout", "trainer sees client list"), API tests alone are NOT implementation. The UI layer is missing. Check the layer detection from Step 3.1.
@@ -1060,6 +1079,7 @@ Before claiming /build is complete for a spec:
 - [ ] `/impeccable polish` final quality pass completed — or N/A (no UI)
 - [ ] Every failure logged as structured bd comment
 - [ ] API integration check passed: all interactive UI elements wired to real API calls (Step 3.3f) — or N/A (backend-only / no API)
+- [ ] Feature mounted in the product: listed in the `@integration` spec's `## Mount Map` and wired into the app entry (`require-feature-mounted.sh`) — or N/A (<2 user-facing specs) / `@mount-skip(reason)`
 - [ ] User sign-off obtained (Step 3.4) — or N/A (--auto flag)
 - [ ] Spec @status updated to @status(verified)
 - [ ] Beads task closed
@@ -1067,6 +1087,8 @@ Before claiming /build is complete for a spec:
 **Epic Close:**
 - [ ] All specs @status(verified)
 - [ ] Playwright e2e tests written for all CUJs from specs (Step 4.1) — or N/A (backend-only / CLI-only / single-spec with no UI)
+- [ ] Epic e2e drives the REAL app entry point and every `## Mount Map` row is reachable from it (Step 4.1) — or N/A (<2 user-facing specs)
+- [ ] Orphan-feature check passed: every `@layer(ui|full-stack)` spec is in the `@integration` spec's Mount Map (release-coordinator, Step 4.2) — or N/A (<2 user-facing specs)
 - [ ] Playwright e2e tests all passing
 - [ ] VERIFICATION comment logged on epic (including e2e results)
 - [ ] Tests gate task closed

@@ -1338,6 +1338,60 @@ else
 fi
 
 echo ""
+echo "=== require-feature-mounted.sh (workflow-0v4 / 2026-05-31 SquashBuckler disconnected-demo-cards) ==="
+# Anti-orphan gate: a @layer(ui|full-stack) feature in a >=2-UI-spec epic
+# cannot reach @status(verified) unless it is in an @integration spec's
+# Mount Map (or imported by the app entry). Fixtures live in their own specs/.
+FM="$TMP/fmproj/specs"
+mkdir -p "$FM"
+# Integration spec with a Mount Map naming widget-alpha
+cat > "$FM/shell.md" <<'EOF'
+@status(approved)
+@integration
+@layer(ui)
+# Feature: App Shell
+## Mount Map
+| Feature | Mounts as | Where |
+| widget-alpha | AlphaPanel | sidebar |
+EOF
+printf '@status(approved)\n@layer(ui)\n# Widget Alpha\n' > "$FM/widget-alpha.md"
+printf '@status(approved)\n@layer(ui)\n# Widget Beta\n'  > "$FM/widget-beta.md"
+printf '@status(approved)\n@layer(api)\n# Backend Svc\n' > "$FM/backend-svc.md"
+
+# A: orphan UI feature (not in Mount Map, not imported) -> BLOCK
+got=$(mkpayload_edit "$FM/widget-beta.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted blocks orphan UI feature" block "$got"
+
+# B: UI feature listed in Mount Map -> ALLOW
+got=$(mkpayload_edit "$FM/widget-alpha.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted allows feature in Mount Map" allow "$got"
+
+# C: @mount-skip override on orphan -> ALLOW
+got=$(mkpayload_edit "$FM/widget-beta.md" "@status(verified) @layer(ui) @mount-skip(rendered inside widget-alpha)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted honors @mount-skip" allow "$got"
+
+# D: the @integration spec itself -> ALLOW (it is the host, not a mountee)
+got=$(mkpayload_edit "$FM/shell.md" "@status(verified) @integration @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted exempts the integration spec" allow "$got"
+
+# E: backend (@layer api) spec -> ALLOW (not user-facing)
+got=$(mkpayload_edit "$FM/backend-svc.md" "@status(verified) @layer(api)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted ignores non-UI specs" allow "$got"
+
+# F: no @integration spec in a >=2-UI-spec epic -> BLOCK (NO integration spec)
+FM2="$TMP/fmproj2/specs"; mkdir -p "$FM2"
+printf '@status(approved)\n@layer(ui)\n# Alpha\n' > "$FM2/alpha.md"
+printf '@status(approved)\n@layer(ui)\n# Beta\n'  > "$FM2/beta.md"
+got=$(mkpayload_edit "$FM2/beta.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted blocks when no integration spec exists" block "$got"
+
+# G: single-UI-spec epic (scope exempt) -> ALLOW
+FM3="$TMP/fmproj3/specs"; mkdir -p "$FM3"
+printf '@status(approved)\n@layer(ui)\n# Solo\n' > "$FM3/solo.md"
+printf '@status(approved)\n@layer(api)\n# Api\n'  > "$FM3/api.md"
+got=$(mkpayload_edit "$FM3/solo.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
+assert "require-feature-mounted exempts single-UI-spec epic" allow "$got"
+
 echo "=== hook output-shape regressions (catches the 2026-05-26 dogfood finding) ==="
 # Regression: every blocking hook must either exit 2 (with stderr message) OR
 # emit the modern hookSpecificOutput JSON schema with permissionDecision=deny.
@@ -1350,6 +1404,7 @@ BLOCKING_HOOKS=(
     "require-handoff-artifact.sh"
     "require-investigation-findings.sh"
     "require-layer-tag.sh"
+    "require-feature-mounted.sh"
     "require-release-handoff.sh"
     "require-ui-tests.sh"
     "require-verifier-agents.sh"

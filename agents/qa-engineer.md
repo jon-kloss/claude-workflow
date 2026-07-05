@@ -122,9 +122,11 @@ After every spec in the epic is at `@status(verified)`:
 
 1. **Collect CUJs.** Read the `## Critical User Journeys` table from every spec. Build a master CUJ list with the unique end-to-end journeys (e.g. "Log a workout" spans auth + lists + tasks + history).
 2. **Author one e2e file per unique journey** at `tests/e2e/cuj-<journey-slug>.spec.ts`. Each file walks the journey end-to-end through the real UI: login → navigate → interact → assert final state.
-3. **Use real browser actions.** Click, type, wait for network idle, assert. No bypassing the UI to call the API directly — that's integration, not e2e.
-4. **Assert on user-visible outcomes.** Text on screen, URL changes, persisted state — not internal implementation details.
-5. **Run the suite** against the running dev server. Any failing CUJ is CRITICAL — the user journey is broken even if per-spec verification was green.
+3. **Start from the REAL app entry point.** Every test launches the application at its actual entry (the `@integration` spec's app shell / root route) and reaches each feature through real navigation — clicking the actual nav, opening the actual route. NEVER deep-link straight to a feature page and NEVER mount a feature component in isolation: that re-verifies the demo card, not the assembled product. This is the exact gap that let SquashBuckler ship 40 features that each passed alone while the running app reached none of them.
+4. **Assert Mount Map reachability.** Read the epic's `@integration` spec's `## Mount Map`. Author `tests/e2e/mount-map-reachability.spec.ts` that, starting from the entry point, navigates to and asserts the presence of EVERY mapped feature. Any Mount Map row you cannot reach from the entry point is a CRITICAL orphan — report it; do not quietly skip it.
+5. **Use real browser actions.** Click, type, wait for network idle, assert. No bypassing the UI to call the API directly — that's integration, not e2e.
+6. **Assert on user-visible outcomes.** Text on screen, URL changes, persisted state — not internal implementation details.
+7. **Run the suite** against the running dev server. Any failing CUJ or unreachable Mount Map row is CRITICAL — the journey/feature is broken for the user even if per-spec verification was green.
 
 ## What you produce
 
@@ -156,6 +158,8 @@ Required sections:
   - Any per-spec QA finding that resurfaced in the cross-spec journey (e.g., a connectivity gap that only manifests when the journey arrives at this screen with state X)
 - **acceptance-criteria** —
   - Every CUJ in every epic spec has ≥1 e2e file
+  - Every e2e file launches the real app entry point (no isolated-component mounts, no deep-links): `data-check="grep -L '<entry-route-or-shell>' tests/e2e/cuj-*.spec.ts"` returns nothing
+  - Every `## Mount Map` row in the `@integration` spec is reachable from the entry point (mount-map-reachability.spec.ts passes)
   - All e2e tests pass
 - **open-questions** — Cross-spec scenarios needing PO disposition.
 
@@ -172,6 +176,8 @@ Optional `<aside data-severity="critical" data-blocks-next-step="true">` for fai
 - **"I'll write tests but skip running them."** No. The running is the verification. Tests that pass in your head don't count.
 - **"Pixel-diff is the right comparison."** Only when the spec is tagged `@visual-pixel-diff`. Otherwise it's flaky on subpixel rendering and you lose signal. Structural diff is the default.
 - **"E2E is just running the unit tests in a browser."** No. E2E uses real navigation, real network, real DOM events. Unit-tests-in-a-browser is a Vitest browser-mode test, not e2e.
+- **"I'll render the feature component in the test and drive it."** That re-verifies the isolated demo card. Launch the real app entry and navigate to the feature the way a user does. If you can only reach it by mounting it directly, it isn't in the product — report it as an orphan.
+- **"Every CUJ passes, so the epic is covered."** Check the Mount Map too. A feature can have no CUJ row yet still be a promised part of the product. Walk every Mount Map entry from the entry point; an unreachable one is a CRITICAL orphan even if no CUJ touches it.
 
 ## Memory: read first, update last
 

@@ -199,6 +199,25 @@ When the agent returns, read its handoff. Verify:
 
 If the decomposition has issues (cycles, missing tags, unclear seams), dispatch again with the specific concern — do NOT proceed.
 
+### Integration spec (BLOCKING for multi-feature user-facing products)
+
+Decomposition optimizes for **independence** — that is the right instinct for seams, and the wrong instinct for the product. Independent features that no spec ever assembles ship as a launchpad of disconnected demo cards: each one builds, tests, and verifies in isolation, and the running app reaches none of them. This is the SquashBuckler dogfood failure (2026-05-31): ~40 UI features all reached `@status(verified)` and the app shell that mounts them was bolted on afterwards under a separate slug — a rescue, not a plan.
+
+**Rule.** When the decomposition contains **≥2 specs tagged `@layer(ui|full-stack)`**, it MUST include exactly one **integration spec**:
+
+- Tagged `@integration` (and `@layer(ui)` or `@layer(full-stack)`).
+- `@depends-on` **every** user-facing feature spec.
+- Carries a `## Mount Map` section — a table with one row per UI feature: `| Feature spec | Mounts as (component) | Where (route / region / nav entry) |`. This is the assembly contract: every feature has a declared home in the running product.
+- Owns the application's single entry point and primary navigation.
+
+And **every** `@layer(ui|full-stack)` feature spec MUST carry `@mounts-in(<integration-spec-slug>)` (or, for a sub-component another feature mounts, `@mount-skip(mounted by <feature>: reason)`).
+
+A UI feature with no row in the Mount Map and no `@mounts-in` is an **orphan** — a decomposition error, not an acceptable outcome. The `require-feature-mounted.sh` hook blocks `@status(verified)` on orphan UI features during /build; catching it here, at decomposition, is far cheaper.
+
+**Exempt (no integration spec, no skip tag needed):** epics with <2 user-facing specs (single-UI-feature, CLI-only, API-only, library, infra-only). For VS Code-extension-style products where independent commands *are* the product, the extension host IS the integration spec — commands `@mounts-in(extension-shell)`.
+
+**Override (rare — document why this epic has no single assembly owner):** `@integration-skip(<reason>)` on the affected specs.
+
 ## Step 2.7: Per-spec Game Design (when applicable)
 
 **Dispatch level-designer, narrative-designer, and systems-designer in PARALLEL** for each spec, when `.claude/game-context.md` exists. These three designers all read the game-designer handoff and produce orthogonal deliverables (space, story, math).
@@ -315,6 +334,7 @@ mkdir -p specs
 - `@status(draft)` on all new specs
 - `## Critical User Journeys` section required on all user-facing Standard and Complex specs — lists which end-to-end journeys this feature participates in, the steps within this feature, and the full journey path. Exempt: Simple specs (typo fixes, renames) and non-user-facing work (pure API-only with no UI consumer in this epic, CLI tools, cron jobs, infra).
 - `## Interaction Map` section required on all full-stack specs (specs with BOTH API endpoints AND UI elements) — maps every interactive UI element (button, form, toggle, nav) to its API endpoint, HTTP method, and expected result. This table becomes the wiring checklist for /build Steps 3.2.5 and 3.2.6. Exempt: API-only specs, UI-only specs with no backend, Simple specs.
+- **Integration spec required for ≥2 user-facing specs** (see Step 2.5 "Integration spec"). Exactly one spec tagged `@integration`, depending on every UI feature, carrying a `## Mount Map`; every UI feature tagged `@mounts-in(<integration-slug>)`. Without it, features ship as disconnected demo cards. Exempt: <2 user-facing specs.
 - Technical Context section with API contracts, data structures, integration points (for non-trivial features)
 - Scenarios cover happy path, error cases, and edge cases discovered during questioning
 - For greenfield: the complete set of specs must be sufficient to rebuild the entire application
@@ -590,6 +610,7 @@ Proposed fix: [optional — if the fix is obvious, note it]"
 15. **CUJ coverage analysis for multi-spec user-facing designs** -> After generating specs (when there are multiple user-facing specs), trace every CUJ end-to-end across all specs. Any journey step without a covering spec is a MISSING SPEC. Generate it before proceeding to reality check.
 16. **Greenfield requires minimum 3 questioning rounds** -> A greenfield project description is a starting point, not a specification. Scope & Architecture → Feature Deep-Dive → Integration & Flows. All completeness gate categories must be covered before generating specs.
 17. **Drill down relentlessly** -> Every answer spawns follow-up questions. "Standard auth" is not an answer. "React Native" is not an answer. Push until you have enough detail to write code. Vague answers produce vague specs that produce broken implementations.
+18. **Integration spec required for multi-feature user-facing products** -> When decomposition has ≥2 `@layer(ui|full-stack)` specs, exactly one spec tagged `@integration` must own assembly: it depends-on every UI feature, carries a `## Mount Map`, and owns the app entry + nav. Every UI feature is tagged `@mounts-in(<integration-slug>)`. CUJ coverage (lesson 15) finds missing *journey-step* specs; the integration spec guarantees the found specs are actually *assembled into one reachable product*. Skipping it is the SquashBuckler failure: 40 features verified in isolation, app shell retrofitted. Plan it at decomposition, not as a rescue.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
@@ -616,6 +637,9 @@ Proposed fix: [optional — if the fix is obvious, note it]"
 - "We have enough specs, the user described 4 features" -> CUJ tracing might reveal 3 missing specs that connect those features. "Enough specs" is determined by CUJ coverage, not by counting features.
 - "CUJ analysis is overkill for this project" -> The FitConnect launch had buttons that did nothing because no one traced the full user journey. 5 minutes of CUJ analysis prevents hours of rework.
 - "I'll trace the journeys mentally" -> Write them down. Mental tracing misses non-obvious steps (navigation, loading states, error recovery). The CUJ table is the tool.
+- "Each feature is independent, so no integration spec is needed" -> Independence is a seam property, not a product property. Independent features still have to be mounted into one app a user can open and navigate. ≥2 UI features => one `@integration` spec with a Mount Map, or you ship demo cards (SquashBuckler).
+- "The app shell is just another UI feature, I'll add it later" -> The shell is the assembly contract for everything else; it must exist at decomposition so every feature can declare `@mounts-in` it. Adding it after features are built means retrofitting mounts and re-verifying — exactly the rescue this rule prevents.
+- "We have a system.md feature map, that covers assembly" -> system.md *describes* features; it is not a verified mount contract. The `@integration` spec's Mount Map is checked by a hook at `@status(verified)` and by e2e at epic close. Prose is not a gate.
 - "The user's description is detailed enough for greenfield" -> No greenfield description is ever detailed enough. The user describes the VISION, not the SPECIFICATION. 3+ rounds of drilling converts vision into spec-ready detail.
 - "One round of questions is sufficient" -> For a typo fix, yes. For greenfield, one round produces specs with 30% of the needed detail. Round 2 catches data model gaps. Round 3 catches integration gaps. All three are required.
 - "I don't want to annoy the user with too many questions" -> Users are far more annoyed by broken implementations than by thorough questioning. 10 minutes of questions prevents 10 hours of rework.
@@ -646,6 +670,7 @@ Before claiming /design is complete:
 - [ ] All specs tagged with `@status(approved)` (after reality check)
 - [ ] Dependency integrity verified (all @depends-on/@blocks/@parallel-risk reference existing specs)
 - [ ] CUJ coverage analysis completed: every journey step has a covering spec — or skipped (single-spec / non-user-facing)
+- [ ] Integration spec present for ≥2 user-facing specs: exactly one `@integration` spec, depends-on every UI feature, has a `## Mount Map`, every UI feature tagged `@mounts-in(<integration-slug>)` — or N/A (<2 user-facing specs) / `@integration-skip(reason)` documented
 - [ ] Reality check passed: agent pre-checked for gaps, showed dependency graph, offered re-decomposition, AND user confirmed via AskUserQuestion
 - [ ] `/design-arch` invoked and completed (arch.md + diagrams + overview.html confirmed by user) — or skipped (trivial single-spec change)
 - [ ] Beads epic created referencing spec files
