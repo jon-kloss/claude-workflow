@@ -4,10 +4,11 @@ Inter-agent and agent-to-human communication format for the workflow. Adapted fr
 
 ## File location
 
-Every role-agent invocation produces exactly one handoff file at:
+Filename grammar is owned by `docs/registry.md` §1 — that file is the authority for step
+ids, the fix-cycle suffix, and the respec namespace. In brief:
 
 ```
-specs/handoffs/<step-id>-<spec-slug>-<role-slug>.html
+specs/handoffs/step-<id>-<spec-slug>-<role-slug>[-fix-cycle-<N>].html
 ```
 
 Examples:
@@ -18,7 +19,17 @@ specs/handoffs/step-2.5-user-auth-application-architect.html
 specs/handoffs/step-3.3-checkout-security-architect.html
 ```
 
-The `step-id` is the dotted step number from the SKILL.md (e.g., `step-2.5`, `step-3.3d`). The `role-slug` matches the agent name without the `.md` extension.
+The `<id>` is one of the flat, phase-level step ids in registry §1 (`2`, `2.3`, `2.5`,
+`2.7`, `2.85`, `3.1`, `3.2`, `3.3`, `4.1`, `4.2`, `4.5`). Sub-steps within the Step 3.3
+verify pass all use `3.3` — the role disambiguates. The `role-slug` matches the agent name
+without the `.md` extension. The `-fix-cycle-<N>` suffix is spelled identically on both
+sides of a fix cycle (implementer and reviewer). /respec handoffs use the
+`respec-3-...` / `respec-4-...` namespace per registry §1.
+
+**How many handoffs per invocation:** one handoff per (invocation × spec). Most dispatches
+concern one spec and produce exactly one file. A designer dispatched across several UI
+specs in one invocation (uiux-designer, game-ui-designer) legally produces one handoff per
+spec it designed — each at its own `step-2.85-<slug>-<role>.html` path.
 
 ## Required schema
 
@@ -33,7 +44,7 @@ Hooks parse only a small set of attributes. The rest of the document is the agen
   <meta charset="utf-8">
   <meta data-from-role="application-architect">
   <meta data-spec-slug="user-auth">
-  <meta data-step="design.2.5-decomposition">
+  <meta data-step="2.5">
   <meta data-produced-at="2026-05-25T14:32:11Z">
   <meta data-input-references="specs/handoffs/step-2-user-auth-product-owner.html">
   <title>Application Architect — Decomposition: user-auth</title>
@@ -47,9 +58,16 @@ Required `<meta>` attributes:
 |---|---|---|
 | `data-from-role` | role-slug | Matches an agent file in `agents/`. Hook verifies. |
 | `data-spec-slug` | spec slug | The spec this handoff is about. Matches a file in `specs/`. |
-| `data-step` | dotted-step-id | Identifies which workflow step produced this. |
-| `data-produced-at` | ISO 8601 UTC | Timestamp. Hook cross-references against `session-agents.log`. |
-| `data-input-references` | space-separated paths | The handoff files this agent read. Empty if no prior handoffs (e.g. first step). |
+| `data-step` | step id | **Exactly the filename `<id>`** (e.g. `"3.3"`, `"2.5"`, `"4.2"`; `"respec-3"` / `"respec-4"` for respec handoffs). Registry §3. |
+| `data-produced-at` | ISO 8601 UTC | Timestamp of when the handoff was written. |
+| `data-input-references` | space-separated paths | The handoff files this agent read. May be empty (e.g. first step). |
+
+Conditionally required `<meta>` attributes:
+
+| Attribute | Type | Notes |
+|---|---|---|
+| `data-verdict` | per-role enum | **Required for reviewer/coordinator roles** (registry §4): `PASS \| FAIL-CRITICAL \| FAIL-SPEC-DRIFT` for security-architect, devops-architect, data-architect, qa-engineer, spec-sre-auditor; `READY-TO-CLOSE \| READY-WITH-CAVEATS \| BLOCKED` for release-coordinator. Producer/designer roles omit it. Hooks parse this meta, never prose verdict lines. |
+| `data-synthesized` | `"true"` | Present when the handoff was produced by inline synthesis (the orchestrating agent performed the role itself because the Agent tool was unavailable) rather than a real role-agent dispatch. Omit entirely for dispatched handoffs. release-coordinator reports synthesized-vs-dispatched counts across the epic in its verdict block. |
 
 Required `<html>` attribute:
 
@@ -73,7 +91,7 @@ Required `<html>` attribute:
   <section data-role="acceptance-criteria">
     <dl>
       <dt data-id="ac-1">Statement of what must be true for the next step to proceed</dt>
-      <dd data-check="grep -c '@layer(' specs/*.md == 5">PASS</dd>
+      <dd data-check="test $(grep -rl '@layer(' specs/ | wc -l) -eq 5">PASS</dd>
       ...
     </dl>
   </section>
@@ -115,7 +133,7 @@ Required `<section data-role>` blocks (all four must be present, even if empty):
 </aside>
 ```
 
-`<aside data-severity>` values: `critical | important | suggestion`. The `data-blocks-next-step="true"` flag (only valid on `critical`) signals that the next role-agent dispatch must be paused for user intervention.
+`<aside data-severity>` values: `critical | important | suggestion | spec-drift` (registry §5). `spec-drift` marks findings where the implementation is internally fine but diverges from the spec's stated intent — the fix is `/respec`, not code. The `data-blocks-next-step="true"` flag (only valid on `critical`) signals that the next role-agent dispatch must be paused for user intervention.
 
 ### Resolving a critical-blocking aside
 
@@ -172,7 +190,7 @@ Canonical routing values:
 | `devops-architect` | Infrastructure-as-code, deployment topology, runbook, alerting — anything outside the application code |
 | `product-owner` | Spec is wrong or ambiguous — scope creep, missing acceptance criteria, contradictory requirements. Triggers `/respec` or a user clarifying question. |
 
-Architect agents (security, devops, data) and quality agents (QA, sre-auditor) are **advisory** — they identify issues but always `data-route-to=` an implementer (`backend-engineer`, `frontend-engineer`, or `uiux-designer`). If you find yourself wanting to route to `security-architect`, route to whichever engineer owns the code containing the security hole and include the architect's analysis in the finding body.
+The table above governs — all six values are legal targets. Reviewers never route to another reviewer: if you find yourself wanting to route to `security-architect`, route to whichever engineer owns the code containing the security hole and include the analysis in the finding body. One documented exception: `devops-architect` may self-route **for infrastructure-as-code findings only** — for IaC, devops-architect is the implementer (see `agents/devops-architect.md`).
 
 `data-route-to` is optional on `data-severity="suggestion"` (those don't trigger a fix dispatch). It IS required on `data-severity="critical"` and `data-severity="important"` — without it, the orchestrator can't dispatch a fix.
 
@@ -217,7 +235,7 @@ Keep it readable. The user opens these in a browser to audit. If the rendered HT
   <meta charset="utf-8">
   <meta data-from-role="product-owner">
   <meta data-spec-slug="user-auth">
-  <meta data-step="design.2-socratic">
+  <meta data-step="2">
   <meta data-produced-at="2026-05-25T14:00:00Z">
   <meta data-input-references="">
   <title>Product Owner — Socratic: user-auth</title>
@@ -277,7 +295,7 @@ Keep it readable. The user opens these in a browser to audit. If the rendered HT
   <meta charset="utf-8">
   <meta data-from-role="application-architect">
   <meta data-spec-slug="user-auth">
-  <meta data-step="design.2.5-decomposition">
+  <meta data-step="2.5">
   <meta data-produced-at="2026-05-25T14:15:00Z">
   <meta data-input-references="specs/handoffs/step-2-user-auth-product-owner.html">
   <title>Application Architect — Decomposition: user-auth</title>
@@ -330,17 +348,17 @@ Keep it readable. The user opens these in a browser to audit. If the rendered HT
 
 `hooks/require-handoff-artifact.sh` validates, at minimum:
 
-1. The file at `specs/handoffs/<step>-<slug>-<role>.html` exists.
+1. The file at `specs/handoffs/step-<id>-<slug>-<role>.html` exists.
 2. The `<html>` element has `data-handoff-version="1"`.
-3. The five required `<meta data-*>` attributes are present and non-empty.
+3. The five required `<meta data-*>` attributes are present. All must be non-empty **except `data-input-references`, which may legitimately be empty** (first step, no prior handoffs).
 4. The four required `<section data-role>` blocks are present.
 5. The `data-spec-slug` value matches the slug in the filename.
 6. Every path in `data-input-references` exists on disk.
-7. The HTML is well-formed enough to parse (gracefully degrades — minor sloppiness is tolerated; broken DOM is not).
+7. For reviewer/coordinator roles: `<meta data-verdict>` is present with a value legal for that role (registry §4).
+8. The HTML is well-formed enough to parse (gracefully degrades — minor sloppiness is tolerated; broken DOM is not).
 
 Optional checks the hook MAY apply:
 
-- Cross-reference `data-produced-at` against `session-agents.log` for that role.
 - Walk `<a href>` links and verify file paths exist.
 - Reject if any `<aside data-severity="critical" data-blocks-next-step="true">` is present unresolved.
 
