@@ -674,6 +674,15 @@ If the epic added/changed features, API, UI, dependencies, or usage patterns —
 ### Step 4.7: Update Memory
 Save anything learned that would be useful in future sessions.
 
+### Step 4.8: Retrospective Check
+
+**Deterministic check — a retrospective is due when EITHER:**
+
+- **(a) ≥3 epics have closed since the last retro.** Compare the `bd list --status closed --type epic` count against the closed-epic count recorded in the last `RETROSPECTIVE:` comment on the `workflow-incidents` issue (`bd search "Workflow Incidents" --status all` to find it — closed issues are excluded without `--status all`). No `RETROSPECTIVE:` comment anywhere = every closed epic counts.
+- **(b) ≥10 `WORKFLOW INCIDENT:` comments have accumulated since the last retro** (across epic comments and the `workflow-incidents` issue).
+
+If either fires, invoke `workflow-retrospective` via the Skill tool. **--auto:** do not run the retrospective autonomously — note "Retrospective pending: [which trigger fired]" in the closing summary and let the user run it.
+
 ### Present Integration Options
 
 **REQUIRED SUB-SKILL:** Invoke `hyperpowers:finishing-a-development-branch` via the Skill tool to clean up task docs and present integration options.

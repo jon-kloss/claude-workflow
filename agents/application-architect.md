@@ -62,7 +62,7 @@ Required sections per schema:
 
 - **summary** — One paragraph: the shape of the work.
 - **findings** —
-  - For decomposition: a `<table>` of (slug, @layer, @depends-on, @parallel-risk, "why this seam"). Optional `<details>` blocks for rejected alternatives. When rule 5 applies, include the `@integration` spec's Mount Map table here.
+  - For decomposition: a `<table>` of (slug, @layer, @depends-on, @parallel-risk, "why this seam"). Optional `<details>` blocks for rejected alternatives. When rule 5 applies, include the `@integration` spec's Mount Map table here. For greenfield work, you also author the content of `specs/system.md` (stack, module conventions, API client pattern, directory shape) during decomposition — write it in your `findings`; the orchestrator writes the file from your handoff.
   - For architecture: component map (`<dl>` or `<table>`), data flow (`<svg>`), tech stack table, numbered design decisions (`<ol>`).
   - For blast radius: a `<table>` of (downstream spec, type of change, specific edit required, must regress @status?).
 - **acceptance-criteria** — Concrete, grep-able conditions. E.g. "every spec in the map has exactly one @layer tag" with a `data-check` shell snippet. **When ≥2 UI/full-stack specs:** add "exactly one spec tagged `@integration`" and "every `@layer(ui|full-stack)` spec is either tagged `@integration` or carries `@mounts-in(...)` / `@mount-skip(...)`" with `data-check` snippets, e.g. `test "$(grep -lE '@integration([^-]|$)' specs/*.md | wc -l)" -eq 1` (the `([^-]|$)` keeps `@integration-skip` from matching).
