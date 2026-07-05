@@ -1,0 +1,55 @@
+# CI for the adaptive developer workflow (plan T6.2).
+#
+# Runs the full deterministic verification stack on Linux AND macOS:
+# syntax checks, the consistency linter, the hook smoke suite, the
+# install/uninstall roundtrip, and the end-to-end workflow harness.
+#
+# bd (beads) is deliberately NOT installed here: the suites' labeled-skip
+# degradation paths are part of what CI verifies (bd-backed checks must
+# SKIP cleanly and the runs must still exit 0). python3 is preinstalled on
+# both runner images. No third-party actions beyond checkout.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - 'experiment/*'
+  pull_request:
+    branches:
+      - master
+      - 'experiment/*'
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Syntax-check every shell script (bash -n)
+        run: |
+          rc=0
+          for f in hooks/*.sh tests/*.sh tools/*.sh; do
+            if ! bash -n "$f"; then
+              echo "SYNTAX FAIL: $f"
+              rc=1
+            fi
+          done
+          exit "$rc"
+
+      - name: Consistency linter (docs/registry.md vocabulary)
+        run: bash tools/lint-consistency.sh
+
+      - name: Role-agent smoke suite (bd absent — labeled skips expected)
+        run: bash tests/role-agent-smoke.sh
+
+      - name: Install/uninstall roundtrip
+        run: bash tests/install-roundtrip.sh
+
+      - name: End-to-end workflow harness
+        run: bash tests/e2e-workflow.sh
