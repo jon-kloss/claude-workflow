@@ -492,37 +492,39 @@ echo "@layer(api) @trivial" > "$FC_TRIVIAL_SPEC"
 got=$(mkpayload_edit "$FC_TRIVIAL_SPEC" "@layer(api) @trivial @status(verified)" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
 assert "@trivial spec bypasses fix-cycle hook" "allow" "$got"
 
-# workflow-myr: every agent has the terminal Exit checklist section
-# Total agent count is now 16 (11 original + 5 game-design)
+# workflow-myr (updated for T2.3 boilerplate extraction): every agent carries the
+# shared Exit protocol section pointing at docs/agent-protocol.md
 TOTAL=$((TOTAL+1))
-agents_with_exit=$(grep -lE '^## Exit checklist \(run before returning\)' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+agents_with_exit=$(grep -lE '^## Exit protocol' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
 if [ "$agents_with_exit" -eq 16 ]; then
-    echo "  PASS  all 16 agents have terminal Exit checklist section"
+    echo "  PASS  all 16 agents have the Exit protocol section"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 16 agents with Exit checklist, found $agents_with_exit (workflow-myr regression)"
+    echo "  FAIL  expected 16 agents with Exit protocol section, found $agents_with_exit (workflow-myr regression)"
     FAIL=$((FAIL+1))
 fi
 
-# workflow-myr: exit checklist names handoff-write as terminal step
+# workflow-myr: the shared protocol doc exists and names handoff-write as the deliverable
 TOTAL=$((TOTAL+1))
-agents_with_terminal_handoff=$(grep -lE 'TERMINAL|handoff file is NOT|verbal confirmation is NOT the deliverable' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_terminal_handoff" -ge 16 ]; then
-    echo "  PASS  all agents emphasize handoff-as-deliverable in exit checklist"
+if [ -f "$WORKFLOW_DIR/docs/agent-protocol.md" ] \
+   && grep -qE 'handoff.*deliverable|deliverable.*handoff' "$WORKFLOW_DIR/docs/agent-protocol.md" \
+   && grep -q 'fix-cycle-N' "$WORKFLOW_DIR/docs/agent-protocol.md"; then
+    echo "  PASS  agent-protocol.md exists with handoff-as-deliverable + fix-cycle naming"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  only $agents_with_terminal_handoff/16 agents emphasize terminal handoff-write"
+    echo "  FAIL  docs/agent-protocol.md missing or lacks handoff-as-deliverable / fix-cycle naming (workflow-myr regression)"
     FAIL=$((FAIL+1))
 fi
 
-# workflow-1bo: sleep-poll anti-pattern guidance present in agent prompts
+# workflow-1bo: sleep-poll anti-pattern guidance lives in the shared protocol doc,
+# and every agent points at that doc from its Exit protocol section
 TOTAL=$((TOTAL+1))
-agents_with_sleep_warn=$(grep -lE 'do not poll background tasks with .sleep' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
-if [ "$agents_with_sleep_warn" -eq 16 ]; then
-    echo "  PASS  all 16 agents carry sleep-poll anti-pattern warning"
+agents_with_pointer=$(grep -lF 'docs/agent-protocol.md' "$WORKFLOW_DIR"/agents/*.md | wc -l | tr -d ' ')
+if grep -qiE 'sleep' "$WORKFLOW_DIR/docs/agent-protocol.md" 2>/dev/null && [ "$agents_with_pointer" -eq 16 ]; then
+    echo "  PASS  sleep-poll rule in agent-protocol.md; all 16 agents reference the doc"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  expected 16 agents with sleep-poll warning, found $agents_with_sleep_warn (workflow-1bo regression)"
+    echo "  FAIL  sleep-poll rule missing from agent-protocol.md or only $agents_with_pointer/16 agents reference it (workflow-1bo regression)"
     FAIL=$((FAIL+1))
 fi
 
