@@ -9,11 +9,10 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
-SKILLS_DIR="${HOME}/.claude/hooks/state"
-SKILLS_FILE="${SKILLS_DIR}/session-skills.log"
-
-mkdir -p "$SKILLS_DIR"
-touch "$SKILLS_FILE"
+# Advisory tracker: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -24,6 +23,9 @@ if ! json_valid "$tool_use_json"; then
     echo '{}'
     exit 0
 fi
+
+SKILLS_FILE="$(state_dir "$tool_use_json")/session-skills.log"
+touch "$SKILLS_FILE"
 
 skill=$(json_get "$tool_use_json" ".tool.input.skill" "")
 [ -z "$skill" ] && skill=$(json_get "$tool_use_json" ".tool_input.skill" "")

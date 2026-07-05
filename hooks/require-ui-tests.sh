@@ -24,6 +24,19 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-ui-tests.sh"
+
+# any_exists <path> [<path> ...] — true if ANY listed path exists.
+# Replaces `ls x.{a,b,c} | head -1` pipelines: ls exits non-zero when ANY
+# brace-expanded operand is missing, so under `set -o pipefail` config-file
+# detection only succeeded when ALL extensions existed (evaluation H6).
+any_exists() {
+    local p
+    for p in "$@"; do
+        [ -e "$p" ] && return 0
+    done
+    return 1
+}
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -109,27 +122,38 @@ fi
 # 2. Auto-detect (priority: e2e > component > native)
 if [ -z "$framework" ]; then
     # Playwright
-    if ls "$project_root"/playwright.config.{ts,js,mjs,cjs} 2>/dev/null | head -1 > /dev/null \
+    if any_exists "$project_root"/playwright.config.ts "$project_root"/playwright.config.js "$project_root"/playwright.config.mjs "$project_root"/playwright.config.cjs \
        || (test -f "$project_root/package.json" && grep -q '"@playwright/test"' "$project_root/package.json" 2>/dev/null); then
         framework="playwright"
     # Cypress
-    elif ls "$project_root"/cypress.config.{ts,js,mjs,cjs} 2>/dev/null | head -1 > /dev/null \
+    elif any_exists "$project_root"/cypress.config.ts "$project_root"/cypress.config.js "$project_root"/cypress.config.mjs "$project_root"/cypress.config.cjs \
          || (test -f "$project_root/package.json" && grep -q '"cypress"' "$project_root/package.json" 2>/dev/null); then
         framework="cypress"
     # Detox (React Native)
     elif test -f "$project_root/package.json" && grep -q '"detox"' "$project_root/package.json" 2>/dev/null; then
         framework="detox"
     # Vitest browser mode
-    elif ls "$project_root"/vitest.config.{ts,js,mjs,cjs} 2>/dev/null | head -1 > /dev/null \
-         && grep -qE 'browser:\s*\{' "$project_root"/vitest.config.* 2>/dev/null; then
-        framework="vitest-browser"
+    elif any_exists "$project_root"/vitest.config.ts "$project_root"/vitest.config.js "$project_root"/vitest.config.mjs "$project_root"/vitest.config.cjs; then
+        for vc in "$project_root"/vitest.config.ts "$project_root"/vitest.config.js "$project_root"/vitest.config.mjs "$project_root"/vitest.config.cjs; do
+            [ -f "$vc" ] || continue
+            if grep -qE 'browser:\s*\{' "$vc" 2>/dev/null; then
+                framework="vitest-browser"
+                break
+            fi
+        done
+        # Vitest config without browser mode: fall through to jest-rtl check
+        if [ -z "$framework" ] && test -f "$project_root/package.json" \
+           && grep -q '"@testing-library/react"' "$project_root/package.json" 2>/dev/null \
+           && grep -qE '"jest"|"vitest"' "$project_root/package.json" 2>/dev/null; then
+            framework="jest-rtl"
+        fi
     # Jest + react-testing-library
     elif test -f "$project_root/package.json" \
          && grep -q '"@testing-library/react"' "$project_root/package.json" 2>/dev/null \
          && grep -qE '"jest"|"vitest"' "$project_root/package.json" 2>/dev/null; then
         framework="jest-rtl"
-    # XCUITest (native iOS)
-    elif ls "$project_root"/*.xcodeproj 2>/dev/null | head -1 > /dev/null; then
+    # XCUITest (native iOS) — .xcodeproj is a directory; any_exists uses -e
+    elif any_exists "$project_root"/*.xcodeproj; then
         framework="xcuitest"
     fi
 fi
@@ -199,22 +223,23 @@ EOF
     exit 2
 fi
 
-# Search: filename contains slug OR file contents contain slug
-# Use ripgrep if available, fall back to grep
+# Search: filename contains slug/first-word OR file contents contain
+# slug/first-word — the documented slug+first-word alternation applies to
+# BOTH checks (the contents grep previously used only the slug and carried a
+# dead search_pattern variable; evaluation H6).
 match=""
-search_pattern="${slug}\\|${first_word}"
 for dir in "${search_dirs[@]}"; do
     # Filename match (any test-shaped file)
     if find "$dir" -type f \( -name "*${slug}*" -o -name "*${first_word}*" \) 2>/dev/null | grep -qE '\.(spec|test|e2e)\.(ts|tsx|js|jsx|mjs|cjs)$|\.swift$|\.kt$|\.java$|\.py$'; then
         match="filename"
         break
     fi
-    # Contents match
+    # Contents match (slug OR first significant word)
     if grep -rIl --include='*.spec.ts' --include='*.spec.tsx' --include='*.spec.js' --include='*.spec.jsx' \
                  --include='*.test.ts' --include='*.test.tsx' --include='*.test.js' --include='*.test.jsx' \
                  --include='*.e2e.ts' --include='*.e2e.js' \
                  --include='*.swift' --include='*.kt' --include='*.java' --include='*.py' \
-                 "$slug" "$dir" 2>/dev/null | head -1 | grep -q .; then
+                 -e "$slug" -e "$first_word" "$dir" 2>/dev/null | head -1 | grep -q .; then
         match="contents"
         break
     fi
@@ -233,7 +258,7 @@ Add at least one test file that:
 
 The test must exercise the actual UI surface (render the component, interact with it, assert behavior), not just unit-test internal helpers.
 
-Reference: build/SKILL.md Step 3.3d (visual fidelity) and 4.1 (e2e for UI-bearing epics).
+Reference: build SKILL.md 'Step 3.3g: qa-verification' and Step 4.1 (e2e for UI-bearing epics).
 
 To skip this check (rare, document the reason): add to the spec:
   @ui-test-skip(<concise reason>)

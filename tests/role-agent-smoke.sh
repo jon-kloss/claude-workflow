@@ -63,8 +63,41 @@ import json, os
 print(json.dumps({"tool":{"name":"Bash","input":{"command":os.environ["CMD"]}}}))'
 }
 
+# ---- session/cwd-aware payload builders + state-key helper (T3.2) ----------
+# Hook state now lives at ~/.claude/hooks/state/<12-hex sha1(cwd)>/<session_id>/
+skey() {
+    python3 -c "import hashlib,sys; print(hashlib.sha1(sys.argv[1].encode()).hexdigest()[:12])" "$1"
+}
+
+mkpayload_edit_s() {  # file content session_id cwd [event]
+    FILE="$1" CONTENT="$2" SID="$3" CW="$4" EV="${5:-PreToolUse}" python3 -c '
+import json, os
+print(json.dumps({"hook_event_name":os.environ["EV"],"session_id":os.environ["SID"],"cwd":os.environ["CW"],"tool_name":"Edit","tool_input":{"file_path":os.environ["FILE"],"new_string":os.environ["CONTENT"]}}))'
+}
+
+mkpayload_bash_s() {  # cmd session_id cwd
+    CMD="$1" SID="$2" CW="$3" python3 -c '
+import json, os
+print(json.dumps({"hook_event_name":"PreToolUse","session_id":os.environ["SID"],"cwd":os.environ["CW"],"tool_name":"Bash","tool_input":{"command":os.environ["CMD"]}}))'
+}
+
+mkpayload_agent_s() {  # subagent_type prompt session_id cwd [event]
+    SUB="$1" P="$2" SID="$3" CW="$4" EV="${5:-PreToolUse}" python3 -c '
+import json, os
+print(json.dumps({"hook_event_name":os.environ["EV"],"session_id":os.environ["SID"],"cwd":os.environ["CW"],"tool_name":"Agent","tool_input":{"subagent_type":os.environ["SUB"],"prompt":os.environ["P"]}}))'
+}
+
 write_handoff() {
     local dir="$1" step="$2" slug="$3" role="$4"
+    # Reviewer/coordinator roles must carry <meta data-verdict> (registry §4,
+    # enforced by _validate_handoff.py since T3.4)
+    local verdict_meta=""
+    case "$role" in
+        security-architect|devops-architect|data-architect|qa-engineer|spec-sre-auditor)
+            verdict_meta='<meta data-verdict="PASS">' ;;
+        release-coordinator)
+            verdict_meta='<meta data-verdict="READY-TO-CLOSE">' ;;
+    esac
     cat > "${dir}/${step}-${slug}-${role}.html" <<EOF
 <!DOCTYPE html><html lang="en" data-handoff-version="1"><head>
 <meta charset="utf-8">
@@ -73,6 +106,7 @@ write_handoff() {
 <meta data-step="${step}">
 <meta data-produced-at="2026-05-25T18:00:00Z">
 <meta data-input-references="">
+${verdict_meta}
 <title>x</title></head><body>
 <section data-role="summary"><p>x</p></section>
 <section data-role="findings"><p>x</p></section>
@@ -196,6 +230,10 @@ echo "=== require-release-handoff.sh ==="
 # Switch back to the workflow dir so `bd` works.
 cd "$WORKFLOW_DIR" || exit 1
 
+# Defensive: a crashed prior run may have left the @release-skip fixture spec
+# behind — it would unlock every epic-close block test below.
+rm -f specs/smoke-release-skip-fixture.md
+
 # Regression: build-test (2026-05-25) found that bd with --type=epic auto-displays [EPIC]
 # uppercase in bd show output, but require-release-handoff.sh's grep was case-sensitive
 # '[epic]'. The hook never matched → silent under-block. Use --type=epic here, NOT
@@ -213,12 +251,45 @@ else
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "epic bd close without handoff blocks" block "$result"
 
-    # Add a release handoff with PASS verdict — put it in workflow repo's specs/handoffs/
+    # H9: multi-id close gates EVERY id — epic in second position still blocks
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $NONEPIC_ID $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+    assert "multi-id close with epic in 2nd position blocks (H9)" block "$result"
+
+    # H9: id extraction takes argument positions after `close` — a path-shaped
+    # token before bd must not shadow the epic id
+    result=$(printf '%s\n' "$(mkpayload_bash "cd my-project && bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+    assert "cd prefix + epic close still gated (H9)" block "$result"
+
+    # H15-style: a MENTION of bd close inside a string must not gate
+    result=$(printf '%s\n' "$(mkpayload_bash "echo \"next step: bd close $EPIC_ID\"")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+    assert "echo-mention of bd close epic allows" allow "$result"
+
+    # Add a release handoff — meta data-verdict BLOCKED must win over body
+    # text READY-TO-CLOSE (H10: verdict from meta, not first-token prose)
     mkdir -p specs/handoffs
     cat > "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html" <<EOF
 <!DOCTYPE html><html lang="en" data-handoff-version="1"><head>
 <meta data-from-role="release-coordinator"><meta data-spec-slug="${EPIC_ID}">
-<meta data-step="x"><meta data-produced-at="x"><meta data-input-references="">
+<meta data-step="4.2"><meta data-produced-at="x"><meta data-input-references="">
+<meta data-verdict="BLOCKED">
+<title>x</title></head><body><section data-role="summary"></section>
+<section data-role="findings"><p>Earlier draft said Verdict: READY-TO-CLOSE but the meta is authoritative.</p></section>
+<section data-role="acceptance-criteria"></section>
+<section data-role="open-questions"></section>
+</body></html>
+EOF
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+    assert "meta data-verdict=BLOCKED wins over READY-TO-CLOSE prose (H10)" block "$result"
+
+    sed -i '' 's/data-verdict="BLOCKED"/data-verdict="READY-TO-CLOSE"/' "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+    assert "meta data-verdict=READY-TO-CLOSE allows" allow "$result"
+
+    # Legacy fallback: handoff with NO meta at all falls back to prose search
+    cat > "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html" <<EOF
+<!DOCTYPE html><html lang="en" data-handoff-version="1"><head>
+<meta data-from-role="release-coordinator"><meta data-spec-slug="${EPIC_ID}">
+<meta data-step="4.2"><meta data-produced-at="x"><meta data-input-references="">
 <title>x</title></head><body><section data-role="summary"></section>
 <section data-role="findings"></section>
 <section data-role="acceptance-criteria"></section>
@@ -226,16 +297,43 @@ else
 <p>Verdict: READY-TO-CLOSE</p></body></html>
 EOF
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
-    assert "epic bd close with PASS verdict allows" allow "$result"
+    assert "legacy handoff (no meta) prose verdict allows" allow "$result"
 
     sed -i '' 's/READY-TO-CLOSE/BLOCKED/' "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
     assert "epic bd close with BLOCKED verdict blocks" block "$result"
 
-    rm "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
+    # H4: the override must work in the BLOCKED branch too — but only with a
+    # quality-validated reason. Garbage reason first: still blocked.
     bd comments add "$EPIC_ID" "RELEASE-SKIP: smoke test override" > /dev/null 2>&1
     result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
-    assert "RELEASE-SKIP bd comment override allows" allow "$result"
+    assert "garbage RELEASE-SKIP reason still blocks (validator)" block "$result"
+
+    bd comments add "$EPIC_ID" "RELEASE-SKIP: verified manually against tests/role-agent-smoke.sh fixtures; epic tracked in workflow-8o6" > /dev/null 2>&1
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+    assert "quality RELEASE-SKIP reason overrides BLOCKED verdict (H4)" allow "$result"
+
+    rm "specs/handoffs/step-4.2-${EPIC_ID}-release-coordinator.html"
+    result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+    assert "quality RELEASE-SKIP also covers missing-handoff branch" allow "$result"
+
+    # @release-skip(<reason>) in-spec form (registry §7) — second epic with no
+    # comments. Garbage reason blocks; quality reason allows.
+    EPIC2_ID=$(bd create --title="SMOKE TEST release hook (in-spec tag)" --description="smoke test, ignore" --type=epic --priority=4 2>&1 | grep -oE 'workflow-[a-z0-9]+' | head -1)
+    if [ -n "$EPIC2_ID" ]; then
+        RS_FIXTURE="specs/smoke-release-skip-fixture.md"
+        echo "# smoke fixture — deleted by tests/role-agent-smoke.sh" > "$RS_FIXTURE"
+        echo "@release-skip(intentional)" >> "$RS_FIXTURE"
+        result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC2_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+        assert "garbage @release-skip in-spec reason blocks" block "$result"
+
+        echo "# smoke fixture — deleted by tests/role-agent-smoke.sh" > "$RS_FIXTURE"
+        echo "@release-skip(release gate run manually per tests/role-agent-smoke.sh; epic covered by workflow-8o6 phase plan)" >> "$RS_FIXTURE"
+        result=$(printf '%s\n' "$(mkpayload_bash "bd close $EPIC2_ID")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+        assert "quality @release-skip in-spec reason allows" allow "$result"
+        rm -f "$RS_FIXTURE"
+        bd close "$EPIC2_ID" --reason="smoke test cleanup" > /dev/null 2>&1
+    fi
 
     # Cleanup
     bd close "$EPIC_ID" --reason="smoke test cleanup" > /dev/null 2>&1
@@ -461,13 +559,15 @@ got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require
 assert "no fix-cycle handoffs at all -> allow" "allow" "$got"
 
 # Case 2: cycle 1 has BOTH implementer + reviewer => allow
+# (reviewer side uses -fix-cycle-N too — the retired -cycle-N spelling is
+# no longer recognized, registry §1 / evaluation M7)
 touch "$FC_TMP/specs/handoffs/step-3.2-example-feature-backend-engineer-fix-cycle-1.html"
-touch "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-cycle-1.html"
+touch "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-fix-cycle-1.html"
 got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
 assert "cycle 1 symmetric (impl + reviewer) -> allow" "allow" "$got"
 
 # Case 3: cycle 2 has reviewer but NOT implementer (the actual bug) => block
-touch "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-cycle-2.html"
+touch "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-fix-cycle-2.html"
 got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
 assert "cycle 2 reviewer-only (the bug) -> block" "block" "$got"
 
@@ -492,6 +592,35 @@ echo "@layer(api) @trivial" > "$FC_TRIVIAL_SPEC"
 got=$(mkpayload_edit "$FC_TRIVIAL_SPEC" "@layer(api) @trivial @status(verified)" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
 assert "@trivial spec bypasses fix-cycle hook" "allow" "$got"
 
+# Case 8 (H11): slug boundary — spec 'example' must NOT inherit
+# example-feature's cycle files (role segment is a known-role alternation)
+FC_SHORT_SPEC="$FC_TMP/specs/example.md"
+echo "@layer(api)" > "$FC_SHORT_SPEC"
+got=$(mkpayload_edit "$FC_SHORT_SPEC" "@layer(api) @status(verified)" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "slug 'example' does not match example-feature cycle files (H11)" "allow" "$got"
+
+# Case 9 (M7): retired -cycle-N reviewer spelling is NOT accepted — a
+# reviewer file in the old spelling leaves the cycle asymmetric.
+# (Remove case 5's asymmetric cycle-3 implementer file first so the block
+# can only come from cycle 4.)
+rm -f "$FC_TMP/specs/handoffs/step-3.2-example-feature-backend-engineer-fix-cycle-3.html"
+touch "$FC_TMP/specs/handoffs/step-3.2-example-feature-backend-engineer-fix-cycle-4.html"
+touch "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-cycle-4.html"
+got=$(mkpayload_edit "$FC_SPEC" "$FC_VERIFIED_CONTENT" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "retired -cycle-N reviewer spelling does not satisfy symmetry (M7)" "block" "$got"
+rm -f "$FC_TMP/specs/handoffs/step-3.2-example-feature-backend-engineer-fix-cycle-4.html" \
+      "$FC_TMP/specs/handoffs/step-3.3-example-feature-qa-engineer-cycle-4.html"
+
+# Case 10 (registry §1): design-side fix cycles — step-2.85 implementer side
+FC_DSGN_SPEC="$FC_TMP/specs/dsgn-widget.md"
+echo "@layer(ui)" > "$FC_DSGN_SPEC"
+touch "$FC_TMP/specs/handoffs/step-2.85-dsgn-widget-uiux-designer-fix-cycle-1.html"
+got=$(mkpayload_edit "$FC_DSGN_SPEC" "@layer(ui) @status(verified)" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "design-side fix without reviewer re-verify -> block" "block" "$got"
+touch "$FC_TMP/specs/handoffs/step-3.3-dsgn-widget-qa-engineer-fix-cycle-1.html"
+got=$(mkpayload_edit "$FC_DSGN_SPEC" "@layer(ui) @status(verified)" | bash "$HOOK_DIR/require-fix-cycle-handoff.sh" 2>&1 || true)
+assert "design-side fix (2.85) + reviewer re-verify -> allow" "allow" "$got"
+
 # workflow-myr (updated for T2.3 boilerplate extraction): every agent carries the
 # shared Exit protocol section pointing at docs/agent-protocol.md
 TOTAL=$((TOTAL+1))
@@ -508,7 +637,7 @@ fi
 TOTAL=$((TOTAL+1))
 if [ -f "$WORKFLOW_DIR/docs/agent-protocol.md" ] \
    && grep -qE 'handoff.*deliverable|deliverable.*handoff' "$WORKFLOW_DIR/docs/agent-protocol.md" \
-   && grep -q 'fix-cycle-N' "$WORKFLOW_DIR/docs/agent-protocol.md"; then
+   && grep -qE 'fix-cycle-(<N>|N)' "$WORKFLOW_DIR/docs/agent-protocol.md"; then
     echo "  PASS  agent-protocol.md exists with handoff-as-deliverable + fix-cycle naming"
     PASS=$((PASS+1))
 else
@@ -778,7 +907,7 @@ assert "guard-handoff-owner accepts quality override reason" "allow" "$got"
 # Integration: require-fix-cycle-handoff.sh enforces validator on @fix-cycle-skip
 FC_SPEC2="$OR_TMP/specs/cycle-test.md"
 mkdir -p "$OR_TMP/specs/handoffs"
-touch "$OR_TMP/specs/handoffs/step-3.3-cycle-test-qa-engineer-cycle-1.html"
+touch "$OR_TMP/specs/handoffs/step-3.3-cycle-test-qa-engineer-fix-cycle-1.html"
 echo "@layer(api)" > "$FC_SPEC2"
 # Bad reason
 bad_skip_content="@layer(api) @status(verified) @fix-cycle-skip(1: n/a)"
@@ -821,6 +950,7 @@ cat > "$RV_HOFF" <<HOFF
 <meta data-step="3.3">
 <meta data-produced-at="2026-05-27T00:00:00Z">
 <meta data-input-references="(none)">
+<meta data-verdict="PASS">
 <title>devops-architect handoff</title>
 </head>
 <body>
@@ -854,6 +984,7 @@ cat > "$RV_HOFF" <<HOFF
 <meta data-step="3.3">
 <meta data-produced-at="2026-05-27T00:00:00Z">
 <meta data-input-references="(none)">
+<meta data-verdict="PASS">
 <title>devops-architect handoff</title>
 </head>
 <body>
@@ -963,10 +1094,13 @@ for h in track-agent-memory-baseline.sh warn-agent-memory-not-updated.sh; do
     fi
 done
 
-# Behavior tests — synthetic project with memory file
+# Behavior tests — synthetic project with memory file.
+# Payloads carry no session_id/cwd, so state_dir falls back to
+# <sha1($PWD)>/no-session under the overridden HOME (T3.2 layout).
 MEM_TMP="$TMP/memory-warn-test"
-mkdir -p "$MEM_TMP/.claude/agent-memory" "$MEM_TMP/.claude/hooks/state"
+mkdir -p "$MEM_TMP/.claude/agent-memory"
 MEM_FILE="$MEM_TMP/.claude/agent-memory/backend-engineer.md"
+MEM_STATE="$MEM_TMP/.claude/hooks/state/$(skey "$MEM_TMP")/no-session"
 echo "# backend-engineer — project memory" > "$MEM_FILE"
 
 # Helper: build Agent payload
@@ -987,14 +1121,14 @@ run_warn() {
     mkpayload_agent "$subagent_type" "$prompt" | (cd "$MEM_TMP" && HOME="$MEM_TMP" bash "$HOOK_DIR/warn-agent-memory-not-updated.sh" 2>&1)
 }
 
-# Case 1: baseline records mtime
+# Case 1: baseline records mtime (under the session-keyed state dir)
 run_baseline "backend-engineer" "test prompt" > /dev/null
 TOTAL=$((TOTAL+1))
-if [ -f "$MEM_TMP/.claude/hooks/state/agent-memory-baseline-backend-engineer.txt" ]; then
-    echo "  PASS  baseline hook records pre-dispatch mtime"
+if [ -f "$MEM_STATE/agent-memory-baseline-backend-engineer.txt" ]; then
+    echo "  PASS  baseline hook records pre-dispatch mtime (keyed state dir)"
     PASS=$((PASS+1))
 else
-    echo "  FAIL  baseline hook did not record mtime"
+    echo "  FAIL  baseline hook did not record mtime at $MEM_STATE"
     FAIL=$((FAIL+1))
 fi
 
@@ -1047,10 +1181,10 @@ fi
 
 # Case 6: memory file missing → no warning
 rm "$MEM_FILE"
-rm -f "$MEM_TMP/.claude/hooks/state/agent-memory-baseline-backend-engineer.txt"
+rm -f "$MEM_STATE/agent-memory-baseline-backend-engineer.txt"
 run_baseline "backend-engineer" "test" > /dev/null
 TOTAL=$((TOTAL+1))
-if [ ! -f "$MEM_TMP/.claude/hooks/state/agent-memory-baseline-backend-engineer.txt" ]; then
+if [ ! -f "$MEM_STATE/agent-memory-baseline-backend-engineer.txt" ]; then
     echo "  PASS  baseline hook skips when memory file does not exist"
     PASS=$((PASS+1))
 else
@@ -1081,6 +1215,13 @@ write_handoff() {
     local from_role="$2"
     local slug="$3"
     local extra="$4"
+    local verdict_meta=""
+    case "$from_role" in
+        security-architect|devops-architect|data-architect|qa-engineer|spec-sre-auditor)
+            verdict_meta='<meta data-verdict="PASS">' ;;
+        release-coordinator)
+            verdict_meta='<meta data-verdict="READY-TO-CLOSE">' ;;
+    esac
     cat > "$outpath" <<HOFF
 <!DOCTYPE html>
 <html lang="en" data-handoff-version="1">
@@ -1091,6 +1232,7 @@ write_handoff() {
 <meta data-step="3.3">
 <meta data-produced-at="2026-05-27T00:00:00Z">
 <meta data-input-references="(none)">
+${verdict_meta}
 <title>${from_role} handoff</title>
 </head>
 <body>
@@ -1203,32 +1345,49 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# Behavior tests — isolate session log via env override
+# Behavior tests — session+project-keyed state (T3.2): the session log lives
+# at $HOME/.claude/hooks/state/<sha1(cwd)>/<session_id>/session-agents.log
 GHO_TMP="$TMP/gho-test"
-mkdir -p "$GHO_TMP/specs/handoffs" "$GHO_TMP/state"
-GHO_AGENTS_LOG="$GHO_TMP/state/session-agents.log"
+GHO_SID="gho-sess"
+mkdir -p "$GHO_TMP/specs/handoffs"
+GHO_STATE="$GHO_TMP/.claude/hooks/state/$(skey "$GHO_TMP")/$GHO_SID"
+mkdir -p "$GHO_STATE"
 
-# Run hook with HOME pointed at our temp dir so it reads our session log.
-# IMPORTANT: HOME must be exported to the bash invocation that runs the hook,
-# not just to mkpayload_edit upstream of the pipe. Use a subshell to scope it.
 run_gho_hook() {
     local file="$1" content="$2"
-    mkpayload_edit "$file" "$content" | (HOME="$GHO_TMP" bash "$HOOK_DIR/guard-handoff-owner.sh" 2>&1) || true
+    mkpayload_edit_s "$file" "$content" "$GHO_SID" "$GHO_TMP" | (HOME="$GHO_TMP" bash "$HOOK_DIR/guard-handoff-owner.sh" 2>&1) || true
 }
-mkdir -p "$GHO_TMP/.claude/hooks/state"
 
 # Case 1: writing handoff with NO dispatch logged => block
 GHO_HANDOFF="$GHO_TMP/specs/handoffs/step-3.2-myslug-frontend-engineer.html"
 got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
 assert "no dispatch logged for frontend-engineer -> block" "block" "$got"
 
-# Case 2: dispatch logged for frontend-engineer => allow
-echo "2026-05-27T00:00:00Z|frontend-engineer|test dispatch" > "$GHO_TMP/.claude/hooks/state/session-agents.log"
+# Case 2: 'dispatched' record (PreToolUse, new 4-field format) => allow (E2/H1)
+echo "2026-05-27T00:00:00Z|frontend-engineer|dispatched|test dispatch" > "$GHO_STATE/session-agents.log"
 got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
-assert "dispatch logged for frontend-engineer -> allow" "allow" "$got"
+assert "dispatched record for frontend-engineer -> allow (H1)" "allow" "$got"
+
+# Case 2b: 'returned' record also accepted
+echo "2026-05-27T00:00:00Z|frontend-engineer|returned|test dispatch" > "$GHO_STATE/session-agents.log"
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
+assert "returned record for frontend-engineer -> allow" "allow" "$got"
+
+# Case 2c: legacy 3-field record still accepted
+echo "2026-05-27T00:00:00Z|frontend-engineer|test dispatch" > "$GHO_STATE/session-agents.log"
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
+assert "legacy 3-field record -> allow" "allow" "$got"
+
+# Case 2d: dispatch logged under a DIFFERENT session id does not unlock this
+# session (H5 isolation)
+OTHER_STATE="$GHO_TMP/.claude/hooks/state/$(skey "$GHO_TMP")/other-sess"
+mkdir -p "$OTHER_STATE"
+mv "$GHO_STATE/session-agents.log" "$OTHER_STATE/session-agents.log"
+got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
+assert "dispatch in another session does not unlock (H5)" "block" "$got"
 
 # Case 3: dispatch logged for backend-engineer but not frontend => block frontend handoff
-echo "2026-05-27T00:00:00Z|backend-engineer|test dispatch" > "$GHO_TMP/.claude/hooks/state/session-agents.log"
+echo "2026-05-27T00:00:00Z|backend-engineer|dispatched|test dispatch" > "$GHO_STATE/session-agents.log"
 got=$(run_gho_hook "$GHO_HANDOFF" "<html data-handoff-version='1'></html>")
 assert "wrong-role dispatch -> block" "block" "$got"
 
@@ -1246,6 +1405,22 @@ CYCLE_HOFF="$GHO_TMP/specs/handoffs/step-3.2-myslug-backend-engineer-fix-cycle-1
 # backend-engineer IS in the log from case 3
 got=$(run_gho_hook "$CYCLE_HOFF" "<html data-handoff-version='1'></html>")
 assert "fix-cycle-N suffix correctly parsed -> allow when dispatched" "allow" "$got"
+
+# Case 7: end-to-end with track-agents.sh — a PreToolUse dispatch record
+# written by the tracker itself unlocks the same session's handoff write
+E2E_SID="gho-e2e"
+mkpayload_agent_s "uiux-designer" "design the myslug mockups" "$E2E_SID" "$GHO_TMP" "PreToolUse" \
+    | (HOME="$GHO_TMP" bash "$HOOK_DIR/track-agents.sh" > /dev/null 2>&1) || true
+got=$(mkpayload_edit_s "$GHO_TMP/specs/handoffs/step-2.85-myslug-uiux-designer.html" "<html data-handoff-version='1'></html>" "$E2E_SID" "$GHO_TMP" | (HOME="$GHO_TMP" bash "$HOOK_DIR/guard-handoff-owner.sh" 2>&1) || true)
+assert "track-agents PreToolUse record unlocks first handoff write (E2)" "allow" "$got"
+TOTAL=$((TOTAL+1))
+if grep -q "|uiux-designer|dispatched|" "$GHO_TMP/.claude/hooks/state/$(skey "$GHO_TMP")/$E2E_SID/session-agents.log" 2>/dev/null; then
+    echo "  PASS  track-agents.sh writes <ts>|<role>|dispatched|<prompt> at PreToolUse"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  track-agents.sh dispatched record missing or wrong format"
+    FAIL=$((FAIL+1))
+fi
 
 echo ""
 echo "=== engineering standards doc + language sub-files (workflow-equ) ==="
@@ -1393,6 +1568,458 @@ printf '@status(approved)\n@layer(ui)\n# Solo\n' > "$FM3/solo.md"
 printf '@status(approved)\n@layer(api)\n# Api\n'  > "$FM3/api.md"
 got=$(mkpayload_edit "$FM3/solo.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1)
 assert "require-feature-mounted exempts single-UI-spec epic" allow "$got"
+
+echo ""
+echo "=== verifier state machine (H2/H3, T3.2) — dispatch markers + keyed inflight state ==="
+VH_TMP="$TMP/verifier-home"; VH_PROJ="$TMP/verifier-proj"
+VH_SID="vh-sess"
+mkdir -p "$VH_TMP" "$VH_PROJ/specs"
+VH_STATE="$VH_TMP/.claude/hooks/state/$(skey "$VH_PROJ")/$VH_SID"
+VH_PROMPT='You are the CONTINUOUS VERIFIER for Checkout.
+
+SPEC: specs/checkout.md
+TASK: workflow-4f2a
+EPIC: workflow-8o6
+
+## Context
+- Spec: (pasted contents)'
+
+# Dispatch: machine markers extracted into the inflight record (real ID shapes)
+mkpayload_agent_s "hyperpowers:code-reviewer" "$VH_PROMPT" "$VH_SID" "$VH_PROJ" "PreToolUse" \
+    | (HOME="$VH_TMP" bash "$HOOK_DIR/verifier-dispatch.sh" > /dev/null 2>&1) || true
+TOTAL=$((TOTAL+1))
+if grep -q '^workflow-4f2a|workflow-8o6|checkout$' "$VH_STATE/verifier-inflight.txt" 2>/dev/null; then
+    echo "  PASS  verifier-dispatch extracts SPEC:/TASK:/EPIC: markers into inflight record (H2)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  inflight record wrong: $(cat "$VH_STATE/verifier-inflight.txt" 2>/dev/null)"
+    FAIL=$((FAIL+1))
+fi
+
+# @status(verified) write on the inflight spec blocks
+got=$(mkpayload_edit_s "$VH_PROJ/specs/checkout.md" "@status(verified)" "$VH_SID" "$VH_PROJ" | (HOME="$VH_TMP" bash "$HOOK_DIR/block-status-during-verification.sh" 2>&1) || true)
+assert "status write blocked while verifier in-flight" "block" "$got"
+
+# A DIFFERENT spec is not blocked
+got=$(mkpayload_edit_s "$VH_PROJ/specs/other.md" "@status(verified)" "$VH_SID" "$VH_PROJ" | (HOME="$VH_TMP" bash "$HOOK_DIR/block-status-during-verification.sh" 2>&1) || true)
+assert "unrelated spec status write allowed" "allow" "$got"
+
+# bd close with a 4-char-suffix real ID blocks ({3,} fix, H3)
+got=$(mkpayload_bash_s "bd close workflow-4f2a" "$VH_SID" "$VH_PROJ" | (HOME="$VH_TMP" bash "$HOOK_DIR/block-status-during-verification.sh" 2>&1) || true)
+assert "bd close of inflight 4-char-suffix task blocks (H3)" "block" "$got"
+
+# Mention inside echo does not block (H15 command-position)
+got=$(mkpayload_bash_s "echo \"then run bd close workflow-4f2a\"" "$VH_SID" "$VH_PROJ" | (HOME="$VH_TMP" bash "$HOOK_DIR/block-status-during-verification.sh" 2>&1) || true)
+assert "echo-mention of bd close does not block (H15)" "allow" "$got"
+
+# Return (tool_response field, fact 8) clears the inflight record
+mkpayload_agent_s "hyperpowers:code-reviewer" "$VH_PROMPT" "$VH_SID" "$VH_PROJ" "PostToolUse" \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); d["tool_response"]="VERIFIER checkout: PASS"; print(json.dumps(d))' \
+    | (cd "$VH_PROJ" && HOME="$VH_TMP" bash "$HOOK_DIR/verifier-return.sh" > /dev/null 2>&1) || true
+TOTAL=$((TOTAL+1))
+if [ ! -s "$VH_STATE/verifier-inflight.txt" ]; then
+    echo "  PASS  verifier-return clears the inflight record (tool_response read)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  inflight record not cleared: $(cat "$VH_STATE/verifier-inflight.txt")"
+    FAIL=$((FAIL+1))
+fi
+
+got=$(mkpayload_edit_s "$VH_PROJ/specs/checkout.md" "@status(verified)" "$VH_SID" "$VH_PROJ" | (HOME="$VH_TMP" bash "$HOOK_DIR/block-status-during-verification.sh" 2>&1) || true)
+assert "status write allowed after verifier returned" "allow" "$got"
+
+echo ""
+echo "=== clear-session-reads (H5) — compact retains, startup truncates own key only ==="
+CS_TMP="$TMP/clear-home"; CS_PROJ="$TMP/clear-proj"; CS_SID="cs-sess"
+mkdir -p "$CS_PROJ"
+CS_STATE="$CS_TMP/.claude/hooks/state/$(skey "$CS_PROJ")/$CS_SID"
+mkdir -p "$CS_STATE"
+echo "evidence" > "$CS_STATE/session-agents.log"
+
+SRC=compact SID="$CS_SID" CW="$CS_PROJ" python3 -c 'import json,os; print(json.dumps({"hook_event_name":"SessionStart","source":os.environ["SRC"],"session_id":os.environ["SID"],"cwd":os.environ["CW"]}))' \
+    | (HOME="$CS_TMP" bash "$HOOK_DIR/clear-session-reads.sh" > /dev/null 2>&1) || true
+TOTAL=$((TOTAL+1))
+if [ -s "$CS_STATE/session-agents.log" ]; then
+    echo "  PASS  SessionStart source=compact RETAINS state (H5)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  compaction wiped session state"
+    FAIL=$((FAIL+1))
+fi
+
+SRC=startup SID="$CS_SID" CW="$CS_PROJ" python3 -c 'import json,os; print(json.dumps({"hook_event_name":"SessionStart","source":os.environ["SRC"],"session_id":os.environ["SID"],"cwd":os.environ["CW"]}))' \
+    | (HOME="$CS_TMP" bash "$HOOK_DIR/clear-session-reads.sh" > /dev/null 2>&1) || true
+TOTAL=$((TOTAL+1))
+if [ ! -s "$CS_STATE/session-agents.log" ]; then
+    echo "  PASS  SessionStart source=startup truncates own session state"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  startup did not truncate own session state"
+    FAIL=$((FAIL+1))
+fi
+
+# Another session's state is untouched by this session's startup
+CS_OTHER="$CS_TMP/.claude/hooks/state/$(skey "$CS_PROJ")/other-sess"
+mkdir -p "$CS_OTHER"; echo "other evidence" > "$CS_OTHER/session-agents.log"
+SRC=startup SID="$CS_SID" CW="$CS_PROJ" python3 -c 'import json,os; print(json.dumps({"hook_event_name":"SessionStart","source":os.environ["SRC"],"session_id":os.environ["SID"],"cwd":os.environ["CW"]}))' \
+    | (HOME="$CS_TMP" bash "$HOOK_DIR/clear-session-reads.sh" > /dev/null 2>&1) || true
+TOTAL=$((TOTAL+1))
+if [ -s "$CS_OTHER/session-agents.log" ]; then
+    echo "  PASS  startup leaves OTHER sessions' state intact (H5 isolation)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  startup wiped another session's state"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
+echo "=== block-unread-edits (H12) — exact-path matching + new-file ordering ==="
+BU_TMP="$TMP/bu-home"; BU_PROJ="$TMP/bu-proj"; BU_SID="bu-sess"
+mkdir -p "$BU_PROJ/src"
+BU_STATE="$BU_TMP/.claude/hooks/state/$(skey "$BU_PROJ")/$BU_SID"
+mkdir -p "$BU_STATE"
+echo "x" > "$BU_PROJ/src/b.ts"
+echo "x" > "$BU_PROJ/src/b.tsx"
+
+# New file + NO reads log at all -> allow (ordering fix)
+got=$(mkpayload_edit_s "$BU_PROJ/src/brand-new.ts" "content" "bu-fresh" "$BU_PROJ" | (HOME="$BU_TMP" bash "$HOOK_DIR/block-unread-edits.sh" 2>&1) || true)
+assert "new-file creation allowed even with no reads log (H12)" "allow" "$got"
+
+# b.tsx read must NOT satisfy an edit of b.ts (substring fix)
+echo "$BU_PROJ/src/b.tsx" > "$BU_STATE/session-reads.txt"
+got=$(mkpayload_edit_s "$BU_PROJ/src/b.ts" "content" "$BU_SID" "$BU_PROJ" | (HOME="$BU_TMP" bash "$HOOK_DIR/block-unread-edits.sh" 2>&1) || true)
+assert "read of b.tsx does not unlock b.ts (H12)" "block" "$got"
+
+# exact file read -> allow
+echo "$BU_PROJ/src/b.ts" >> "$BU_STATE/session-reads.txt"
+got=$(mkpayload_edit_s "$BU_PROJ/src/b.ts" "content" "$BU_SID" "$BU_PROJ" | (HOME="$BU_TMP" bash "$HOOK_DIR/block-unread-edits.sh" 2>&1) || true)
+assert "exact-path read unlocks the file" "allow" "$got"
+
+# exact parent-dir Grep/Glob entry unlocks files in that dir
+echo "y" > "$BU_PROJ/src/c.ts"
+echo "$BU_PROJ/src" > "$BU_STATE/session-reads.txt"
+got=$(mkpayload_edit_s "$BU_PROJ/src/c.ts" "content" "$BU_SID" "$BU_PROJ" | (HOME="$BU_TMP" bash "$HOOK_DIR/block-unread-edits.sh" 2>&1) || true)
+assert "exact parent-dir entry unlocks contained file" "allow" "$got"
+
+echo ""
+echo "=== require-bead-description (H15) — command-position matching ==="
+got=$(mkpayload_bash 'bd create --title="x"' | bash "$HOOK_DIR/require-bead-description.sh" 2>&1 || true)
+assert "bd create without --description blocks" "block" "$got"
+got=$(mkpayload_bash 'bd create --title="x" --description="why and what"' | bash "$HOOK_DIR/require-bead-description.sh" 2>&1 || true)
+assert "bd create with --description allows" "allow" "$got"
+got=$(mkpayload_bash 'echo "next run bd create for this"' | bash "$HOOK_DIR/require-bead-description.sh" 2>&1 || true)
+assert "echo-mention of bd create allows (H15)" "allow" "$got"
+got=$(mkpayload_bash 'cd proj && bd create --title="x"' | bash "$HOOK_DIR/require-bead-description.sh" 2>&1 || true)
+assert "bd create after && still gated" "block" "$got"
+
+echo ""
+echo "=== require-investigation-findings (H16) — refs + Decision required ==="
+IV_TMP="$TMP/iv-proj"; mkdir -p "$IV_TMP/specs"
+IV_SPEC="$IV_TMP/specs/thing.md"
+IV_FILLER='@layer(api) @status(implemented)
+
+## Investigation Findings
+- looked around the codebase
+- everything seems reasonable
+- no surprises found'
+got=$(mkpayload_edit "$IV_SPEC" "$IV_FILLER" | bash "$HOOK_DIR/require-investigation-findings.sh" 2>&1 || true)
+assert "3 lines of filler no longer pass (H16)" "block" "$got"
+
+IV_GOOD='@layer(api) @status(implemented)
+
+## Investigation Findings
+- src/auth/middleware.ts:42 — session validation via verifyJwt()
+- src/routes/index.ts:17 — consistent error shape
+Decision: extend middleware.ts rather than a parallel auth path.'
+got=$(mkpayload_edit "$IV_SPEC" "$IV_GOOD" | bash "$HOOK_DIR/require-investigation-findings.sh" 2>&1 || true)
+assert "2 file:line refs + Decision line pass" "allow" "$got"
+
+IV_NODEC='@layer(api) @status(implemented)
+
+## Investigation Findings
+- src/auth/middleware.ts:42 — session validation
+- src/routes/index.ts:17 — error shape'
+got=$(mkpayload_edit "$IV_SPEC" "$IV_NODEC" | bash "$HOOK_DIR/require-investigation-findings.sh" 2>&1 || true)
+assert "refs without Decision line block" "block" "$got"
+
+got=$(mkpayload_edit "$IV_SPEC" '@layer(api) @status(implemented) @investigation-skip(covered by prior spike in specs/thing-spike.md)' | bash "$HOOK_DIR/require-investigation-findings.sh" 2>&1 || true)
+assert "@investigation-skip override allows" "allow" "$got"
+
+echo ""
+echo "=== check-open-beads (H14) — clean project produces no integer-expression error ==="
+CB_TMP="$TMP/cb-clean"; mkdir -p "$CB_TMP"
+cb_out=$( (cd "$CB_TMP" && bash "$HOOK_DIR/check-open-beads.sh" < /dev/null 2>&1); echo "rc=$?" )
+TOTAL=$((TOTAL+1))
+if ! echo "$cb_out" | grep -q "integer expression" && echo "$cb_out" | grep -q "rc=0"; then
+    echo "  PASS  check-open-beads runs clean in an empty project (H14)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  check-open-beads errored: ${cb_out:0:200}"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
+echo "=== require-design-ui (M1) — @layer vocabulary escape hatch ==="
+DU_TMP="$TMP/du-proj"; mkdir -p "$DU_TMP/specs"
+DU_SPEC="$DU_TMP/specs/widget.md"
+got=$(mkpayload_edit "$DU_SPEC" '@status(approved) Feature with a button and a form view' | bash "$HOOK_DIR/require-design-ui.sh" 2>&1 || true)
+assert "UI-facing spec without design artifacts blocks" "block" "$got"
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q '@layer(' ; then
+    echo "  PASS  block message names @layer(...) (not retired tags)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  block message does not mention @layer(...): ${got:0:160}"
+    FAIL=$((FAIL+1))
+fi
+
+got=$(mkpayload_edit "$DU_SPEC" '@status(approved) @layer(api) endpoint returning a list view payload' | bash "$HOOK_DIR/require-design-ui.sh" 2>&1 || true)
+assert "@layer(api) skips the design-ui gate (M1)" "allow" "$got"
+
+# Legacy backend-only tag still accepted, with a deprecation nudge
+LEG_TAG='@backend'; LEG_TAG="${LEG_TAG}-only"
+got=$(mkpayload_edit "$DU_SPEC" "@status(approved) $LEG_TAG endpoint with a form payload" | bash "$HOOK_DIR/require-design-ui.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q 'hookSpecificOutput' && echo "$got" | grep -q 'DEPRECATED TAG'; then
+    echo "  PASS  legacy backend-only tag allowed with deprecation nudge"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  legacy tag handling wrong: ${got:0:160}"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
+echo "=== require-ui-tests (H6) — single-extension config detection ==="
+UT_TMP="$TMP/ut-proj"; mkdir -p "$UT_TMP/specs" "$UT_TMP/tests"
+echo "export default {};" > "$UT_TMP/playwright.config.ts"   # ONLY .ts — old ls-brace pipeline failed here
+echo "test('checkout-flow renders', () => {})" > "$UT_TMP/tests/checkout-flow.spec.ts"
+UT_SPEC="$UT_TMP/specs/checkout-flow.md"
+got=$(mkpayload_edit "$UT_SPEC" '@status(verified) @layer(ui)' | bash "$HOOK_DIR/require-ui-tests.sh" 2>&1 || true)
+assert "playwright.config.ts alone is detected (H6) and test evidence found" "allow" "$got"
+
+rm -f "$UT_TMP/tests/checkout-flow.spec.ts"
+got=$(mkpayload_edit "$UT_SPEC" '@status(verified) @layer(ui)' | bash "$HOOK_DIR/require-ui-tests.sh" 2>&1 || true)
+assert "no test evidence blocks" "block" "$got"
+
+got=$(mkpayload_edit "$UT_SPEC" '@status(verified) @layer(ui) @ui-test-skip(covered by e2e in tests/checkout.e2e.ts of parent epic)' | bash "$HOOK_DIR/require-ui-tests.sh" 2>&1 || true)
+assert "@ui-test-skip override allows" "allow" "$got"
+
+echo ""
+echo "=== require-feature-mounted (H7) — skip-tag misclassification + word-boundary Mount Map ==="
+# H7.1: a sibling spec carrying only @integration-skip must NOT count as the
+# integration host — the epic has NO integration spec and blocks accordingly
+FM4="$TMP/fmproj4/specs"; mkdir -p "$FM4"
+printf '@status(approved)\n@layer(ui)\n# Alpha\n' > "$FM4/alpha.md"
+printf '@status(approved)\n@layer(ui)\n# Beta\n'  > "$FM4/beta.md"
+printf '@status(approved)\n@layer(ui)\n@integration-skip(epic assembled by external shell repo per specs/notes.md)\n# Gamma\n' > "$FM4/gamma.md"
+got=$(mkpayload_edit "$FM4/beta.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "NO integration spec"; then
+    echo "  PASS  @integration-skip sibling not misread as integration host (H7.1)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  expected 'NO integration spec' block, got: ${got:0:160}"
+    FAIL=$((FAIL+1))
+fi
+
+# H7.2: Mount-Map membership is whole-word — slug 'chat' must not ride on 'chat-window'
+FM5="$TMP/fmproj5/specs"; mkdir -p "$FM5"
+cat > "$FM5/shell.md" <<'EOF'
+@status(approved)
+@integration
+@layer(ui)
+# Feature: App Shell
+## Mount Map
+| Feature | Mounts as | Where |
+| chat-window | ChatWindow | sidebar |
+EOF
+printf '@status(approved)\n@layer(ui)\n# Chat\n' > "$FM5/chat.md"
+printf '@status(approved)\n@layer(ui)\n# Chat Window\n' > "$FM5/chat-window.md"
+got=$(mkpayload_edit "$FM5/chat.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1 || true)
+assert "slug 'chat' does not match 'chat-window' Mount Map row (H7.2)" "block" "$got"
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "NOTE:"; then
+    echo "  PASS  whole-dir fallback warning present when bd/epic scoping unavailable (H7.3)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  fallback scope warning missing from block message"
+    FAIL=$((FAIL+1))
+fi
+got=$(mkpayload_edit "$FM5/chat-window.md" "@status(verified) @layer(ui)" | bash "$HOOK_DIR/require-feature-mounted.sh" 2>&1 || true)
+assert "exact slug 'chat-window' matches its Mount Map row" "allow" "$got"
+
+echo ""
+echo "=== require-handoff-artifact (M10/D2) — data-architect gates on @touches-data only ==="
+# The api-feature fixture (no @touches-data) must pass WITHOUT a data-architect handoff
+rm -f "$TMP/specs/handoffs/step-3.3-api-feature-data-architect.html"
+got=$(mkpayload_edit "$TMP/specs/api-feature.md" '@status(verified)' | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1 || true)
+assert "@layer(api) without @touches-data needs no data-architect (M10)" "allow" "$got"
+
+# Advisory: DB terms in Technical Context without the tag -> block message
+# (missing other handoffs) carries the one-line @touches-data suggestion
+ADV_SPEC="$TMP/specs/dbish.md"
+cat > "$ADV_SPEC" <<'EOF'
+@status(approved)
+@layer(api)
+
+## Technical Context
+Persists orders to the postgres database via a new table and migration.
+EOF
+got=$(mkpayload_edit "$ADV_SPEC" '@status(verified)' | bash "$HOOK_DIR/require-handoff-artifact.sh" 2>&1 || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q "BLOCKED" && echo "$got" | grep -q "ADVISORY" && echo "$got" | grep -q "@touches-data"; then
+    echo "  PASS  DB terms without @touches-data produce the advisory line (D2)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  advisory missing: ${got:0:200}"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
+echo "=== _validate_handoff.py (T3.4) — verdict + severity + route-to vocabulary ==="
+VD_TMP="$TMP/vd-proj"; mkdir -p "$VD_TMP/specs/handoffs"
+
+vd_fixture() {  # path role head_extra body_extra
+    local path="$1" role="$2" head_extra="$3" body_extra="$4"
+    cat > "$path" <<HOFF
+<!DOCTYPE html>
+<html lang="en" data-handoff-version="1">
+<head>
+<meta charset="utf-8">
+<meta data-from-role="${role}">
+<meta data-spec-slug="vd-spec">
+<meta data-step="3.3">
+<meta data-produced-at="2026-07-05T00:00:00Z">
+<meta data-input-references="">
+${head_extra}
+<title>x</title>
+</head>
+<body>
+<section data-role="summary"><p>x</p></section>
+<section data-role="findings">${body_extra}</section>
+<section data-role="acceptance-criteria"><dl><dt data-id="a">x</dt><dd>x</dd></dl></section>
+<section data-role="open-questions"><ul></ul></section>
+</body>
+</html>
+HOFF
+}
+
+VD_F="$VD_TMP/specs/handoffs/step-3.3-vd-spec-qa-engineer.html"
+vd_fixture "$VD_F" "qa-engineer" "" ""
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$VD_F" "vd-spec" "qa-engineer" 2>&1)
+if echo "$out" | grep -q "missing <meta data-verdict"; then
+    echo "  PASS  reviewer handoff without data-verdict is an error (registry §4)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  missing data-verdict not flagged (got: ${out:0:160})"
+    FAIL=$((FAIL+1))
+fi
+
+vd_fixture "$VD_F" "qa-engineer" '<meta data-verdict="MAYBE">' ""
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$VD_F" "vd-spec" "qa-engineer" 2>&1)
+if echo "$out" | grep -q "not legal for qa-engineer"; then
+    echo "  PASS  illegal verdict value flagged"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  illegal verdict not flagged (got: ${out:0:160})"
+    FAIL=$((FAIL+1))
+fi
+
+vd_fixture "$VD_F" "qa-engineer" '<meta data-verdict="FAIL-SPEC-DRIFT">' ""
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$VD_F" "vd-spec" "qa-engineer" 2>&1)
+if [ -z "$out" ]; then
+    echo "  PASS  FAIL-SPEC-DRIFT is legal for qa-engineer"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  legal verdict rejected (got: ${out:0:160})"
+    FAIL=$((FAIL+1))
+fi
+
+VD_P="$VD_TMP/specs/handoffs/step-3.2-vd-spec-backend-engineer.html"
+vd_fixture "$VD_P" "backend-engineer" "" ""
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$VD_P" "vd-spec" "backend-engineer" 2>&1)
+if [ -z "$out" ]; then
+    echo "  PASS  producer role exempt from data-verdict"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  producer wrongly required to carry verdict (got: ${out:0:160})"
+    FAIL=$((FAIL+1))
+fi
+
+# Severity vocabulary + route-to requirements
+vd_fixture "$VD_P" "backend-engineer" "" '<aside data-severity="major" data-route-to="backend-engineer"><p>x</p></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$VD_P" "vd-spec" "backend-engineer" 2>&1)
+if echo "$out" | grep -q "not legal"; then
+    echo "  PASS  illegal data-severity flagged (registry §5)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  illegal severity not flagged (got: ${out:0:160})"
+    FAIL=$((FAIL+1))
+fi
+
+vd_fixture "$VD_P" "backend-engineer" "" '<aside data-severity="important"><p>no route</p></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$VD_P" "vd-spec" "backend-engineer" 2>&1)
+if echo "$out" | grep -q "missing data-route-to"; then
+    echo "  PASS  important aside without data-route-to flagged"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  route-to requirement not enforced (got: ${out:0:160})"
+    FAIL=$((FAIL+1))
+fi
+
+vd_fixture "$VD_P" "backend-engineer" "" '<aside data-severity="spec-drift"><p>drift note</p></aside>'
+TOTAL=$((TOTAL+1))
+out=$(python3 "$HOOK_DIR/_validate_handoff.py" "$VD_P" "vd-spec" "backend-engineer" 2>&1)
+if [ -z "$out" ]; then
+    echo "  PASS  spec-drift severity legal; no route-to required"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  spec-drift aside wrongly flagged (got: ${out:0:160})"
+    FAIL=$((FAIL+1))
+fi
+
+echo ""
+echo "=== UserPromptSubmit hooks (H8) — .prompt field + hookSpecificOutput wrapper ==="
+UP_TMP="$TMP/ups-proj"; mkdir -p "$UP_TMP"
+
+got=$( (cd "$UP_TMP" && echo '{"prompt":"please add a new endpoint to the api"}' | bash "$HOOK_DIR/workflow-reminder.sh" 2>&1) || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q 'hookSpecificOutput' && echo "$got" | grep -q '/design'; then
+    echo "  PASS  workflow-reminder reads .prompt and emits wrapped context (H8)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  workflow-reminder output wrong: ${got:0:160}"
+    FAIL=$((FAIL+1))
+fi
+
+got=$( (cd "$UP_TMP" && echo '{"prompt":"why did you delete the tests? this is wrong"}' | bash "$HOOK_DIR/detect-correction.sh" 2>&1) || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q 'hookSpecificOutput' && echo "$got" | grep -q 'WORKFLOW INCIDENT'; then
+    echo "  PASS  detect-correction reads .prompt and detects corrections (H8)"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  detect-correction output wrong: ${got:0:160}"
+    FAIL=$((FAIL+1))
+fi
+
+got=$( (cd "$UP_TMP" && echo '{"prompt":"just a normal question"}' | bash "$HOOK_DIR/wwiwo.sh" 2>&1) || true)
+assert "wwiwo without trigger word stays silent (fact 5 — matcher is decorative)" "allow" "$got"
+
+got=$( (cd "$UP_TMP" && echo '{"prompt":"wwiwo?"}' | bash "$HOOK_DIR/wwiwo.sh" 2>&1) || true)
+TOTAL=$((TOTAL+1))
+if echo "$got" | grep -q 'hookSpecificOutput'; then
+    echo "  PASS  wwiwo trigger word in prompt fires the hook"
+    PASS=$((PASS+1))
+else
+    echo "  FAIL  wwiwo trigger did not fire: ${got:0:160}"
+    FAIL=$((FAIL+1))
+fi
 
 echo "=== hook output-shape regressions (catches the 2026-05-26 dogfood finding) ==="
 # Regression: every blocking hook must either exit 2 (with stderr message) OR

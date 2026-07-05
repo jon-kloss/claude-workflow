@@ -19,7 +19,10 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
-STATE_DIR="${HOME}/.claude/hooks/state"
+# Advisory hook (WARN mode): exit quietly when python is unavailable.
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -64,7 +67,9 @@ if [ ! -f "$memory_file" ]; then
     exit 0
 fi
 
-baseline_file="$STATE_DIR/agent-memory-baseline-${subagent_type}.txt"
+# Session+project-keyed state (evaluation H5) — same key as the PreToolUse
+# baseline hook, since subagents inherit the parent session_id (fact 11).
+baseline_file="$(state_dir "$tool_use_json")/agent-memory-baseline-${subagent_type}.txt"
 
 if [ ! -f "$baseline_file" ]; then
     # No baseline recorded (PreToolUse hook didn't fire, or first dispatch
@@ -98,7 +103,7 @@ if echo "$prompt" | grep -qE "@memory-update-skip\(${subagent_type}:[^)]+\)"; th
     override_reason=$(echo "$prompt" | grep -oE "@memory-update-skip\(${subagent_type}:[^)]+\)" | head -1 | sed -E "s/@memory-update-skip\(${subagent_type}:[[:space:]]*//; s/\)$//")
     VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
     if [ -f "$VALIDATOR" ]; then
-        if ! validation_error=$(python3 "$VALIDATOR" "warn-agent-memory-not-updated" "@memory-update-skip" "$subagent_type" "$override_reason" 2>&1); then
+        if ! validation_error=$("$PYTHON" "$VALIDATOR" "warn-agent-memory-not-updated" "@memory-update-skip" "$subagent_type" "$override_reason" 2>&1); then
             # WARN mode: don't block; surface the bad-override attempt as a warning
             msg="WARNING: ${subagent_type} dispatch returned without updating memory AND the @memory-update-skip override reason did not meet quality requirements.
 
@@ -107,7 +112,7 @@ Override validation error: ${validation_error}
 Provided reason: '${override_reason}'
 
 Either update the memory file per the Exit checklist, or re-dispatch with a more specific @memory-update-skip reason (must include a concrete artifact reference — beads ID, commit SHA, file path, URL, or user authorization)."
-            json_encode_context "$msg"
+            json_encode_context "$msg" "PostToolUse"
             exit 0
         fi
     fi
@@ -123,5 +128,5 @@ If the dispatch genuinely had no memory delta (e.g. @trivial spec, one-line fix 
 
 Otherwise: re-dispatch the agent with: 'Your prior dispatch returned without updating .claude/agent-memory/${subagent_type}.md. Per your Exit checklist step 2, append to Recent changes and bump frontmatter timestamps. The verbal confirmation is not the deliverable — the artifact is.'"
 
-json_encode_context "$msg"
+json_encode_context "$msg" "PostToolUse"
 exit 0

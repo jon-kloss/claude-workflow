@@ -10,8 +10,10 @@ set -euo pipefail
 # of dispatching the agent. The handoff file is the role agent's deliverable,
 # not the orchestrator's — the agent's reasoning is the load-bearing artifact.
 #
-# track-agents.sh (PostToolUse Agent hook) logs every dispatch to the same
-# session log this hook reads; if a dispatch fired, this hook allows the write.
+# track-agents.sh (PreToolUse + PostToolUse Agent hook) logs every dispatch
+# (at dispatch time — decision E2) and every return to the same session log
+# this hook reads; either record ('dispatched' or 'returned') for the role
+# allows the write.
 #
 # Override: @handoff-author-skip(<role>: <reason>) in the handoff content.
 # Legitimate use case: subagent inline-synthesis fallback when running without
@@ -21,8 +23,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
-
-AGENTS_FILE="${HOME}/.claude/hooks/state/session-agents.log"
+require_python_or_block "guard-handoff-owner.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -33,6 +34,8 @@ if ! json_valid "$tool_use_json"; then
     echo '{}'
     exit 0
 fi
+
+AGENTS_FILE="$(state_dir "$tool_use_json")/session-agents.log"
 
 file_path=$(json_get "$tool_use_json" ".tool.input.file_path" "")
 [ -z "$file_path" ] && file_path=$(json_get "$tool_use_json" ".tool_input.file_path" "")
@@ -96,7 +99,7 @@ if echo "$combined" | grep -qE "@handoff-author-skip\(${role}:[^)]+\)"; then
     override_reason=$(echo "$combined" | grep -oE "@handoff-author-skip\(${role}:[^)]+\)" | head -1 | sed -E "s/@handoff-author-skip\(${role}:[[:space:]]*//; s/\)$//")
     VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
     if [ -f "$VALIDATOR" ]; then
-        if ! validation_error=$(python3 "$VALIDATOR" "guard-handoff-owner" "@handoff-author-skip" "$role" "$override_reason" 2>&1); then
+        if ! validation_error=$("$PYTHON" "$VALIDATOR" "guard-handoff-owner" "@handoff-author-skip" "$role" "$override_reason" 2>&1); then
             cat >&2 <<EOF
 BLOCKED: @handoff-author-skip(${role}: ...) override reason failed quality validation.
 
@@ -113,7 +116,10 @@ EOF
     exit 0
 fi
 
-# Check session log for a dispatch to this role
+# Check session log for a dispatch to this role. Accept EITHER record kind:
+# 'dispatched' (PreToolUse, fires before the agent's first handoff write) or
+# 'returned' (PostToolUse). Legacy 3-field lines (no record column) also match
+# on the role column alone.
 dispatch_found="no"
 if [ -f "$AGENTS_FILE" ]; then
     if awk -F'|' -v r="$role" '$2 == r {print; exit}' "$AGENTS_FILE" 2>/dev/null | grep -q .; then

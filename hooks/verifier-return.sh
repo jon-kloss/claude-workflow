@@ -3,10 +3,20 @@ set -euo pipefail
 
 # PostToolUse hook for Agent tool.
 # Detects when the Continuous Verifier agent returns, extracts the verdict,
-# logs the full result as a bd comment on the task, and injects a summary.
+# logs the full result onto the task (bd comments add), and injects a summary.
+#
+# Result extraction reads the documented PostToolUse field `tool_response`
+# (docs/harness-behavior.md fact 8). For Agent results the whole value is
+# searched (dicts/lists are JSON-dumped). Legacy field names are kept as
+# fallback for older harness versions.
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+
+# Advisory hook: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -39,9 +49,12 @@ for path in [
     except (KeyError, TypeError):
         continue
 
-# Extract result (try multiple paths)
+# Extract result: documented field is tool_response (fact 8). Search the
+# whole value for Agent results — dump dicts/lists to JSON text. Legacy
+# names kept as fallback.
 result = ''
 for path in [
+    lambda d: d['tool_response'],
     lambda d: d['tool_result'],
     lambda d: d['tool']['result'],
     lambda d: d['result'],
@@ -50,7 +63,7 @@ for path in [
     try:
         val = path(data)
         if val:
-            if isinstance(val, dict):
+            if isinstance(val, (dict, list)):
                 result = json.dumps(val)
             else:
                 result = str(val)
@@ -75,12 +88,15 @@ if ! echo "$prompt" | grep -q "CONTINUOUS VERIFIER"; then
     exit 0
 fi
 
-# Extract task and epic IDs
+# Extract task and epic IDs (machine markers first, legacy shapes as fallback
+# — same extraction as verifier-dispatch.sh)
 ids=$("$PYTHON" -c "
 import re, sys
 prompt = sys.stdin.read()
-task = re.search(r'Task:\s*(bd-\d+)', prompt)
-epic = re.search(r'Epic:\s*(bd-\d+)', prompt)
+task = re.search(r'^TASK:\s*([a-z]+-[a-z0-9]{2,})\b', prompt, re.MULTILINE) \
+    or re.search(r'Task:\s*(bd-\d+)', prompt)
+epic = re.search(r'^EPIC:\s*([a-z]+-[a-z0-9]{2,})\b', prompt, re.MULTILINE) \
+    or re.search(r'Epic:\s*(bd-\d+)', prompt)
 task_id = task.group(1) if task else 'unknown'
 epic_id = epic.group(1) if epic else 'unknown'
 print(f'{task_id}|{epic_id}')
@@ -89,8 +105,9 @@ print(f'{task_id}|{epic_id}')
 task_id="${ids%%|*}"
 epic_id="${ids##*|}"
 
-# Remove this task from the in-flight verifier list (paired with verifier-dispatch.sh)
-INFLIGHT_FILE="${HOME}/.claude/hooks/state/verifier-inflight.txt"
+# Remove this task from the in-flight verifier list (paired with
+# verifier-dispatch.sh — same session+project-keyed state directory).
+INFLIGHT_FILE="$(state_dir "$tool_use_json")/verifier-inflight.txt"
 if [ -f "$INFLIGHT_FILE" ]; then
     grep -v "^${task_id}|" "$INFLIGHT_FILE" > "${INFLIGHT_FILE}.tmp" 2>/dev/null || true
     mv "${INFLIGHT_FILE}.tmp" "$INFLIGHT_FILE" 2>/dev/null || true
@@ -110,7 +127,7 @@ fi
 # Log to bd as a comment on the task
 logged="false"
 if [ "$task_id" != "unknown" ] && command -v bd &> /dev/null; then
-    # Truncate result for bd comment (max ~2000 chars to avoid arg length issues)
+    # Truncate result for the comment body (max ~2000 chars to avoid arg length issues)
     comment=$("$PYTHON" -c "
 import sys
 task_id = sys.argv[1]
@@ -123,18 +140,18 @@ if not result:
 print(f'CONTINUOUS VERIFIER RESULT for {task_id}:\nVerdict: {verdict}\n\n{result}')
 " "$task_id" "$verdict" <<< "$result" 2>/dev/null)
 
-    if bd comment "$task_id" "$comment" 2>/dev/null; then
+    if bd comments add "$task_id" "$comment" 2>/dev/null; then
         logged="true"
     fi
 fi
 
 # Build context message
 if [ "$logged" = "true" ]; then
-    msg="CONTINUOUS VERIFIER RETURNED for task ${task_id}: ${verdict}. Full result logged as bd comment on ${task_id}."
+    msg="CONTINUOUS VERIFIER RETURNED for task ${task_id}: ${verdict}. Full result logged via bd comments add on ${task_id}."
 elif [ -n "$result" ]; then
-    msg="CONTINUOUS VERIFIER RETURNED for task ${task_id}: ${verdict}. WARNING: Failed to log to bd — you must manually run: bd comment ${task_id} \"<verifier result>\""
+    msg="CONTINUOUS VERIFIER RETURNED for task ${task_id}: ${verdict}. WARNING: Failed to log to bd — you must manually run: bd comments add ${task_id} \"<verifier result>\""
 else
-    msg="CONTINUOUS VERIFIER RETURNED for task ${task_id}: ${verdict}. WARNING: Could not capture agent result — you must manually log the verifier output as a bd comment on ${task_id}."
+    msg="CONTINUOUS VERIFIER RETURNED for task ${task_id}: ${verdict}. WARNING: Could not capture agent result — you must manually log the verifier output via bd comments add on ${task_id}."
 fi
 
-json_encode_context "$msg"
+json_encode_context "$msg" "PostToolUse"

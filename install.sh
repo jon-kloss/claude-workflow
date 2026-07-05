@@ -489,6 +489,10 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
         {
           "type": "command",
           "command": "bash ${HOME}/.claude/hooks/track-agent-memory-baseline.sh"
+        },
+        {
+          "type": "command",
+          "command": "bash ${HOME}/.claude/hooks/track-agents.sh"
         }
       ]
     }
@@ -557,7 +561,6 @@ HOOKS_JSON=$(cat <<'HOOKS_EOF'
       ]
     },
     {
-      "matcher": "wwiwo",
       "hooks": [
         {
           "type": "command",

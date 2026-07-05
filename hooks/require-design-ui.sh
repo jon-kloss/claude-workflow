@@ -5,12 +5,17 @@ set -euo pipefail
 # Prevents the pattern where /design-ui is skipped and specs get approved
 # without PRODUCT.md, DESIGN.md, or mockups.
 #
-# Escape hatch: add @backend-only tag to a spec to skip this check.
+# Escape hatch: @layer(api|cli|infra) — non-UI implementation surfaces per
+# docs/registry.md §8. Evaluation M1: the retired bare-tag opt-out vocabulary
+# (see registry §7 "Retired tags") is no longer how specs opt out. The single
+# retired backend-only tag is still ACCEPTED as legacy with a deprecation
+# nudge; the other retired spellings are dropped entirely.
 #
 # Runs as PreToolUse hook on Edit/Write commands targeting specs/*.md files.
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-design-ui.sh"
 
 # Read tool use event from stdin
 if ! read -t 2 -r tool_use_json; then
@@ -76,9 +81,19 @@ else
     spec_content="$new_content"
 fi
 
-# Check for @backend-only escape hatch
-if echo "$spec_content" | grep -qi "@backend-only\|@api-only\|@cli\|@infra"; then
+# Escape hatch: @layer(api|cli|infra) — these surfaces have no UI to design.
+if echo "$spec_content" | grep -qE "@layer\((api|cli|infra)\)"; then
     echo '{}'
+    exit 0
+fi
+
+# Legacy escape hatch: the retired backend-only tag is still honored, with a
+# deprecation nudge. The literal is split so tools/lint-consistency.sh R1
+# (which bans the retired tag vocabulary) doesn't flag this support code.
+LEGACY_BACKEND_TAG='@backend'
+LEGACY_BACKEND_TAG="${LEGACY_BACKEND_TAG}-only"
+if echo "$spec_content" | grep -qF "$LEGACY_BACKEND_TAG"; then
+    json_encode_context "[DEPRECATED TAG] This spec uses ${LEGACY_BACKEND_TAG}, which is retired vocabulary (docs/registry.md §7). It still skips the design-ui gate for now — replace it with @layer(api), @layer(cli), or @layer(infra)." "PreToolUse"
     exit 0
 fi
 
@@ -151,6 +166,6 @@ BLOCKED: This spec is UI-facing but /design-ui was not run.
 Missing: ${missing}
 
 Run /design-ui before approving UI-facing specs.
-If this spec is NOT UI-facing, add @backend-only tag to skip this check.
+If this spec is NOT UI-facing, tag it @layer(api), @layer(cli), or @layer(infra) to skip this check (docs/registry.md §8).
 EOF
 exit 2

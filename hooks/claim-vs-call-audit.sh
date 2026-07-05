@@ -5,8 +5,9 @@ set -euo pipefail
 # /impeccable quality gates (critique, audit, harden, clarify, adapt) were
 # actually invoked via the Skill tool in this session for this spec slug.
 #
-# Enforces design-ui/SKILL.md:14 ("If you did not type Skill(impeccable,
-# '<gate> <slug>'), the gate did not run") deterministically. Prevents the
+# Enforces the design-ui SKILL.md rigid rule ("If you did not type
+# Skill(impeccable, '<gate> <slug>'), the gate did not run" — see the quality
+# gates section) deterministically. Prevents the
 # documented 2026-05-21 incident pattern where gate claims appeared in the
 # spec but no corresponding Skill calls were logged.
 #
@@ -20,8 +21,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
-
-SKILLS_FILE="${HOME}/.claude/hooks/state/session-skills.log"
+require_python_or_block "claim-vs-call-audit.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -85,6 +85,9 @@ fi
 
 slug="${basename_file%.md}"
 
+# Session+project-keyed state (evaluation H5)
+SKILLS_FILE="$(state_dir "$tool_use_json")/session-skills.log"
+
 # Required gates
 required_gates=(critique audit harden clarify adapt)
 
@@ -99,7 +102,7 @@ while IFS= read -r match; do
     gate_match=$(echo "$match" | sed -E "s/@gate-skip\(([a-z]+):.*/\1/")
     reason_match=$(echo "$match" | sed -E "s/@gate-skip\([a-z]+:[[:space:]]*(.*)\)$/\1/")
     if [ -f "$REASON_VALIDATOR" ]; then
-        if ! validation_error=$(python3 "$REASON_VALIDATOR" "claim-vs-call-audit" "@gate-skip" "$gate_match" "$reason_match" 2>&1); then
+        if ! validation_error=$("$PYTHON" "$REASON_VALIDATOR" "claim-vs-call-audit" "@gate-skip" "$gate_match" "$reason_match" 2>&1); then
             cat >&2 <<EOF
 BLOCKED: @gate-skip(${gate_match}: ...) override reason failed quality validation.
 
@@ -149,9 +152,9 @@ fi
 cat >&2 <<EOF
 BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but these /impeccable gates were not invoked via the Skill tool in this session for '${slug}': ${missing_gates}
 
-design-ui/SKILL.md:14: 'If you did not type Skill(impeccable, "<gate> <slug>"), the gate did not run.'
+design-ui SKILL.md (quality gates section): 'If you did not type Skill(impeccable, "<gate> <slug>"), the gate did not run.'
 
-This hook reads ~/.claude/hooks/state/session-skills.log. Run the missing gates:
+This hook reads session-skills.log from the session-keyed state directory. Run the missing gates:
 $(for g in $missing_gates; do printf '  Skill(impeccable, "%s %s")\n' "$g" "$slug"; done)
 
 Then retry the edit.

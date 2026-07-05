@@ -11,8 +11,8 @@ set -euo pipefail
 # updating their memory file, despite the Exit checklist naming it as a
 # terminal step. Same family as the handoff-skip enforcement, but for memory.
 #
-# State files: ~/.claude/hooks/state/agent-memory-baseline-<role>.txt
-# Format: <epoch-mtime>
+# State files: <session-keyed state dir>/agent-memory-baseline-<role>.txt
+# (see _common.sh state_dir — evaluation H5). Format: <epoch-mtime>
 #
 # Skip conditions: subagent_type is not in the known-role-agent set
 # (general-purpose, hyperpowers:*, etc. don't have memory files); memory file
@@ -21,8 +21,10 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
-STATE_DIR="${HOME}/.claude/hooks/state"
-mkdir -p "$STATE_DIR"
+# Advisory tracker: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -77,6 +79,7 @@ if [ -z "$mtime" ]; then
     exit 0
 fi
 
+STATE_DIR="$(state_dir "$tool_use_json")"
 echo "$mtime" > "$STATE_DIR/agent-memory-baseline-${subagent_type}.txt"
 
 echo '{}'

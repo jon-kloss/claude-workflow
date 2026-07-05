@@ -5,7 +5,8 @@ set -euo pipefail
 # hyperpowers:code-reviewer agent was dispatched in this session with a
 # prompt referencing this spec's slug.
 #
-# Enforces build/SKILL.md:14 ("Verification never scales down") deterministically.
+# Enforces the build SKILL.md verification rule ("Verification never scales
+# down" — see the Full Verification section) deterministically.
 #
 # Escape hatch: add @verifier-skip(reason) tag to the spec content. The reason
 # stays in the spec file as documentation of why this verification was skipped.
@@ -14,8 +15,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
-
-AGENTS_FILE="${HOME}/.claude/hooks/state/session-agents.log"
+require_python_or_block "require-verifier-agents.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -85,6 +85,9 @@ fi
 # Derive the spec slug from the filename
 slug="${basename_file%.md}"
 
+# Session+project-keyed state (evaluation H5)
+AGENTS_FILE="$(state_dir "$tool_use_json")/session-agents.log"
+
 # If no session agents log exists, nothing has been dispatched
 if [ ! -f "$AGENTS_FILE" ]; then
     cat >&2 <<EOF
@@ -100,11 +103,12 @@ EOF
 fi
 
 # Look for a code-reviewer dispatch whose prompt mentions this slug or spec path.
-# The session-agents.log format is: timestamp|subagent_type|prompt-oneline
-# We match the subagent_type column exactly, then check the prompt for the slug.
+# Log format: timestamp|subagent_type|dispatched-or-returned|prompt-oneline
+# (legacy 3-field lines carry the prompt in field 3 — search the whole line
+# after matching the subagent_type column so both formats work).
 match=$(awk -F'|' -v slug="$slug" '
     $2 == "hyperpowers:code-reviewer" {
-        if (index($3, slug) > 0) { print; exit }
+        if (index($0, slug) > 0) { print; exit }
     }
 ' "$AGENTS_FILE" 2>/dev/null || echo "")
 

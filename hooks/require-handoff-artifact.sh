@@ -12,7 +12,7 @@ set -euo pipefail
 #     step-2-<slug>-product-owner.html
 #     step-2.5-<slug>-application-architect.html
 #     step-3.3-<slug>-security-architect.html
-#     step-4.1-<slug>-qa-engineer.html
+#     step-3.3-<slug>-qa-engineer.html
 #   @layer(ui), @layer(full-stack):
 #     step-2.85-<slug>-uiux-designer.html
 #     step-3.2-<slug>-frontend-engineer.html
@@ -20,6 +20,12 @@ set -euo pipefail
 #     step-3.2-<slug>-backend-engineer.html
 #   @layer(cli) or @layer(infra):
 #     step-3.2-<slug>-backend-engineer.html  (the closest match — generic implementer)
+#   @touches-data ONLY (decision D2, evaluation M10):
+#     step-3.3-<slug>-data-architect.html
+#     (@layer(api|full-stack) alone no longer forces the data gate — a DB-free
+#     proxy endpoint shouldn't pay a validated override. When the Technical
+#     Context mentions DB terms but the tag is missing, a one-line advisory
+#     suggests adding @touches-data instead of blocking.)
 #
 # Escape hatch: @handoff-skip(role: reason) tag in spec content, one per role
 # to skip. Reason persists.
@@ -28,6 +34,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-handoff-artifact.sh"
 
 # Defensive: if the Python validator isn't installed (e.g. install.sh ran on
 # an older version that only symlinked *.sh, or the file was manually removed),
@@ -171,14 +178,19 @@ case "$layer" in
         ;;
 esac
 
-# data-architect required when:
-#   - spec is explicitly tagged @touches-data, OR
-#   - spec is @layer(api) or @layer(full-stack) (these implicitly touch data)
+# data-architect required ONLY when the spec is tagged @touches-data
+# (decision D2 / evaluation M10 — @layer(api|full-stack) alone no longer
+# forces the gate). When the tag is absent but the Technical Context section
+# mentions DB terms, emit a one-line advisory suggesting the tag.
 touches_data="no"
+data_advisory=""
 if echo "$spec_content" | grep -q "@touches-data"; then
     touches_data="yes"
 elif [ "$layer" = "api" ] || [ "$layer" = "full-stack" ]; then
-    touches_data="yes"
+    tech_context=$(echo "$spec_content" | sed -n '/^## Technical Context/,/^## /p' 2>/dev/null || echo "")
+    if echo "$tech_context" | grep -qiE '(database|migration|schema|sql|postgres|mysql|sqlite|mongo|redis|dynamodb| orm |query plan|table[s]? |index(es)? )'; then
+        data_advisory="ADVISORY: specs/${slug}.md (@layer ${layer}) has no @touches-data tag but its Technical Context mentions database terms — if it touches persistent data, add @touches-data so the data-architect gate applies (registry §8)."
+    fi
 fi
 if [ "$touches_data" = "yes" ]; then
     expected+=("step-3.3-${slug}-data-architect.html")
@@ -195,7 +207,7 @@ while IFS= read -r match; do
     role_match=$(echo "$match" | sed -E "s/@handoff-skip\(([a-z-]+):.*/\1/")
     reason_match=$(echo "$match" | sed -E "s/@handoff-skip\([a-z-]+:[[:space:]]*(.*)\)$/\1/")
     if [ -f "$REASON_VALIDATOR" ]; then
-        if ! validation_error=$(python3 "$REASON_VALIDATOR" "require-handoff-artifact" "@handoff-skip" "$role_match" "$reason_match" 2>&1); then
+        if ! validation_error=$("$PYTHON" "$REASON_VALIDATOR" "require-handoff-artifact" "@handoff-skip" "$role_match" "$reason_match" 2>&1); then
             cat >&2 <<EOF
 BLOCKED: @handoff-skip(${role_match}: ...) override reason failed quality validation.
 
@@ -235,21 +247,29 @@ done
 
 # Build response
 if [ ${#missing[@]} -eq 0 ] && [ ${#malformed[@]} -eq 0 ]; then
-    echo '{}'
+    if [ -n "$data_advisory" ]; then
+        json_encode_context "$data_advisory" "PreToolUse"
+    else
+        echo '{}'
+    fi
     exit 0
 fi
 
+# Real newlines (not literal \n escapes — the harness renders those as raw
+# backslash-n text in the error the model sees; harness-behavior.md).
+NL='
+'
 err_body=""
 if [ ${#missing[@]} -gt 0 ]; then
-    err_body="${err_body}\nMissing handoff files (specs/handoffs/):\n"
+    err_body="${err_body}${NL}Missing handoff files (specs/handoffs/):${NL}"
     for m in "${missing[@]}"; do
-        err_body="${err_body}  - ${m}\n"
+        err_body="${err_body}  - ${m}${NL}"
     done
 fi
 if [ ${#malformed[@]} -gt 0 ]; then
-    err_body="${err_body}\nSchema violations:\n"
+    err_body="${err_body}${NL}Schema violations:${NL}"
     for m in "${malformed[@]}"; do
-        err_body="${err_body}  - ${m}\n"
+        err_body="${err_body}  - ${m}${NL}"
     done
 fi
 
@@ -261,5 +281,6 @@ ${err_body}
 Dispatch the missing role agents and produce their handoff files per docs/role-agent-handoff-schema.md. To skip a specific role (rare — document the reason), add to the spec content:
   @handoff-skip(<role-slug>: <concise reason>)
   e.g. @handoff-skip(security-architect: spec is a UI text-only copy change, no security surface)
+${data_advisory}
 EOF
 exit 2
