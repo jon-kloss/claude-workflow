@@ -25,10 +25,10 @@
 - [x] T4.2 D1/D2/D3/D5/D6 resolved in core skills (671e74f)
 - [x] T4.3 Registry sweep complete — repo-wide lint: 0 violations (671e74f, 9025e32, 157cbec)
 - [x] T4.4 De-scaffolding: build 1181→902, design 752→624, respec 565→477, qa-engineer 222→192; model pins gone; announce lines gone; docs/incidents.md ledger
-- [ ] T5.1 Retrospective repair (build Phase 4 trigger, bd types, override-ledger analysis, taxonomy)
-- [ ] T5.2 README/AGENTS truth pass + "when a hook blocks you" section
-- [ ] T5.3 Smoke-test sandboxing + Linux portability + behavior coverage for Phase 3 fixes
-- [ ] T5.4 Benchmarks refresh or retire (needs D10)
-- [ ] T6.1 e2e-workflow harness (artifact-replay first)
-- [ ] T6.2 CI wiring (lint + smoke + e2e on Linux/macOS)
-- [ ] T6.3 Close-out checklist vs evaluation; delete this plan dir
+- [x] T5.1 Retrospective repair (a9c8402): Step 4.8 trigger, correct bd types, override-ledger analysis, registry-ID taxonomy, role tie-breaks
+- [x] T5.2 README/AGENTS truth pass (e555183): 16 agents, 35 hooks, "When a Hook Blocks You", manifest reality, live link fixes
+- [x] T5.3 Smoke sandboxed + portable (059b219): zero real side effects proven, bash 3.2, --installed flag, 216 checks
+- [x] T5.4 Benchmarks refreshed per D10 (29ae01f): artifact-predicate rubrics, A/B vs vanilla, benchmarks/README
+- [x] T6.1 e2e-workflow harness (c57d982): 76-check composition test, sandboxed, harness-fact regressions
+- [x] T6.2 CI wiring (c57d982): .github/workflows/ci.yml, ubuntu+macos, bd-absent skip path verified
+- [x] T6.3 Close-out checklist green (lint 0, all 5 suites pass); epic close + plan-dir delete next
