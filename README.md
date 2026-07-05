@@ -88,7 +88,7 @@ Use when starting workflow on an existing codebase, OR when accumulated changes 
 
 Inspired by [Simon Willison's "unreasonable effectiveness of HTML"](https://simonwillison.net/2026/May/8/unreasonable-effectiveness-of-html/) extended to inter-agent communication. Each handoff is:
 
-- **User-auditable** — `open specs/handoffs/foo.html` renders in a browser with proper hierarchy. The user can spot-check any session.
+- **User-auditable** — `open specs/handoffs/step-2.5-user-auth-application-architect.html` renders in a browser with proper hierarchy. The user can spot-check any session.
 - **Machine-parseable** — required `<meta data-*>` and `<section data-role="...">` tags are the only contract; hooks grep for them.
 - **Rich content** — inline `<svg>` for architecture diagrams, `<details>` for collapsibles, `<table>` for matrices.
 - **Versionable** — `data-handoff-version` on the `<html>` element.
@@ -104,12 +104,12 @@ Full schema: [docs/role-agent-handoff-schema.md](docs/role-agent-handoff-schema.
 | `product-owner` | Design | Socratic questioning (Step 2), reality check + sign-off (Step 4) |
 | `application-architect` | Design + Respec | Decomposition (Step 2.5), arch docs (Step 4.5), blast radius |
 | `uiux-designer` | Design | Wraps `/design-ui` — PRODUCT.md, DESIGN.md, mockups, `/impeccable` gate pipeline |
-| `security-architect` | Build | Step 3.3c.1 threat-model review (OWASP-style on the diff) |
-| `devops-architect` | Build + Design | Deployment topology, observability, scaling, rollback (Step 3.3c.2 + Step 4.5) |
-| `data-architect` | Build | Schema design (Step 3.1.1), migration safety + query review (Step 3.3c.3) — conditional on `@touches-data` or `@layer(api\|full-stack)` |
+| `security-architect` | Build | Step 3.3d threat-model review (OWASP-style on the diff) |
+| `devops-architect` | Build + Design | Deployment topology, observability, scaling, rollback (Step 3.3e + Step 4.5) |
+| `data-architect` | Build | Schema design (Step 3.1.1), migration safety + query review (Step 3.3f) — conditional on `@touches-data` |
 | `backend-engineer` | Build | TDD for `@layer(api\|cli\|infra)` + the API portion of `@layer(full-stack)` |
-| `frontend-engineer` | Build | TDD for `@layer(ui)` + UI portion of full-stack; owns Step 3.2.5 wiring + Step 3.3d visual fidelity |
-| `qa-engineer` | Build | Per-spec scenario coverage (Step 3.3e) + epic-level Playwright/Cypress/Detox e2e (Step 4.1) |
+| `frontend-engineer` | Build | TDD for `@layer(ui)` + UI portion of full-stack; owns Step 3.2.5 wiring + visual-fidelity self-audit at REFACTOR |
+| `qa-engineer` | Build | Per-spec authoritative verification (Step 3.3g) + epic-level Playwright/Cypress/Detox e2e (Step 4.1) |
 | `release-coordinator` | Build | Final cross-spec coherence check + rollback plan (Step 4.2 — gates `bd close <epic>`) |
 | `spec-sre-auditor` | Build | Step 3.3g intent + SRE-rigor audit (carried over from master) |
 
@@ -386,7 +386,7 @@ Hooks are organized by event. Most are deterministic gates that block on missing
 | Hook | What It Does |
 |------|--------------|
 | `block-unread-edits.sh` | Blocks edits on files that haven't been read first |
-| `require-design-ui.sh` | Blocks `@status(approved)` on UI-facing specs missing PRODUCT.md, DESIGN.md, or mockups. Use `@backend-only` to skip. |
+| `require-design-ui.sh` | Blocks `@status(approved)` on UI-facing specs missing PRODUCT.md, DESIGN.md, or mockups. Skips automatically for `@layer(api\|cli\|infra)` specs. |
 | `require-layer-tag.sh` | Blocks `@status(approved\|implemented\|verified)` on specs without `@layer(api\|ui\|full-stack\|cli\|infra)` |
 | `require-investigation-findings.sh` | Blocks `@status(implemented)` without `## Investigation Findings` section (3+ lines). Override: `@investigation-skip(reason)`. Auto-allows `@trivial`. |
 | `require-verifier-agents.sh` | Blocks `@status(verified)` without a `hyperpowers:code-reviewer` Agent dispatch in this session referencing the spec slug. Override: `@verifier-skip(reason)`. |

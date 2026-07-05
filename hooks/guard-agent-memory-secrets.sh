@@ -15,6 +15,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "guard-agent-memory-secrets.sh"
 
 # Defensive: if the Python detector isn't installed (e.g. install.sh ran on an
 # older version that only symlinked *.sh), degrade gracefully.

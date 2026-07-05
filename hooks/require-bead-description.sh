@@ -7,6 +7,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-bead-description.sh"
 
 # Read tool use event from stdin
 if ! read -t 2 -r tool_use_json; then
@@ -31,8 +32,10 @@ if [ "$command" = "null" ] || [ -z "$command" ]; then
     exit 0
 fi
 
-# Only check bd create commands
-if ! echo "$command" | grep -qE '\bbd\s+create\b'; then
+# Only check bd create in COMMAND position: start of the command, or after
+# && ; | or an opening paren. A mention inside a string (`echo "run bd
+# create"`) must not fire (evaluation H15).
+if ! echo "$command" | grep -qE '(^|[;&|(])[[:space:]]*bd[[:space:]]+create([[:space:]]|$)'; then
     echo '{}'
     exit 0
 fi

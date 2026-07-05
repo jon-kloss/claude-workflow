@@ -14,10 +14,14 @@ set -euo pipefail
 # This hook makes "mounted in the product" part of a UI feature's definition
 # of done, so the integration spec must exist and own every feature UP FRONT.
 #
-# Scope (matches /design Step 2.5 rule): only fires when the epic has >=2
-# user-facing specs (@layer(ui|full-stack)). Single-UI-feature epics, CLI-only,
-# API-only, library, and infra-only epics are exempt automatically — no skip
-# tag needed.
+# Scope (matches /design Step 2.5 rule): only fires when the CURRENT EPIC has
+# >=2 user-facing specs (@layer(ui|full-stack)). The epic's spec list is read
+# from beads (open epic's design field); when bd is unavailable or the epic
+# lists no specs, the count falls back to the whole specs/ directory with a
+# warning in the block message (evaluation H7.3 — whole-dir counting let
+# verified specs from a previous epic push a single-feature epic over the
+# threshold). Single-UI-feature epics, CLI-only, API-only, library, and
+# infra-only epics are exempt automatically — no skip tag needed.
 #
 # The integration spec is the spec tagged @integration. It carries a Mount Map
 # (## Mount Map section / Composition table) naming every feature and where it
@@ -41,6 +45,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-feature-mounted.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -97,7 +102,9 @@ if ! echo "$spec_content" | grep -qE "@layer\((ui|full-stack)\)"; then
 fi
 
 # The integration spec is itself the host — exempt it.
-if echo "$spec_content" | grep -qE "@integration\b"; then
+# @integration must NOT be followed by '-' so the @integration-skip override
+# tag is not misread as the @integration marker (evaluation H7.1).
+if echo "$spec_content" | grep -qE "@integration([^-]|\$)"; then
     echo '{}'
     exit 0
 fi
@@ -117,17 +124,45 @@ spec_dir="$(dirname "$file_path")"
 project_root="$(dirname "$spec_dir")"
 
 # ---------- Scope gate: only multi-feature user-facing epics ----------
-# Count user-facing specs in specs/ (excluding system.md / arch.md). If fewer
-# than 2, this is a single-UI-feature epic (or non-UI) — exempt.
+# Count user-facing specs IN THE CURRENT EPIC (evaluation H7.3). The epic's
+# spec list comes from beads: open epic -> `bd show` design field spec paths.
+# Fallback (bd missing / no open epic / no spec list): whole specs/ dir count
+# plus a warning appended to any block message.
 ui_spec_count=0
-for s in "$spec_dir"/*.md; do
-    [ -f "$s" ] || continue
-    b="$(basename "$s")"
-    [[ "$b" == "system.md" || "$b" == "arch.md" ]] && continue
-    if grep -qE "@layer\((ui|full-stack)\)" "$s" 2>/dev/null; then
-        ui_spec_count=$((ui_spec_count + 1))
+epic_scoped="no"
+scope_note=""
+
+if command -v bd >/dev/null 2>&1; then
+    epic_id=$( (cd "$project_root" 2>/dev/null && bd list --status=open --type=epic 2>/dev/null) | grep -oE '[a-z]+-[a-z0-9]{2,}' | head -1 || true)
+    if [ -n "$epic_id" ]; then
+        epic_specs=$( (cd "$project_root" 2>/dev/null && bd show "$epic_id" 2>/dev/null) | grep -oE 'specs/[A-Za-z0-9._-]+\.md' | sort -u || true)
+        if [ -n "$epic_specs" ]; then
+            epic_scoped="yes"
+            while IFS= read -r sp; do
+                [ -z "$sp" ] && continue
+                s="$project_root/$sp"
+                [ -f "$s" ] || continue
+                b="$(basename "$s")"
+                [[ "$b" == "system.md" || "$b" == "arch.md" ]] && continue
+                if grep -qE "@layer\((ui|full-stack)\)" "$s" 2>/dev/null; then
+                    ui_spec_count=$((ui_spec_count + 1))
+                fi
+            done <<< "$epic_specs"
+        fi
     fi
-done
+fi
+
+if [ "$epic_scoped" != "yes" ]; then
+    for s in "$spec_dir"/*.md; do
+        [ -f "$s" ] || continue
+        b="$(basename "$s")"
+        [[ "$b" == "system.md" || "$b" == "arch.md" ]] && continue
+        if grep -qE "@layer\((ui|full-stack)\)" "$s" 2>/dev/null; then
+            ui_spec_count=$((ui_spec_count + 1))
+        fi
+    done
+    scope_note="(NOTE: bd was unavailable or the open epic lists no spec paths, so the UI-spec count above used the WHOLE specs/ directory — it may overcount across epics. If this epic really has <2 UI specs, this block is a false positive from that fallback.)"
+fi
 
 if [ "$ui_spec_count" -lt 2 ]; then
     echo '{}'
@@ -135,12 +170,13 @@ if [ "$ui_spec_count" -lt 2 ]; then
 fi
 
 # ---------- Find the integration spec(s) ----------
-# An integration spec is any spec (other than this one) tagged @integration.
+# An integration spec is any spec (other than this one) tagged @integration
+# (not followed by '-', so @integration-skip doesn't qualify a spec as host).
 integration_specs=()
 for s in "$spec_dir"/*.md; do
     [ -f "$s" ] || continue
     [ "$s" = "$file_path" ] && continue
-    if grep -qE "@integration\b" "$s" 2>/dev/null; then
+    if grep -qE "@integration([^-]|\$)" "$s" 2>/dev/null; then
         integration_specs+=("$s")
     fi
 done
@@ -168,16 +204,20 @@ To override (rare — document why this epic has no single assembly owner):
   @integration-skip(<reason>)
 To override for just this feature (it is mounted by another feature, not the shell):
   @mount-skip(<reason>)
+${scope_note}
 EOF
     exit 2
 fi
 
 # ---------- Check 1: listed in an integration spec's Mount Map ----------
-# Satisfied if any integration spec references this slug anywhere in its body
-# (the Mount Map / Composition table names the feature by slug).
+# Satisfied if any integration spec references this slug as a whole word /
+# table cell. Bare substring matching let slug 'chat' pass when the map only
+# contained 'chat-window' (evaluation H7.2) — the slug must be delimited by
+# table pipes, whitespace, path separators, or punctuation on both sides.
 in_mount_map="no"
+slug_boundary="(^|[|[:space:]/(\`])${slug}([|[:space:].,:;)\`]|\$)"
 for isp in "${integration_specs[@]}"; do
-    if grep -q "$slug" "$isp" 2>/dev/null; then
+    if grep -qE "$slug_boundary" "$isp" 2>/dev/null; then
         in_mount_map="yes"
         break
     fi
@@ -198,6 +238,9 @@ pascal="$(echo "$slug" | awk -F- '{out=""; for(i=1;i<=NF;i++){out=out toupper(su
 imported="no"
 if command -v grep >/dev/null 2>&1; then
     # Search common source roots under the project root, not the specs dir.
+    # The slug/PascalCase form must appear as a whole identifier — the same
+    # boundary discipline as the Mount-Map check (evaluation H7.2): slug
+    # 'chat' must not be satisfied by an import of 'chat-window'.
     if grep -rIlE "(import|from|require|use |mod )" "$project_root" \
             --include='*.ts' --include='*.tsx' --include='*.js' --include='*.jsx' \
             --include='*.mjs' --include='*.cjs' --include='*.vue' --include='*.svelte' \
@@ -207,7 +250,7 @@ if command -v grep >/dev/null 2>&1; then
             --exclude-dir=dist --exclude-dir=build --exclude-dir=specs \
             --exclude-dir=tests --exclude-dir=e2e --exclude-dir=__tests__ \
             2>/dev/null \
-        | xargs grep -lE "(\\b${pascal}\\b|${slug})" 2>/dev/null \
+        | xargs grep -lE "((^|[^A-Za-z0-9_])${pascal}([^A-Za-z0-9_]|\$)|(^|[^A-Za-z0-9-])${slug}([^A-Za-z0-9-]|\$))" 2>/dev/null \
         | grep -q .; then
         imported="yes"
     fi
@@ -219,7 +262,7 @@ if [ "$imported" = "yes" ]; then
     json_encode_context "
 [MOUNT MAP] specs/${slug}.md appears imported in application source but is NOT listed in the integration spec's Mount Map ($(basename "${integration_specs[0]}")). Add a row for it so the assembly contract stays authoritative:
   | ${slug} | <component> | <route/region/nav> |
-and tag this spec @mounts-in($(basename "${integration_specs[0]}" .md))."
+and tag this spec @mounts-in($(basename "${integration_specs[0]}" .md))." "PreToolUse"
     exit 0
 fi
 
@@ -244,5 +287,6 @@ Fix one of:
 Reference: build/SKILL.md Step 4.1 (assembled-app e2e) and the integration
 spec's Mount Map. Runtime reachability is independently verified by qa-engineer
 Step 4.1 and the release-coordinator orphan check before epic close.
+${scope_note}
 EOF
 exit 2

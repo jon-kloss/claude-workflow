@@ -8,11 +8,10 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
-READS_DIR="${HOME}/.claude/hooks/state"
-READS_FILE="${READS_DIR}/session-reads.txt"
-
-mkdir -p "$READS_DIR"
-touch "$READS_FILE"
+# Advisory tracker: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
 
 # Read tool use event from stdin
 if ! read -t 2 -r tool_use_json; then
@@ -25,6 +24,9 @@ if ! json_valid "$tool_use_json"; then
     echo '{}'
     exit 0
 fi
+
+READS_FILE="$(state_dir "$tool_use_json")/session-reads.txt"
+touch "$READS_FILE"
 
 tool_name=$(json_get "$tool_use_json" ".tool.name" "unknown")
 if [ "$tool_name" = "unknown" ]; then

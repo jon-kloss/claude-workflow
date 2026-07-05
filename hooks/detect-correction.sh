@@ -9,14 +9,21 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
+# Advisory hook: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
+
 # Read prompt from stdin
 if ! read -t 2 -r prompt_json; then
     echo '{}'
     exit 0
 fi
 
-# Extract prompt text
-prompt_text=$(json_get "$prompt_json" ".text")
+# Extract prompt text. UserPromptSubmit payload field is `prompt`
+# (docs/harness-behavior.md fact 4); `.text` kept as legacy fallback.
+prompt_text=$(json_get "$prompt_json" ".prompt")
+[ -z "$prompt_text" ] && prompt_text=$(json_get "$prompt_json" ".text")
 
 if [ -z "$prompt_text" ]; then
     echo '{}'
@@ -98,7 +105,7 @@ Proposed fix: [optional — if the fix is obvious]\"
 **Beads not initialized.** Cannot log incident. Note the correction and suggest the user run \`bd init\` if they want incident tracking."
     fi
 
-    json_encode_context "$msg"
+    json_encode_context "$msg" "UserPromptSubmit"
 else
     echo '{}'
 fi

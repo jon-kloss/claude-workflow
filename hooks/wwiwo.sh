@@ -1,15 +1,41 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# "What Was I Working On?" — triggered by typing "wwiwo?" in the prompt.
+# "What Was I Working On?" — triggered by typing "wwiwo" in the prompt.
 # Shows in-progress, ready, and recently closed beads work + Gherkin spec statuses.
+#
+# Trigger filtering happens HERE, not via an install.sh matcher:
+# UserPromptSubmit matchers are ignored by the harness — every UserPromptSubmit
+# hook runs on every prompt (docs/harness-behavior.md fact 5). The decorative
+# "matcher": "wwiwo" was removed from install.sh accordingly.
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
+# Advisory hook: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+  exit 0
+fi
+
+# Read the prompt payload and check for the trigger word.
+if ! read -t 2 -r prompt_json; then
+  echo '{}'
+  exit 0
+fi
+
+prompt_text=$(json_get "$prompt_json" ".prompt")
+[ -z "$prompt_text" ] && prompt_text=$(json_get "$prompt_json" ".text")
+
+# Invocation only, not mention: the prompt must BE "wwiwo" (or start with it as a
+# command, e.g. "wwiwo?"). A prompt merely discussing wwiwo must not dump status.
+if ! echo "$prompt_text" | grep -qiE '^[[:space:]]*wwiwo([[:space:]?!.]|$)'; then
+  echo '{}'
+  exit 0
+fi
+
 # Skip if beads not initialized
 if [ ! -d ".beads" ]; then
-  json_encode_context 'No .beads/ directory in this project. Run `bd init` to set up issue tracking.'
+  json_encode_context 'No .beads/ directory in this project. Run `bd init` to set up issue tracking.' "UserPromptSubmit"
   exit 0
 fi
 
@@ -123,4 +149,4 @@ fi
 msg+="
 **Present this to the user in a clear, readable format. If there is in-progress or ready work, ask which one they want to pick up.**"
 
-json_encode_context "$msg"
+json_encode_context "$msg" "UserPromptSubmit"

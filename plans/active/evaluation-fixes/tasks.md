@@ -15,16 +15,16 @@
 - [x] T1.4 Manifest-driven uninstall + tests/install-roundtrip.sh (21/21 green, verified independently)
 - [x] T1.5 Agent paths absolute (d74e490)
 - [x] T2.3 docs/agent-protocol.md extraction (d74e490): agents 1910→1694 lines; smoke 151/151 after re-pointing 3 shape checks
-- [ ] T3.1 Enforcement architecture per decision record (A2/H1)
-- [ ] T3.2 Verifier state machine: template markers + session-keyed state + compact retention
-- [ ] T3.3 Per-hook correctness fixes (one commit per hook; smoke test each: block/allow/override)
-- [ ] T3.4 _validate_handoff.py: empty input-refs, data-verdict, spec-drift severity, route-to required
+- [x] T3.1 PreToolUse dispatch logging live (e611a67); H1 deadlock fixed; verified in live settings
+- [x] T3.2 Verifier markers + sha(cwd)/session_id state keying (subagents inherit session_id — fact 11); compact retains
+- [x] T3.3 All per-hook fixes (e611a67, one chunked commit rather than per-hook); smoke 151→216 checks, green
+- [x] T3.4 _validate_handoff.py upgraded (empty input-refs, spec-drift, route-to, per-role data-verdict)
 
 ## Later
-- [ ] T4.1 Orchestrator-mediated questioning protocol (design/respec/build/agents)
-- [ ] T4.2 Semantic contradiction resolutions (needs D1, D2, D3, D5)
-- [ ] T4.3 Registry-driven drift sweep across skills/agents/schema
-- [ ] T4.4 De-scaffolding pass (boilerplate, rationalizations, data-check examples, context economy, model pins per D4, announce lines per D6)
+- [x] T4.1 Orchestrator-mediated questioning landed in design/respec + agents (671e74f, 9025e32); design-ui fallback conditionals added
+- [x] T4.2 D1/D2/D3/D5/D6 resolved in core skills (671e74f)
+- [x] T4.3 Registry sweep complete — repo-wide lint: 0 violations (671e74f, 9025e32, 157cbec)
+- [x] T4.4 De-scaffolding: build 1181→902, design 752→624, respec 565→477, qa-engineer 222→192; model pins gone; announce lines gone; docs/incidents.md ledger
 - [ ] T5.1 Retrospective repair (build Phase 4 trigger, bd types, override-ledger analysis, taxonomy)
 - [ ] T5.2 README/AGENTS truth pass + "when a hook blocks you" section
 - [ ] T5.3 Smoke-test sandboxing + Linux portability + behavior coverage for Phase 3 fixes

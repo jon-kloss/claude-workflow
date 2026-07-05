@@ -91,9 +91,7 @@ MIXED:
 
 <the_process>
 
-## Step 1: Announce and Find Spec
-
-"I'm using the /respec skill to modify an existing spec."
+## Step 1: Find Spec
 
 ### Find spec from beads issue
 
@@ -145,12 +143,14 @@ Agent tool (subagent_type: application-architect, run_in_background: false):
 "You are running /respec Step 3 (blast radius) for specs/<target-slug>.md. The user wants to change:
 <paste change description from Step 2>. Walk the dependency graph, grep specs/*.md for informal
 references to the changing contract symbols/paths, classify the change, and produce a table of
-affected specs with required edits. Produce your handoff at:
-  specs/handoffs/step-3-<target-slug>-application-architect.html
+affected specs with the specific edits each requires — that table is the edit plan the orchestrator
+executes in Step 4. You cannot ask the user questions — put blocking questions in your handoff's
+open-questions section per docs/agent-protocol.md §2. Produce your handoff at:
+  specs/handoffs/respec-3-<slug>-application-architect.html   (slug = the target spec's slug)
 End with a recommendation: PROPAGATE (list of specs) or LOCALIZED (target only)."
 ```
 
-When the agent returns, present its blast radius to the user via AskUserQuestion:
+When the agent returns: relay any `data-blocking="true"` open-questions to the user via AskUserQuestion and re-dispatch with the answers (cap 3 rounds, then escalate with a written summary — `docs/agent-protocol.md` §2). Then present its blast radius to the user via AskUserQuestion:
 
 ```
 "Blast radius analysis for [change description]:
@@ -182,22 +182,13 @@ Confirm this is the correct scope?"
 
 ### Propagate to downstream specs (contract-breaking only)
 
-**Dispatch the role-implementer agent for each affected downstream spec** based on its `@layer`:
-- `@layer(api|cli|infra)` → backend-engineer
-- `@layer(ui)` → frontend-engineer
-- `@layer(full-stack)` → backend-engineer (API portion) + frontend-engineer (UI portion)
+**The ORCHESTRATOR edits each affected downstream spec directly**, working row-by-row through the application-architect's blast-radius table (its handoff is the edit plan — no engineer dispatch for spec edits; implementers write code during /build, not specs). For each affected downstream spec:
 
-```
-Agent tool (subagent_type: <backend-engineer|frontend-engineer>, run_in_background: false):
-"You are propagating a contract change to specs/<downstream-slug>.md. The application-architect's
-blast-radius handoff (step-3-<target-slug>-application-architect.html) lists the specific edits
-required. Make those edits: update Technical Context, update scenarios that reference old behavior,
-regress @status to @status(approved), add @respec change note. Produce a brief handoff at:
-  specs/handoffs/respec-<downstream-slug>-<role>.html
-summarizing what changed and citing file:lines in the edited spec."
-```
+1. Make the edits the architect's table specifies: update Technical Context, update scenarios that reference old behavior.
+2. Regress `@status` per the Status Regression Rules.
+3. Add the `@respec(YYYY-MM-DD)` change note.
 
-When the agent returns, verify the diff matches the architect's blast-radius edits and the `@status` was regressed.
+After editing, verify each diff (`git diff specs/<downstream-slug>.md`) matches the architect's blast-radius table and the `@status` was regressed. The architect's handoff is the audit record of the propagation; the orchestrator's edits need no per-spec handoff.
 
 **Do NOT propagate when ALL three deterministic checks pass:**
 - **Additive change**: The diff to the upstream spec adds new `### Scenario:` blocks but modifies no existing scenario, no `## Technical Context` API entries, and no `## Interaction Map` entries. Verify with `git diff specs/<upstream-slug>.md` — look for `-` lines on existing scenario/contract sections.
@@ -214,34 +205,15 @@ Upstream specs (`@depends-on` targets) are generally NOT affected by downstream 
 
 ### For each regressed spec:
 
-```bash
-# Find the beads task for this spec
-bd search "<spec-slug>"
+Find the task (`bd search "<spec-slug>"`), then:
 
-# If task is closed (was @status(verified)):
-bd reopen <task-id>
-bd comments add <task-id> "RESPEC: spec regressed from @status(verified) to @status(approved).
+| Task state (prior spec status) | Action |
+|---|---|
+| closed (was `@status(verified)`) | `bd reopen <task-id>`, then RESPEC comment: change, reason, what needs re-implementation, "existing tests will need updating" |
+| in_progress (was `@status(implemented)`) | RESPEC comment: change, reason, what implementation work is invalidated, "pause /build, review updated spec before continuing" |
+| open (was `@status(approved)`) | RESPEC comment: change, reason, "impact: none — implementation hasn't started" |
 
-Change: [what changed]
-Reason: [why]
-Impact: [what needs to be re-implemented]
-Tests: existing tests for this spec will need updating"
-
-# If task is in_progress (was @status(implemented)):
-bd comments add <task-id> "RESPEC: spec modified while implementation in progress.
-
-Change: [what changed]
-Reason: [why]
-Impact: [what implementation work is invalidated]
-Action: pause /build, review updated spec before continuing"
-
-# If task is open (was @status(approved)):
-bd comments add <task-id> "RESPEC: spec updated before implementation.
-
-Change: [what changed]
-Reason: [why]
-Impact: none — implementation hasn't started"
-```
+All comments via `bd comments add <task-id> "RESPEC: ..."`.
 
 ### Log on epic
 
@@ -269,34 +241,16 @@ Via AskUserQuestion:
 ```
 "Here are the updated specs after respec:
 
----
-## specs/<target>.md (changed from @status(verified) to @status(approved))
-
+## specs/<target>.md (@status(verified) -> @status(approved))
 [FULL SPEC CONTENT — paste the entire file]
+Changes from previous version: Added [new scenarios] / Modified [scenarios, Technical Context] / Unchanged [rest]
 
-**Changes from previous version:**
-- Added: [new scenarios]
-- Modified: [changed scenarios or Technical Context]
-- Unchanged: [scenarios that stayed the same]
-
----
-## specs/<downstream>.md (changed from @status(implemented) to @status(approved))
-
+## specs/<downstream>.md (@status(implemented) -> @status(approved))
 [FULL SPEC CONTENT]
+Changes from previous version: Modified [propagated contract changes]
 
-**Changes from previous version:**
-- Modified: [propagated contract changes]
-
----
-
-Build order after acceptance:
-  1. specs/<target>.md (no dependencies among changed specs)
-  2. specs/<downstream>.md (depends on: <target>)
-
-Beads tasks affected:
-- beads-XXX — reopened
-- beads-YYY — flagged (in-progress work partially invalidated)
-
+Build order after acceptance: 1. <target> 2. <downstream> (depends on: <target>)
+Beads tasks affected: [id — reopened / flagged]
 Existing tests: [N] test files will need updating during /build
 
 Do you approve these specs?"
@@ -316,21 +270,8 @@ Do you approve these specs?"
 
 After the user accepts the updated specs:
 
-1. Confirm all affected specs are `@status(approved)` (set during Step 4, validated here)
-2. Announce the handoff:
-
-```
-"Specs approved. Invoking /build to implement the changes."
-```
-
-3. Hand off to /build:
-
-**REQUIRED SUB-SKILL:** Invoke the `build` skill via the Skill tool. /build will pick up the regressed specs at `@status(approved)` and resume from where /respec stopped.
-
-/build will:
-- Detect the `@status(approved)` specs (including ones regressed by /respec)
-- Build in dependency order
-- Follow its full process (investigate, TDD, verify)
+1. Confirm all affected specs are `@status(approved)` (set during Step 4, validated here).
+2. **REQUIRED SUB-SKILL:** Invoke the `build` skill via the Skill tool. /build detects the `@status(approved)` specs (including ones regressed by /respec), builds in dependency order, and follows its full process (investigate, TDD, verify).
 
 **The /respec -> /build handoff is automatic.** The user does not need to manually run `/build`.
 
@@ -367,15 +308,7 @@ Without /respec, "just adding a scenario" looks like: edit the file, add the sce
 - Downstream: none affected (new scenario doesn't change existing contract)
 - Beads: beads-043 (closed) will be reopened
 
-**Step 4:** Add new scenario to spec:
-```markdown
-### Scenario: Reject registration with malformed email
-- Given a user submits registration with email "not-an-email"
-- When the registration is processed
-- Then it is rejected before uniqueness check
-- And the error indicates invalid email format
-```
-Regress `@status(verified)` -> `@status(approved)`.
+**Step 4:** Orchestrator adds the new scenario ("Reject registration with malformed email" — rejected before uniqueness check, error indicates invalid format) and regresses `@status(verified)` -> `@status(approved)`.
 
 **Step 5:** Reopen beads-043, add RESPEC comment.
 
@@ -397,16 +330,9 @@ Without blast-radius analysis, the agent edits `user-registration.md`'s Technica
 
 **Step 2:** AskUserQuestion: "The error response shape is changing from `{ error: string }` to `{ errors: [{ field, message }] }`. Does this new shape apply only to registration, or system-wide to all validation errors?" User confirms: system-wide.
 
-**Step 3:** Blast radius:
-- Change type: contract-breaking (error response shape in Technical Context)
-- Target: `specs/user-registration.md` (@status(verified) -> @status(approved))
-- Downstream: `specs/user-authentication.md` references error format in login failure scenarios (@status(implemented) -> @status(approved))
-- Downstream: `specs/payment-processing.md` references error format (@status(approved) stays @status(approved), but Technical Context updated)
-- Beads: beads-043 reopened, beads-044 flagged (in-progress work invalidated)
+**Step 3:** Architect blast-radius handoff: contract-breaking; target `user-registration.md` (verified -> approved); downstream `user-authentication.md` references the error format in login-failure scenarios (implemented -> approved) and `payment-processing.md` in Technical Context (stays approved, context updated); beads-043 reopened, beads-044 flagged. User confirms scope.
 
-User confirms scope.
-
-**Step 4:** Edit all three specs — update Technical Context error shapes, update scenarios referencing old format, regress statuses, add `@respec` notes.
+**Step 4:** Orchestrator edits all three specs per the architect's table — error shapes, scenarios referencing the old format, status regressions, `@respec` notes.
 
 **Step 5:** Reopen beads-043, flag beads-044 with RESPEC comment, comment on beads-045, log on epic.
 
@@ -460,43 +386,29 @@ Without /respec, /build's natural instinct under pressure is to "just make it wo
 5. **Present full spec content for acceptance** -> Show the complete updated spec, not just a summary. User must see every scenario and Technical Context change.
 6. **Acceptance gates /build** -> Do NOT invoke /build until user explicitly approves the updated specs.
 7. **All questions via AskUserQuestion** -> Blocks execution until answered.
-8. **No implementation during respec** -> Respec edits specs. /build implements them. Do not write code.
+8. **No implementation during respec** -> Respec edits specs — and the ORCHESTRATOR does the editing (agents advise via handoffs). /build implements them. Do not write code, and do not dispatch engineers to edit specs.
 9. **Auto-invoke /build after acceptance** -> Once user approves, invoke /build automatically. The user does not manually run /build.
 10. **Note existing test impact** -> Regressed specs with existing tests need those tests updated during /build. Always note this.
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
-- "It's just adding a scenario" -> Classify first. Even additive changes need status regression if the spec was verified.
-- "The downstream specs are probably fine" -> "Probably" is not analysis. Read them. Check Technical Context references.
-- "I'll just fix this one spec quickly" -> Quick edits without blast radius analysis cause cascading failures.
-- "The status can stay as verified since the change is small" -> Size doesn't matter. Changed spec = regressed status. Period.
-- "I don't need to check beads for this" -> Every respec touches beads. Reopening/flagging tasks is mandatory.
-- "The user knows which spec to edit" -> The user knows the ISSUE. The skill's job is to trace it to the spec.
-- "I'll propagate later" -> Propagation happens NOW or downstream specs silently diverge.
+- "It's just adding a scenario" -> Classify first (rule 3). Even additive changes need status regression if the spec was verified (rule 4).
+- "The downstream specs are probably fine" -> "Probably" is not analysis (rule 2). Read them; check Technical Context references.
+- "The status can stay as verified since the change is small" -> Size doesn't matter. Changed spec = regressed status (rule 4). Period.
+- "I'll propagate later" -> Propagation happens NOW or downstream specs silently diverge (rule 3).
 - "This is too small for /respec, I'll just edit inline" -> If the spec's contract changes or status needs to regress, it's not "too small."
-- "The user already saw the blast radius, they don't need to see the full spec" -> Blast radius is scope confirmation. Acceptance requires seeing the actual spec content — every scenario, every Technical Context field.
-- "I'll let the user run /build when they're ready" -> No. /build invocation is automatic after acceptance. The handoff is seamless.
+- "The user already saw the blast radius, they don't need to see the full spec" -> Blast radius is scope confirmation; acceptance requires the actual spec content (rule 5).
 </critical_rules>
 
 <verification_checklist>
 Before claiming /respec is complete:
 
-- [ ] Spec found from beads issue (not assumed)
-- [ ] All questions asked via AskUserQuestion
-- [ ] User answered all questions before proceeding
-- [ ] Target spec read in full
-- [ ] All @depends-on and @blocks specs identified and read
-- [ ] Change classified as additive / corrective / contract-breaking
-- [ ] Blast radius presented to user and confirmed
-- [ ] Target spec edited with correct changes
-- [ ] Downstream specs propagated (contract-breaking changes only)
-- [ ] @respec change notes added to all modified specs
-- [ ] Status regression applied to all changed specs
-- [ ] Beads tasks reopened/flagged/commented
-- [ ] RESPEC comment logged on epic
-- [ ] Existing test impact noted in beads comments
-- [ ] Full spec content presented to user (not just a summary)
-- [ ] User explicitly accepted the updated specs
+- [ ] Spec found from beads issue (not assumed); target spec read in full
+- [ ] All questions asked via AskUserQuestion and answered before proceeding
+- [ ] Blast radius: all @depends-on/@blocks specs read; change classified (additive / corrective / contract-breaking); scope presented to user and confirmed
+- [ ] Specs edited BY THE ORCHESTRATOR per the architect's table: target + downstream propagation (contract-breaking only), `@respec` change notes, status regression on every changed spec
+- [ ] Beads updated: tasks reopened/flagged/commented, RESPEC comment on epic, existing test impact noted
+- [ ] Full spec content presented to user (not just a summary); user explicitly accepted
 - [ ] No implementation code written (that's /build's job)
 - [ ] /build invoked automatically after acceptance
 

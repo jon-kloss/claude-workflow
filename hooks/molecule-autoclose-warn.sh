@@ -18,6 +18,11 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
+# Advisory hook: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
+
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
     exit 0
@@ -44,10 +49,22 @@ if ! echo "$cmd" | grep -qE '\bbd\s+close\b'; then
 fi
 
 # Extract the tool's stdout — the auto-close message lives there.
+# Documented PostToolUse field is `tool_response`; for Bash it is a dict and
+# the message is in `.stdout` (docs/harness-behavior.md fact 8). Legacy field
+# names kept as fallback for older harness versions.
 output=$("$PYTHON" -c "
 import json, sys
 try:
     d = json.load(sys.stdin)
+    tr = d.get('tool_response')
+    if isinstance(tr, dict):
+        out = str(tr.get('stdout') or '') + '\n' + str(tr.get('stderr') or '')
+        if out.strip():
+            print(out)
+            sys.exit(0)
+    elif tr:
+        print(tr if isinstance(tr, str) else json.dumps(tr))
+        sys.exit(0)
     for path in [
         lambda x: x['tool_result'],
         lambda x: x['tool']['result'],
@@ -73,7 +90,7 @@ if echo "$output" | grep -qiE "auto-closed.*molecule|molecule.*auto-closed"; the
     epic_id=$(echo "$output" | grep -oE '[a-z]+-[a-z0-9]{3,}' | tail -1)
     if [ -n "$epic_id" ]; then
         msg="WARNING: beads auto-closed epic ${epic_id} as a side-effect of this bd close. This bypassed the require-release-handoff.sh gate. If you intended for release-coordinator to gate this epic, dispatch it now and produce specs/handoffs/step-4.2-${epic_id}-release-coordinator.html before any downstream work depends on the epic being closed. To disable beads' auto-close, configure beads to not promote-close molecules, or close child tasks individually + run 'bd epic close-eligible' manually after the release-coordinator gate."
-        json_encode_context "$msg"
+        json_encode_context "$msg" "PostToolUse"
         exit 0
     fi
 fi

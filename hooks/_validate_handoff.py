@@ -43,7 +43,11 @@ Q = r"[\"']"
 if not re.search(r"<html[^>]*\bdata-handoff-version\s*=\s*" + Q + r"1" + Q, content, re.I):
     errors.append("missing <html data-handoff-version='1'>")
 
-# 2. Required <meta> attributes
+# 2. Required <meta> attributes.
+# NOTE: data-input-references must be PRESENT but may be EMPTY — the first
+# handoff in a chain has no prior handoffs to reference (registry / schema
+# reconciliation, evaluation M8; the old "present and non-empty" prose in the
+# schema doc was self-contradictory and the table wins).
 required_meta = [
     "data-from-role",
     "data-spec-slug",
@@ -55,6 +59,59 @@ for attr in required_meta:
     pat = r"<meta[^>]*\b" + re.escape(attr) + r"\s*=\s*" + Q + r"[^\"']*" + Q
     if not re.search(pat, content, re.I):
         errors.append(f"missing <meta {attr}=...>")
+
+# 2b. Verdict vocabulary (docs/registry.md §4, evaluation M9): reviewer /
+# coordinator roles MUST carry <meta data-verdict="..."> with a legal value.
+# Producer/designer roles are exempt.
+VERDICTS_BY_ROLE = {
+    "security-architect": ("PASS", "FAIL-CRITICAL", "FAIL-SPEC-DRIFT"),
+    "devops-architect": ("PASS", "FAIL-CRITICAL", "FAIL-SPEC-DRIFT"),
+    "data-architect": ("PASS", "FAIL-CRITICAL", "FAIL-SPEC-DRIFT"),
+    "qa-engineer": ("PASS", "FAIL-CRITICAL", "FAIL-SPEC-DRIFT"),
+    "spec-sre-auditor": ("PASS", "FAIL-CRITICAL", "FAIL-SPEC-DRIFT"),
+    "release-coordinator": ("READY-TO-CLOSE", "READY-WITH-CAVEATS", "BLOCKED"),
+}
+if expected_role in VERDICTS_BY_ROLE:
+    legal = VERDICTS_BY_ROLE[expected_role]
+    vm = re.search(
+        r"<meta[^>]*\bdata-verdict\s*=\s*" + Q + r"\s*([^\"']*?)\s*" + Q,
+        content,
+        re.I,
+    )
+    if not vm:
+        errors.append(
+            f"missing <meta data-verdict=...> — registry §4: 'Every reviewer/"
+            f"auditor/coordinator handoff MUST carry <meta data-verdict=\"...\">' "
+            f"(legal values for {expected_role}: {' | '.join(legal)})"
+        )
+    elif vm.group(1).upper() not in legal:
+        errors.append(
+            f"data-verdict='{vm.group(1)}' is not legal for {expected_role} "
+            f"(registry §4 allows: {' | '.join(legal)})"
+        )
+
+# 2c. Severity vocabulary (registry §5): data-severity must be one of
+# critical | important | suggestion | spec-drift, and data-route-to is
+# REQUIRED on critical and important asides (schema promise, evaluation M8).
+LEGAL_SEVERITIES = {"critical", "important", "suggestion", "spec-drift"}
+for _m in re.finditer(r"<aside\b[^>]*?>", content, re.I):
+    _tag = _m.group(0)
+    _sev_m = re.search(r"\bdata-severity\s*=\s*[\"']([^\"']*)[\"']", _tag, re.I)
+    if not _sev_m:
+        continue
+    _sev = _sev_m.group(1).strip().lower()
+    if _sev not in LEGAL_SEVERITIES:
+        errors.append(
+            f"data-severity='{_sev_m.group(1)}' is not legal "
+            f"(registry §5: critical | important | suggestion | spec-drift)"
+        )
+        continue
+    if _sev in ("critical", "important"):
+        if not re.search(r"\bdata-route-to\s*=\s*[\"'][^\"']+[\"']", _tag, re.I):
+            errors.append(
+                f"{_sev} aside is missing data-route-to — registry §5 requires "
+                f"a routing target on critical and important findings"
+            )
 
 # 3. Required <section data-role> blocks
 for s in ("summary", "findings", "acceptance-criteria", "open-questions"):
@@ -118,7 +175,7 @@ def _attr(tag_str, attr):
     return m.group(1) if m else None
 
 
-# Resolve project root: handoff lives at <root>/specs/handoffs/<file>.html
+# Resolve project root: handoff lives at <root>/specs/handoffs/<step>-<slug>-<role>.html
 abs_handoff = os.path.abspath(path)
 project_root = os.path.dirname(os.path.dirname(os.path.dirname(abs_handoff)))
 

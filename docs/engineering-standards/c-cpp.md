@@ -1,6 +1,6 @@
 # C / C++ idioms
 
-Load when the spec touches a `CMakeLists.txt` / `Makefile` / `*.vcxproj` project. Pairs with `../engineering-standards.md` (§0–§4, §6).
+Load when the spec touches a `CMakeLists.txt` / `*.vcxproj` project, or a `Makefile` project that actually contains `.c`/`.cc`/`.cpp` sources (a Makefile alone is not a C signal). Pairs with `../engineering-standards.md` (§0–§4, §6).
 
 ## C++ (modern, C++17/20+)
 - **RAII for every resource.** Ownership is expressed by type: `std::unique_ptr` (sole owner), `std::shared_ptr` (shared, only when ownership is genuinely shared), references/spans for non-owning access. **No raw `new`/`delete`** in application code; no owning raw pointers.

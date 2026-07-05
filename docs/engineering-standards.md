@@ -79,7 +79,7 @@ The example-backed language rules live in per-language sub-files under `docs/eng
 | `go.mod` | Go | `~/.claude/workflow/docs/engineering-standards/go.md` |
 | `pom.xml` / `build.gradle(.kts)` | Java / Kotlin | `~/.claude/workflow/docs/engineering-standards/jvm.md` |
 | `*.csproj` / `*.sln` | C# / .NET | `~/.claude/workflow/docs/engineering-standards/csharp-dotnet.md` |
-| `CMakeLists.txt` / `Makefile` / `*.vcxproj` | C / C++ | `~/.claude/workflow/docs/engineering-standards/c-cpp.md` |
+| `CMakeLists.txt` / `*.vcxproj` — or `Makefile` **plus** `.c`/`.cc`/`.cpp` sources (a Makefile alone is a generic build entry point, not a C signal) | C / C++ | `~/.claude/workflow/docs/engineering-standards/c-cpp.md` |
 | `Package.swift` / `*.xcodeproj` | Swift | `~/.claude/workflow/docs/engineering-standards/swift.md` |
 | `Gemfile` / `*.gemspec` | Ruby | `~/.claude/workflow/docs/engineering-standards/ruby.md` |
 | `*.sql` / `migrations/` | SQL | `~/.claude/workflow/docs/engineering-standards/sql.md` |

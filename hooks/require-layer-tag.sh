@@ -15,6 +15,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-layer-tag.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'

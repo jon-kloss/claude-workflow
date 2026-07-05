@@ -1,14 +1,28 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Block Bash commands that write/modify files under specs/*.md.
+# BEST-EFFORT guard against Bash commands that write/modify files under
+# specs/*.md.
 #
 # The require-verifier-agents, require-ui-tests, require-investigation-findings,
 # claim-vs-call-audit, and require-design-ui hooks all fire on Edit|Write
 # PreToolUse only. Writing the same content via Bash (`cat > specs/foo.md`,
-# `sed -i`, `perl -pi`, `echo > ...`, `printf > ...`, `tee`, redirects, etc.)
-# bypasses all of them. This hook closes that loophole by blocking any Bash
-# command that targets a path matching */specs/*.md.
+# `sed -i`, `perl -pi`, `echo > ...`, `printf > ...`, `tee`, redirects, git
+# checkout/restore of spec paths, `cd specs && cat > foo.md`, simple
+# variable-indirection like `f=specs/foo.md; echo x > $f`) bypasses all of
+# them. This hook detects those shapes and blocks.
+#
+# HONEST SCOPE — this is pattern matching on command text, NOT a sandbox.
+# Known remaining bypasses (accepted; evaluation H13):
+#   - paths built by command substitution or multi-step variable assembly
+#     (f="specs"; g="$f/foo.md"; ... > "$g")
+#   - writes performed by invoked scripts/programs whose source this hook
+#     never sees (./write-spec.sh, make targets, python file.py)
+#   - encoded payloads (base64 | sh), exec redirections (exec 3> ...),
+#     and editors run interactively.
+# Composition (registry / decision E-series) treats this hook as one layer:
+# the Edit/Write gates + guard-handoff-owner + the smoke suite are the
+# load-bearing enforcement; this hook raises the cost of casual bypasses.
 #
 # The block is unconditional — there is no override at the Bash level. Spec
 # edits must go through the Edit or Write tools so the gate hooks can audit
@@ -19,6 +33,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "guard-spec-bash-writes.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -38,8 +53,10 @@ if [ -z "$cmd" ]; then
     exit 0
 fi
 
-# Quick scan: does the command even mention specs/ ?
-if ! echo "$cmd" | grep -qE 'specs/[a-zA-Z0-9_.-]+\.md'; then
+# Quick scan: does the command even mention specs at all? (Looser than the
+# old specs/<file>.md check on purpose — `cd specs && cat > foo.md` and
+# variable-indirection forms don't contain the full literal path.)
+if ! echo "$cmd" | grep -qE '(^|[^a-zA-Z0-9_])specs(/|[[:space:]]|$|["'\''])'; then
     echo '{}'
     exit 0
 fi
@@ -104,6 +121,30 @@ if echo "$cmd" | grep -qE '<<-?\s*[A-Z_]+'; then
     fi
 fi
 
+# 7. git checkout / git restore of spec paths — rewrites spec content from
+#    the index or another ref without any Edit/Write gate firing.
+if echo "$cmd" | grep -qE '\bgit\s+(checkout|restore)\b[^|&;]*specs(/|[[:space:]]|$)'; then
+    write_pattern_found="git checkout/restore -> specs"
+fi
+
+# 8. cd into specs (or a .../specs dir) + a redirect to a .md file in the
+#    same command line — `cd specs && cat > foo.md` never mentions the full
+#    specs/<file>.md literal.
+if echo "$cmd" | grep -qE '\bcd\s+[^|&;]*specs([/[:space:]]|$)'; then
+    if echo "$cmd" | grep -qE '>>?\s*[^|&;<>]*\.md([[:space:]]|$|["'\''])'; then
+        write_pattern_found="cd specs + redirect"
+    fi
+fi
+
+# 9. Simple variable indirection: a spec path assigned to a variable in this
+#    command AND a redirect/tee to a $variable. Multi-step assembly across
+#    commands is out of scope (see header).
+if echo "$cmd" | grep -qE '=\s*["'\'']?[^|&;[:space:]"'\'']*specs/[a-zA-Z0-9_.-]+\.md'; then
+    if echo "$cmd" | grep -qE '(>>?\s*["'\'']?\$|\btee\s+(-[a-zA-Z]+\s+)?["'\'']?\$)'; then
+        write_pattern_found="variable-indirection redirect"
+    fi
+fi
+
 if [ -z "$write_pattern_found" ]; then
     echo '{}'
     exit 0
@@ -114,8 +155,10 @@ fi
 # These are caught by the patterns above being write-shaped, so we only need
 # to allow them through when no write pattern matched — already handled.
 
-# Extract the spec target for a clearer message
-spec_target=$(echo "$cmd" | grep -oE 'specs/[a-zA-Z0-9_.-]+\.md' | head -1)
+# Extract the spec target for a clearer message (some detected shapes — e.g.
+# `cd specs && cat > foo.md` — never contain the full literal path)
+spec_target=$(echo "$cmd" | grep -oE 'specs/[a-zA-Z0-9_.-]+\.md' | head -1 || true)
+[ -z "$spec_target" ] && spec_target="a specs/*.md file"
 
 cat >&2 <<EOF
 BLOCKED: Bash command appears to write to ${spec_target} (pattern: ${write_pattern_found}).
@@ -126,7 +169,7 @@ Use:
   Edit  — replace specific text in an existing spec
   Write — replace the entire spec file
 
-If this Bash command is NOT meant to modify the spec (false positive — e.g. you're piping spec contents to another tool), restructure the command so it doesn't redirect into the spec file. The hook keys on '>specs/<slug>.md', 'sed -i', and similar write-shaped patterns.
+If this Bash command is NOT meant to modify the spec (false positive — e.g. you're piping spec contents to another tool), restructure the command so it doesn't redirect into the spec file. The hook keys on '>specs/<slug>.md', 'sed -i', 'git checkout/restore ... specs', 'cd specs' + redirect, spec-path variable + redirect, and similar write-shaped patterns.
 
 No override is offered at the Bash level — by design. Spec edits go through audited tools.
 EOF

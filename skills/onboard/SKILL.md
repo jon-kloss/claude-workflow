@@ -40,11 +40,14 @@ MIXED:
         ├── backend-engineer.md
         ├── frontend-engineer.md
         ├── qa-engineer.md
-        ├── release-coordinator.md
-        └── spec-sre-auditor.md
+        └── release-coordinator.md
+        (spec-sre-auditor.md is DEFERRED — seeded on its first real audit,
+         not at bootstrap. 10 files at bootstrap + 1 deferred.)
 ```
 
-Each file is committed. **Soft cap ~3,500 words; hard cap ~6,000 words.** Agents prune to the soft cap during normal updates. Above the hard cap, content overflows into sub-files under `.claude/agent-memory/<role>/` — see [Multi-file overflow](#multi-file-overflow) below.
+Each file is committed.
+
+**Word budget (the single canonical statement — everything else references this):** soft cap **~3,500 words** per file; hard cap **~6,000 words**. Within the soft cap: Summary + Conventions + the role's primary section (Component map / Routes / etc.) target ~500 words; the Pointers section can grow to ~1,500 words across all entries. Prefer pointers to existing docs/code over inline content. Agents prune to the soft cap during normal updates; above the hard cap, content overflows into sub-files under `.claude/agent-memory/<role>/` — see [Multi-file overflow](#multi-file-overflow) below.
 </quick_reference>
 
 <when_to_use>
@@ -56,10 +59,6 @@ Each file is committed. **Soft cap ~3,500 words; hard cap ~6,000 words.** Agents
 
 <the_process>
 
-## Step 1: Announce
-
-"I'm using the /onboard skill to seed/refresh per-agent memory of this codebase."
-
 ## Step 2: Sanity check
 
 ```bash
@@ -70,7 +69,7 @@ Each file is committed. **Soft cap ~3,500 words; hard cap ~6,000 words.** Agents
 [ -d .beads ] || echo "WARN: .beads/ not found — initialize beads before /onboard"
 
 # git initialized
-[ -d .git ] || (echo "FATAL: git not initialized — /onboard requires git for SHA tracking" && exit 1)
+[ -d .git ] || { echo "FATAL: git not initialized — /onboard requires git for SHA tracking"; exit 1; }
 
 # Capture bootstrap baseline
 BOOTSTRAP_SHA=$(git rev-parse HEAD)
@@ -126,7 +125,7 @@ Game agents (only when .claude/game-context.md exists):
 
 If `.claude/game-context.md` is missing on a project the user identifies as a game, copy `skills/onboard/resources/game-context-template.md` to `.claude/game-context.md`, AskUserQuestion to confirm the fields, then proceed with the game-agent dispatches.
 
-**Dispatch parallelism.** Agents 1–4 must serialize (later ones read earlier memory). Agents 5–10 can run in parallel. Game agents 12–16 also parallelize after agent 11 (or alongside 5–10 — they're independent). To dispatch in parallel, include MULTIPLE Agent tool calls in a SINGLE message (per the parallel-dispatch pattern in build/SKILL.md and design/SKILL.md).
+**Dispatch parallelism.** Agents 1–4 must serialize (later ones read earlier memory). Agents 5–10 can run in parallel. Game agents 12–16 parallelize alongside agents 5–10 — they're independent (agent 11, spec-sre-auditor, is deferred and dispatches nothing at bootstrap). To dispatch in parallel, include MULTIPLE Agent tool calls in a SINGLE message (per the parallel-dispatch pattern in build/SKILL.md and design/SKILL.md).
 
 **Per-role bootstrap scope (eager vs lazy).**
 
@@ -158,19 +157,14 @@ CRITICAL constraints:
 - NEVER write actual secrets, tokens, API keys, passwords, PII, or real user data
 - Use pointers to where secrets live (env file names, secret manager keys) — never values
 - Memory is COMMITTED to git; treat every line as code review-visible by the team
-- Stay under ~3,500 words total (soft cap). If a section grows beyond that, prefer Pointers to existing docs/code over inline content. Hard cap is 6,000 words; above that, follow the multi-file overflow protocol below.
+- Stay within the word budget defined in this skill's Output section (soft cap ~3,500;
+  500/1,500 Summary-block/Pointers split; 6,000 hard cap with multi-file overflow)
 
 Bootstrap-LAZY content for your role (defer — stub-only at bootstrap, populate on real dispatch):
 <inserted per role from the table above. Empty for roles with nothing to defer.>
 
-Frontmatter timestamp precision: set `last-updated` to the CURRENT timestamp at seconds
-precision. Run `date -u +%Y-%m-%dT%H:%M:%SZ` (or equivalent) — do NOT write a date-stub
-like 2026-05-26T00:00:00Z. The seconds-precision stamp is what /onboard --refresh's delta
-detection compares against.
-
-Cap memory at ~500 words for Summary + Conventions + Component map. Pointers section can
-go to ~1500 words across all entries. If you have more to memorize than fits, prefer pointers
-to your existing docs/code over verbose summaries.
+Set `last-updated` via `date -u +%Y-%m-%dT%H:%M:%SZ` (seconds precision — see the
+validation rules in Step 6).
 
 Once written, return a SHORT confirmation (≤ 100 words): what you covered, what you skipped,
 any sections that need follow-up dispatch."
@@ -181,9 +175,8 @@ For refresh mode, the dispatch prompt instead says:
 ```
 "You are REFRESHING your memory at .claude/agent-memory/<role-slug>.md. Your current memory
 file is below. The git diff since your last-recorded-SHA (<sha>) is below. Update only the
-sections affected by the diff. Preserve unrelated content. Update last-updated and last-commit-sha
-in frontmatter to HEAD. Set last-updated to the CURRENT timestamp at seconds precision
-(date -u +%Y-%m-%dT%H:%M:%SZ) — never a date-stub like T00:00:00Z."
+sections affected by the diff. Preserve unrelated content. Update last-updated (seconds
+precision, per Step 6) and last-commit-sha in frontmatter to HEAD."
 ```
 
 ## Step 6: Validate each memory file
@@ -191,9 +184,9 @@ in frontmatter to HEAD. Set last-updated to the CURRENT timestamp at seconds pre
 For each `.claude/agent-memory/<role>.md` produced:
 
 1. **Frontmatter present** — `agent`, `project-root`, `last-updated`, `last-commit-sha`, `schema-version`.
-2. **Frontmatter timestamp precision** — `last-updated` is a full ISO 8601 UTC timestamp at seconds precision (e.g. `2026-05-26T17:53:15Z`), NOT a date-stub (`2026-05-26T00:00:00Z`). Validate: `grep -L 'T00:00:00Z' .claude/agent-memory/*.md` should equal the full file list. Any file with `T00:00:00Z` → re-dispatch that single agent with "set last-updated to current `date -u +%Y-%m-%dT%H:%M:%SZ`" instruction. Rationale: `/onboard --refresh` delta detection compares timestamps, and a batch of files all stamped midnight UTC on the same day is indistinguishable from a manual edit.
-3. **Required sections** — vary by role. Always required across all roles: `## Summary`, `## Recent changes`, `## Pointers`. Roles that hold conventions also require `## Conventions` (everyone EXCEPT `product-owner`, whose equivalents are scope decisions + open questions). Roles that surface deferred items also require `## Known issues` (everyone EXCEPT `product-owner`, whose deferred items are documented in scope-decisions + open-questions sections). Look up each role's expected sections from its template at `skills/onboard/resources/memory-template-<role>.md` — that's the canonical schema per role. At least one role-specific primary section per memory (Component map / Routes / Tables / Tokens / Personas / etc.).
-4. **Word count** — total words ≤ 3,500 soft cap (`wc -w`). 3,500–6,000 is a warning (prune on next update). Above 6,000 (hard cap) → re-dispatch the agent with "compress to ~3,000 words or move overflow content into sub-files under `.claude/agent-memory/<role>/` per the multi-file overflow protocol" prompt.
+2. **Frontmatter timestamp precision** — `last-updated` is a full ISO 8601 UTC timestamp at seconds precision (e.g. `2026-05-26T17:53:15Z`, from `date -u +%Y-%m-%dT%H:%M:%SZ`), NOT a date-stub (`2026-05-26T00:00:00Z`). Validate: `grep -L 'T00:00:00Z' .claude/agent-memory/*.md` should equal the full file list. Any file with `T00:00:00Z` → re-dispatch that single agent to fix the stamp. Rationale: `--refresh` delta detection is SHA-based (`git diff <last-commit-sha>..HEAD`), not timestamp-based — the seconds-precision stamp exists so update recency is auditable and a batch of files all stamped midnight UTC is distinguishable from a real write.
+3. **Required sections** — vary by role: each role's template at `skills/onboard/resources/memory-template-<role>.md` is the canonical schema. Always required across all roles: `## Summary`, `## Recent changes`, `## Pointers`, plus at least one role-specific primary section (Component map / Routes / Tables / Tokens / Personas / etc.). All roles also require `## Conventions` and `## Known issues` EXCEPT `product-owner`, whose template omits those two (its equivalents are scope-decisions + open-questions sections).
+4. **Word count** — within the budget defined in the Output section (`wc -w`). 3,500–6,000 is a warning (prune on next update). Above 6,000 (hard cap) → re-dispatch the agent with "compress to ~3,000 words or move overflow content into sub-files under `.claude/agent-memory/<role>/` per the multi-file overflow protocol" prompt.
 5. **Bootstrap-LAZY guard for qa-engineer** — if `qa-engineer.md` contains a multi-row "Test inventory" / "Per-spec coverage" / "Tests by cluster" table at bootstrap, that's eager-inventory creep. The table belongs in lazy content (populated by real QA dispatches). Re-dispatch with "replace eager per-spec test inventory with a stub section; per-spec mappings populate during real QA dispatches" instruction.
 6. **No secret-shaped strings** — `guard-agent-memory-secrets.sh` enforces this on write, but also re-validate on read: `grep -E '(Bearer\s+eyJ|sk_live_|AKIA[0-9A-Z]{16}|-----BEGIN.*PRIVATE KEY)' .claude/agent-memory/*.md` returns empty.
 
@@ -286,7 +279,7 @@ When the main `.claude/agent-memory/<role>.md` file approaches the 6,000-word ha
 
 <critical_rules>
 1. **Secrets and PII never go into memory.** Memory is committed; treat every line as if it's in a screenshot on Twitter. Use pointers to where secrets live (env var names, secret manager keys), not the values.
-2. **Memory is HIERARCHICAL, not exhaustive.** Summary + Conventions cap at ~500 words. Role-specific sections (Routes / Component map / Tables / Tokens) can grow toward the soft 3,500-word total cap. Beyond that, push detail into Pointers (links to existing docs/code/beads). Beyond the 6,000-word hard cap, follow the multi-file overflow protocol. If you find yourself writing a 3rd paragraph in Summary, you're doing memory wrong — push detail into pointers or overflow files.
+2. **Memory is HIERARCHICAL, not exhaustive.** The word budget in the Output section governs. If you find yourself writing a 3rd paragraph in Summary, you're doing memory wrong — push detail into pointers or overflow files.
 3. **Dispatch order matters in bootstrap.** application-architect must run before data-architect must run before backend-engineer must run before frontend-engineer. UIUX, security, devops, QA, PO, release can parallelize. Spec-sre-auditor is deferred.
 4. **Memory is committed by default.** The skill's final step offers commit; the secret-guard hook protects against bad-content commits. If the user wants memory NOT committed, they edit .gitignore — that's their call, not the skill's default.
 5. **Refresh mode is delta-only.** Don't rewrite memory from scratch on `--refresh`; preserve unrelated content and update only what the diff implicates.
@@ -299,7 +292,7 @@ Before declaring /onboard complete:
 - [ ] `.claude/agent-memory/` directory exists with 10 files (spec-sre-auditor deferred) — PLUS 5 game-design files (game-designer, level-designer, narrative-designer, systems-designer, game-ui-designer) when `.claude/game-context.md` exists
 - [ ] Each file has valid YAML frontmatter (agent, project-root, last-updated, last-commit-sha, schema-version)
 - [ ] `last-updated` timestamps are seconds-precision (NOT `T00:00:00Z` date-stubs)
-- [ ] Each file has the required sections (Summary, Conventions, Recent changes, Known issues, Pointers, plus ≥1 role-specific section)
+- [ ] Each file has all sections its role's template requires (per Step 6.3 — the product-owner template omits Conventions and Known issues; every other role requires them)
 - [ ] `qa-engineer.md` does NOT contain an eager per-spec / per-cluster test inventory table (bootstrap-lazy content)
 - [ ] No file contains secret-shaped strings (`grep` validation passes)
 - [ ] No file exceeds the 6,000-word hard cap; any over the 3,500-word soft cap has a follow-up to prune or split via multi-file overflow
