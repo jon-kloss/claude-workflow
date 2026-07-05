@@ -335,6 +335,8 @@ Log a `DEAD UI SCAN: ... Verdict: PASS|FAIL` entry via `bd comments add` with el
 
 The verify pass runs Steps 3.3a–3.3i (registry §2): 3.3a test-suite, 3.3b test-effectiveness, 3.3c code-review, 3.3d security-review, 3.3e devops-review, 3.3f data-review (when `@touches-data`), 3.3g qa-verification, 3.3h sre-intent-audit, 3.3i fix-cycle. Handoff FILES for all of 3.3d–3.3h use the flat id `3.3` (`step-3.3-<slug>-<role>.html`) — the role disambiguates; the letters are prose section numbers only.
 
+**Cost discipline for the verify pass.** This pass is the workflow's largest token sink — up to nine reviewers, each reading the spec, the diff, and prior handoffs. Two levers, neither of which weakens a gate: (1) **Every reviewer dispatch tells the agent to read upstream handoffs summary-first** (`agent-protocol.md` §5) — the spec and the diff are the primary inputs; prior handoffs are context, read at their `summary`/`acceptance-criteria` sections unless a specific finding is being re-verified. (2) **Dispatch every independent reviewer for a spec in ONE message** so they fan out in parallel — 3.3a–3.3c together, then 3.3d–3.3h together (each is independent; only 3.3i fix-cycle depends on their output). Serial dispatch multiplies wall-clock for no benefit.
+
 Dispatch 3.3a–3.3c in parallel:
 
 **Step 3.3a: Test Suite**

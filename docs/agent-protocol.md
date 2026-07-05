@@ -74,3 +74,23 @@ via `data-input-references`).
 
 Never poll background work with `sleep` (e.g. `sleep 60 && tail log`) — launch it with
 `run_in_background: true` and let the harness notify you on completion, or use Monitor.
+
+## 5. Read only what you need (context economy)
+
+Handoffs accumulate through a spec, and every reviewer that reads all of them in full pays
+for the whole pile. Default to the cheap read; escalate only when your task needs the detail.
+
+- **Upstream handoffs:** read the `data-role="summary"` and `data-role="acceptance-criteria"`
+  sections first (5–15 lines). Open the full `findings` section ONLY when your job needs a
+  specific artifact in it — e.g. the architect's decomposition table, the engineer's wiring
+  evidence, a reviewer's exact file:line finding you are re-verifying. Naming which handoff
+  detail you opened (and why) in your own findings is good practice.
+- **The spec and the diff are your primary inputs** — read those fully. The handoffs are
+  context around them, not a substitute for reading the code you are judging.
+- **Memory:** read Summary + Conventions + your role's primary section always; drill into
+  Pointers only when the current task references something there (per section 3).
+- **Do not re-read what you already have.** If the dispatch prompt pasted the spec or a diff,
+  don't re-open the file. If two upstream handoffs cover the same fact, read one.
+
+This is a floor on cost, never on rigor: if a summary is ambiguous or a finding smells wrong,
+read the full source. Skipping a detail you needed is a worse failure than a few extra tokens.
