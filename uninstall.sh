@@ -4,181 +4,228 @@ set -euo pipefail
 # Uninstall the Adaptive Developer Workflow for Claude Code
 # Usage: ./uninstall.sh
 #
-# This script:
-# 1. Removes skill links and restores any backed-up originals
-# 2. Removes hook links and restores any backed-up originals
-# 3. Restores settings.json from pre-workflow backup
+# Manifest-driven: consumes ~/.claude/workflow-install-manifest.json written by
+# install.sh and reverses exactly what it recorded:
+# 1. Removes every link the manifest lists (only if it still points into the
+#    repo the manifest names), restoring any .pre-workflow backup next to it
+# 2. Surgically removes exactly the settings hook commands install added
+#    (command-level: a matcher entry that still contains non-workflow commands
+#    is preserved with those commands intact)
+# 3. Reverses the superpowers-disable step if the manifest says we did it
+# 4. Deletes the manifest
 
 CLAUDE_DIR="${HOME}/.claude"
 BACKUP_SUFFIX=".pre-workflow"
-MANIFEST_FILE="$CLAUDE_DIR/.workflow-manifest"
+MANIFEST_JSON="$CLAUDE_DIR/workflow-install-manifest.json"
+LEGACY_MANIFEST="$CLAUDE_DIR/.workflow-manifest"
 
 echo "=== Adaptive Developer Workflow Uninstaller ==="
 echo ""
 
-# Helper: check if a file was installed by us (via manifest, symlink, or hard link)
-is_our_file() {
-    local target="$1"
-    # Symlink is always ours
-    if [ -L "$target" ]; then
-        return 0
-    fi
-    # Check manifest from install
-    if [ -f "$MANIFEST_FILE" ] && grep -qF "$target" "$MANIFEST_FILE" 2>/dev/null; then
-        return 0
-    fi
-    # Hard link check - file has more than 1 link count
-    if [ -f "$target" ]; then
-        local link_count
-        link_count="$(stat -c '%h' "$target" 2>/dev/null || stat -f '%l' "$target" 2>/dev/null || echo 1)"
-        if [ "$link_count" -gt 1 ]; then
-            return 0
+if [ ! -f "$MANIFEST_JSON" ]; then
+    echo "no manifest — run install.sh once (it is idempotent) to generate one, then uninstall"
+    exit 1
+fi
+
+# Find a working Python 3 interpreter
+PYTHON=""
+for candidate in python3 python; do
+    if command -v "$candidate" &> /dev/null; then
+        if "$candidate" -c "import sys; assert sys.version_info[0] >= 3" 2>/dev/null; then
+            PYTHON="$candidate"
+            break
         fi
     fi
-    return 1
-}
-
-# Helper: remove installed file and restore backup if it exists
-restore_or_remove() {
-    local target="$1"
-
-    if is_our_file "$target"; then
-        rm "$target"
-        if [ -f "${target}${BACKUP_SUFFIX}" ]; then
-            mv "${target}${BACKUP_SUFFIX}" "$target"
-            echo "  - Restored $(basename "$target") from backup"
-        else
-            echo "  - Removed $(basename "$target") (no backup to restore)"
-        fi
-    elif [ -f "$target" ]; then
-        echo "  - $(basename "$target") not found in manifest, skipping (not ours)"
-    fi
-}
-
-# 1. Remove skills
-echo "[1/4] Removing skills..."
-restore_or_remove "$CLAUDE_DIR/skills/design/SKILL.md"
-restore_or_remove "$CLAUDE_DIR/skills/design-arch/SKILL.md"
-restore_or_remove "$CLAUDE_DIR/skills/design-ui/SKILL.md"
-restore_or_remove "$CLAUDE_DIR/skills/build/SKILL.md"
-restore_or_remove "$CLAUDE_DIR/skills/respec/SKILL.md"
-restore_or_remove "$CLAUDE_DIR/skills/workflow-retrospective/SKILL.md"
-
-# Clean up empty skill directories
-rmdir "$CLAUDE_DIR/skills/design" 2>/dev/null || true
-rmdir "$CLAUDE_DIR/skills/design-arch" 2>/dev/null || true
-rmdir "$CLAUDE_DIR/skills/design-ui" 2>/dev/null || true
-rmdir "$CLAUDE_DIR/skills/build" 2>/dev/null || true
-rmdir "$CLAUDE_DIR/skills/respec" 2>/dev/null || true
-rmdir "$CLAUDE_DIR/skills/workflow-retrospective" 2>/dev/null || true
-# Legacy: workflow-orchestrator was removed; clean up if still installed from an older version
-restore_or_remove "$CLAUDE_DIR/skills/workflow-orchestrator/SKILL.md" 2>/dev/null || true
-rmdir "$CLAUDE_DIR/skills/workflow-orchestrator" 2>/dev/null || true
-
-# 2. Remove agents
-echo "[2/4] Removing agents..."
-for agent in spec-sre-auditor.md; do
-    restore_or_remove "$CLAUDE_DIR/agents/$agent"
-done
-rmdir "$CLAUDE_DIR/agents" 2>/dev/null || true
-
-# 3. Remove hooks
-echo "[3/4] Removing hooks..."
-for hook in _common.sh beads-auto-resume.sh block-unread-edits.sh check-open-beads.sh \
-            clear-session-reads.sh remind-integration-tests.sh require-bead-description.sh \
-            track-reads.sh verifier-dispatch.sh verifier-return.sh \
-            wwiwo.sh workflow-reminder.sh; do
-    restore_or_remove "$CLAUDE_DIR/hooks/$hook"
 done
 
-# 4. Remove our hook entries from settings.json (preserves user's own hooks)
-echo "[4/4] Removing workflow hooks from settings.json..."
-SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+if [ -z "$PYTHON" ]; then
+    echo "ERROR: Python 3 is required to uninstall safely and was not found."
+    echo "Uninstall must parse the JSON manifest and surgically edit"
+    echo "~/.claude/settings.json; doing that without a JSON parser risks"
+    echo "deleting your own hooks or files. Refusing to guess."
+    echo "Install Python 3 (https://www.python.org/downloads/) and re-run."
+    exit 1
+fi
 
-if [ -f "$SETTINGS_FILE" ]; then
-    # Find a working Python 3 interpreter
-    PYTHON=""
-    for candidate in python3 python; do
-        if command -v "$candidate" &> /dev/null; then
-            if "$candidate" -c "import sys; assert sys.version_info[0] >= 3" 2>/dev/null; then
-                PYTHON="$candidate"
-                break
-            fi
+# Validate the manifest itself before acting on it
+if ! "$PYTHON" -c "import json,sys; json.load(open(sys.argv[1]))" "$MANIFEST_JSON" 2>/dev/null; then
+    echo "ERROR: $MANIFEST_JSON is not valid JSON. Refusing to act on a corrupt"
+    echo "manifest. Re-run install.sh (it is idempotent and rewrites the"
+    echo "manifest), then run uninstall.sh again."
+    exit 1
+fi
+
+REPO="$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1]))['repo'])" "$MANIFEST_JSON")"
+echo "Manifest found. Install source repo: $REPO"
+echo ""
+
+STATE_TMP="$(mktemp -d)"
+trap 'rm -rf "$STATE_TMP"' EXIT
+
+# Print the absolute resolved target of a symlink (one level; install creates
+# direct absolute links).
+resolve_link() {
+    local raw
+    raw="$(readlink "$1")"
+    case "$raw" in
+        /*) printf '%s\n' "$raw" ;;
+        *)  printf '%s/%s\n' "$(cd "$(dirname "$1")" && pwd)" "$raw" ;;
+    esac
+}
+
+# 1. Remove links listed in the manifest
+echo "[1/4] Removing installed links..."
+LINKS_FILE="$STATE_TMP/links.txt"
+"$PYTHON" -c "
+import json, sys
+m = json.load(open(sys.argv[1]))
+for l in m.get('links', []):
+    print('%s\t%s' % (l['dest'], l['source']))
+" "$MANIFEST_JSON" > "$LINKS_FILE"
+
+removed=0
+skipped=0
+restored=0
+while IFS="$(printf '\t')" read -r dest source; do
+    [ -n "$dest" ] || continue
+    if [ -L "$dest" ]; then
+        resolved="$(resolve_link "$dest")"
+        case "$resolved" in
+            "$REPO"/*)
+                rm -f "$dest"
+                removed=$((removed + 1))
+                ;;
+            *)
+                echo "  - skipping $dest (symlink no longer points into $REPO — not ours)"
+                skipped=$((skipped + 1))
+                ;;
+        esac
+    elif [ -e "$dest" ] && [ -e "$source" ] && [ "$dest" -ef "$source" ]; then
+        # Windows hard-link install: same inode as the repo source
+        rm -f "$dest"
+        removed=$((removed + 1))
+    elif [ -e "$dest" ]; then
+        echo "  - skipping $dest (regular file, not a link into the repo — not ours)"
+        skipped=$((skipped + 1))
+    fi
+    # Restore a backup install made, but only into a now-vacant slot
+    if [ ! -e "$dest" ] && [ ! -L "$dest" ]; then
+        if [ -e "${dest}${BACKUP_SUFFIX}" ] || [ -L "${dest}${BACKUP_SUFFIX}" ]; then
+            mv -f "${dest}${BACKUP_SUFFIX}" "$dest"
+            restored=$((restored + 1))
+            echo "  - restored $(basename "$dest") from backup"
         fi
-    done
+    fi
+done < "$LINKS_FILE"
+echo "  - $removed links removed, $restored backups restored, $skipped skipped"
 
-    if [ -n "$PYTHON" ]; then
-        # Surgically remove only our hook entries (identified by ~/.claude/hooks/ commands)
-        "$PYTHON" -c "
+# 2. Clean up directories install created, if now empty (deepest first)
+echo "[2/4] Cleaning up empty directories..."
+cut -f1 "$LINKS_FILE" | while read -r dest; do
+    [ -n "$dest" ] || continue
+    dirname "$dest"
+done | sort -ur | while read -r d; do
+    case "$d" in
+        "$CLAUDE_DIR"/skills/*|"$CLAUDE_DIR"/agents|"$CLAUDE_DIR"/hooks)
+            rmdir "$d" 2>/dev/null || true
+            ;;
+    esac
+done
+echo "  - Done"
+
+# 3. Remove exactly our hook commands from settings.json + reverse superpowers
+echo "[3/4] Removing workflow hook commands from settings.json..."
+SETTINGS_FILE="$("$PYTHON" -c "import json,sys; print(json.load(open(sys.argv[1])).get('settings_file',''))" "$MANIFEST_JSON")"
+if [ -z "$SETTINGS_FILE" ]; then
+    SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+fi
+
+if [ ! -f "$SETTINGS_FILE" ]; then
+    echo "  - No settings.json found, nothing to clean up"
+else
+    if ! "$PYTHON" -c "import json,sys; json.load(open(sys.argv[1]))" "$SETTINGS_FILE" 2>/dev/null; then
+        echo "ERROR: $SETTINGS_FILE is not valid JSON, so the workflow hook"
+        echo "commands cannot be removed safely. Links have already been removed."
+        echo "Fix the JSON, then re-run uninstall.sh (the manifest was kept so"
+        echo "the settings cleanup can complete)."
+        exit 1
+    fi
+    "$PYTHON" -c "
 import json, sys
 
-settings_path = sys.argv[1]
+settings_path, manifest_path = sys.argv[1], sys.argv[2]
 
-with open(settings_path, 'r') as f:
+with open(manifest_path) as f:
+    manifest = json.load(f)
+with open(settings_path) as f:
     settings = json.load(f)
 
+# --- Command-level surgery: remove exactly the commands install added. ---
+# Never delete a whole matcher entry that still contains non-workflow commands.
+targets = {}
+for c in manifest.get('settings_hooks', []):
+    targets.setdefault((c['event'], c.get('matcher', '')), set()).add(c['command'])
+
 hooks = settings.get('hooks', {})
-if not hooks:
-    sys.exit(0)
-
-# Our hooks all reference scripts in ~/.claude/hooks/
-our_scripts = {
-    'beads-auto-resume.sh', 'block-unread-edits.sh', 'check-open-beads.sh',
-    'clear-session-reads.sh', 'remind-integration-tests.sh',
-    'require-bead-description.sh', 'track-reads.sh',
-    'verifier-dispatch.sh', 'verifier-return.sh',
-    'workflow-reminder.sh', 'wwiwo.sh'
-}
-
-def is_our_entry(entry):
-    for h in entry.get('hooks', []):
-        cmd = h.get('command', '')
-        for script in our_scripts:
-            if script in cmd:
-                return True
-    return False
-
 removed = 0
 for event in list(hooks.keys()):
-    original_len = len(hooks[event])
-    hooks[event] = [e for e in hooks[event] if not is_our_entry(e)]
-    removed += original_len - len(hooks[event])
-    # Remove empty event arrays
-    if not hooks[event]:
+    kept_entries = []
+    for entry in hooks[event]:
+        cmds = targets.get((event, entry.get('matcher', '')))
+        if cmds:
+            before = entry.get('hooks', [])
+            after = [h for h in before if h.get('command', '') not in cmds]
+            removed += len(before) - len(after)
+            entry['hooks'] = after
+        if entry.get('hooks'):
+            kept_entries.append(entry)
+    if kept_entries:
+        hooks[event] = kept_entries
+    else:
         del hooks[event]
 
-# Remove hooks key entirely if empty
-if not hooks:
-    del settings['hooks']
-else:
+if hooks:
     settings['hooks'] = hooks
+elif 'hooks' in settings:
+    del settings['hooks']
+
+print('  - Removed %d workflow hook commands from settings.json' % removed)
+print('  - User hooks preserved')
+
+# --- Reverse the superpowers-disable step if we performed it. ---
+sp = manifest.get('superpowers', {})
+if sp.get('disabled_by_us'):
+    key = 'superpowers@claude-plugins-official'
+    plugins = settings.get('enabledPlugins', {})
+    if plugins.get(key) is False:  # only touch it if still as we left it
+        prior = sp.get('prior_value', None)
+        if prior is None:
+            del plugins[key]
+        else:
+            plugins[key] = prior
+        if plugins:
+            settings['enabledPlugins'] = plugins
+        elif 'enabledPlugins' in settings:
+            del settings['enabledPlugins']
+        print('  - Reversed superpowers-disable (restored to pre-install state)')
+    else:
+        print('  - Superpowers setting changed since install, leaving as-is')
 
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
+" "$SETTINGS_FILE" "$MANIFEST_JSON"
 
-print(f'  - Removed {removed} workflow hook entries from settings.json')
-print('  - User hooks preserved')
-" "$SETTINGS_FILE"
-    else
-        echo "  - WARNING: python3/python not found, cannot edit settings.json"
-        if [ -f "${SETTINGS_FILE}${BACKUP_SUFFIX}" ]; then
-            echo "  - Falling back to restoring pre-workflow backup"
-            cp "${SETTINGS_FILE}${BACKUP_SUFFIX}" "$SETTINGS_FILE"
-        else
-            echo "  - You may need to manually remove workflow hooks from settings.json"
-        fi
+    if [ -f "${SETTINGS_FILE}${BACKUP_SUFFIX}" ]; then
+        echo "  - Pre-workflow settings backup kept at ${SETTINGS_FILE}${BACKUP_SUFFIX}"
+        echo "    (settings were surgically cleaned instead of restored wholesale;"
+        echo "    the backup is safe to delete)"
     fi
-else
-    echo "  - No settings.json found, nothing to clean up"
 fi
 
-# Clean up settings backup if it exists
-if [ -f "${SETTINGS_FILE}${BACKUP_SUFFIX}" ]; then
-    echo "  - Pre-workflow backup kept at ${SETTINGS_FILE}${BACKUP_SUFFIX} (safe to delete)"
-fi
-
-# Clean up manifest if it exists
-rm -f "$CLAUDE_DIR/.workflow-manifest"
+# 4. Delete the manifest (and any legacy manifest from older installs)
+echo "[4/4] Removing manifest..."
+rm -f "$MANIFEST_JSON" "$LEGACY_MANIFEST"
+echo "  - Done"
 
 echo ""
 echo "=== Uninstall Complete ==="

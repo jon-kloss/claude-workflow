@@ -13,6 +13,11 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
+# Advisory hook: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
+
 # Read tool use event from stdin
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -105,4 +110,4 @@ Consider whether this change needs integration tests covering:
   - Message queue / event flows
   - CLI command end-to-end behavior
 If this change is internal-only with no integration surface, this reminder can be safely ignored.
-"
+" "PreToolUse"

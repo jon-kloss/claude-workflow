@@ -7,6 +7,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-bead-description.sh"
 
 # Read tool use event from stdin
 if ! read -t 2 -r tool_use_json; then
@@ -31,8 +32,16 @@ if [ "$command" = "null" ] || [ -z "$command" ]; then
     exit 0
 fi
 
-# Only check bd create commands
-if ! echo "$command" | grep -qE '\bbd\s+create\b'; then
+# Only check bd create in COMMAND position: start of the command, or after
+# && ; | or an opening paren. A mention inside a string (`echo "run bd
+# create"`) must not fire (evaluation H15).
+if ! echo "$command" | grep -qE '(^|[;&|(])[[:space:]]*bd[[:space:]]+create([[:space:]]|$)'; then
+    echo '{}'
+    exit 0
+fi
+
+# Help lookups are not creations — never gate them.
+if echo "$command" | grep -qE 'bd[[:space:]]+create[[:space:]]+(-h|--help)([[:space:]]|$)'; then
     echo '{}'
     exit 0
 fi
@@ -44,4 +53,7 @@ if echo "$command" | grep -q -- '--description'; then
 fi
 
 # Block: bd create without --description
-echo '{"error": "BLOCKED: bd create requires --description flag. Every bead must have a description explaining WHY this issue exists and WHAT needs to be done. Add --description=\"...\" to your command."}'
+cat >&2 <<'EOF'
+BLOCKED: bd create requires --description flag. Every bead must have a description explaining WHY this issue exists and WHAT needs to be done. Add --description="..." to your command.
+EOF
+exit 2

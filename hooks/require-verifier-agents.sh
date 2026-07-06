@@ -5,7 +5,8 @@ set -euo pipefail
 # hyperpowers:code-reviewer agent was dispatched in this session with a
 # prompt referencing this spec's slug.
 #
-# Enforces build/SKILL.md:14 ("Verification never scales down") deterministically.
+# Enforces the build SKILL.md verification rule ("Verification never scales
+# down" — see the Full Verification section) deterministically.
 #
 # Escape hatch: add @verifier-skip(reason) tag to the spec content. The reason
 # stays in the spec file as documentation of why this verification was skipped.
@@ -14,8 +15,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
-
-AGENTS_FILE="${HOME}/.claude/hooks/state/session-agents.log"
+require_python_or_block "require-verifier-agents.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -85,28 +85,48 @@ fi
 # Derive the spec slug from the filename
 slug="${basename_file%.md}"
 
+# Session+project-keyed state (evaluation H5)
+AGENTS_FILE="$(state_dir "$tool_use_json")/session-agents.log"
+
 # If no session agents log exists, nothing has been dispatched
 if [ ! -f "$AGENTS_FILE" ]; then
-    cat <<EOF
-{"error": "BLOCKED: Writing @status(verified) to specs/${slug}.md but no code-reviewer agent has been dispatched in this session.\n\nbuild/SKILL.md Step 3.3c requires:\n  Agent(subagent_type: hyperpowers:code-reviewer, prompt referencing '${slug}')\n\nDispatch the agent, then retry the edit. To override (rare — document the reason), add this tag to the spec:\n  @verifier-skip(<reason>)"}
+    cat >&2 <<EOF
+BLOCKED: Writing @status(verified) to specs/${slug}.md but no code-reviewer agent has been dispatched in this session.
+
+build/SKILL.md Step 3.3c requires:
+  Agent(subagent_type: hyperpowers:code-reviewer, prompt referencing '${slug}')
+
+Dispatch the agent, then retry the edit. To override (rare — document the reason), add this tag to the spec:
+  @verifier-skip(<reason>)
 EOF
-    exit 0
+    exit 2
 fi
 
 # Look for a code-reviewer dispatch whose prompt mentions this slug or spec path.
-# The session-agents.log format is: timestamp|subagent_type|prompt-oneline
-# We match the subagent_type column exactly, then check the prompt for the slug.
+# Log format: timestamp|subagent_type|dispatched-or-returned|prompt-oneline
+# (legacy 3-field lines carry the prompt in field 3 — search the whole line
+# after matching the subagent_type column so both formats work).
 match=$(awk -F'|' -v slug="$slug" '
     $2 == "hyperpowers:code-reviewer" {
-        if (index($3, slug) > 0) { print; exit }
+        if (index($0, slug) > 0) { print; exit }
     }
 ' "$AGENTS_FILE" 2>/dev/null || echo "")
 
 if [ -z "$match" ]; then
-    cat <<EOF
-{"error": "BLOCKED: Writing @status(verified) to specs/${slug}.md but no hyperpowers:code-reviewer agent was dispatched in this session with a prompt mentioning '${slug}'.\n\nbuild/SKILL.md Step 3.3c requires (full text):\n  Agent(subagent_type: hyperpowers:code-reviewer, prompt: 'Review ALL files changed for this spec. 1. Read specs/${slug}.md — verify EVERY scenario has code and tests ...')\n\nThis hook is reading ~/.claude/hooks/state/session-agents.log to determine whether the agent ran. Dispatch the agent (or re-dispatch with the slug clearly in the prompt) and retry.\n\nTo skip this check (rare — document the reason), add the following tag to the spec content:\n  @verifier-skip(<concise reason>)\n\nDo NOT silently self-verify: this is the documented failure mode this hook exists to catch."}
+    cat >&2 <<EOF
+BLOCKED: Writing @status(verified) to specs/${slug}.md but no hyperpowers:code-reviewer agent was dispatched in this session with a prompt mentioning '${slug}'.
+
+build/SKILL.md Step 3.3c requires (full text):
+  Agent(subagent_type: hyperpowers:code-reviewer, prompt: 'Review ALL files changed for this spec. 1. Read specs/${slug}.md — verify EVERY scenario has code and tests ...')
+
+This hook is reading ~/.claude/hooks/state/session-agents.log to determine whether the agent ran. Dispatch the agent (or re-dispatch with the slug clearly in the prompt) and retry.
+
+To skip this check (rare — document the reason), add the following tag to the spec content:
+  @verifier-skip(<concise reason>)
+
+Do NOT silently self-verify: this is the documented failure mode this hook exists to catch.
 EOF
-    exit 0
+    exit 2
 fi
 
 # Code reviewer fired — allow the edit

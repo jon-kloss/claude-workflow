@@ -24,6 +24,19 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
+require_python_or_block "require-ui-tests.sh"
+
+# any_exists <path> [<path> ...] — true if ANY listed path exists.
+# Replaces `ls x.{a,b,c} | head -1` pipelines: ls exits non-zero when ANY
+# brace-expanded operand is missing, so under `set -o pipefail` config-file
+# detection only succeeded when ALL extensions existed (evaluation H6).
+any_exists() {
+    local p
+    for p in "$@"; do
+        [ -e "$p" ] && return 0
+    done
+    return 1
+}
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -109,43 +122,76 @@ fi
 # 2. Auto-detect (priority: e2e > component > native)
 if [ -z "$framework" ]; then
     # Playwright
-    if ls "$project_root"/playwright.config.{ts,js,mjs,cjs} 2>/dev/null | head -1 > /dev/null \
+    if any_exists "$project_root"/playwright.config.ts "$project_root"/playwright.config.js "$project_root"/playwright.config.mjs "$project_root"/playwright.config.cjs \
        || (test -f "$project_root/package.json" && grep -q '"@playwright/test"' "$project_root/package.json" 2>/dev/null); then
         framework="playwright"
     # Cypress
-    elif ls "$project_root"/cypress.config.{ts,js,mjs,cjs} 2>/dev/null | head -1 > /dev/null \
+    elif any_exists "$project_root"/cypress.config.ts "$project_root"/cypress.config.js "$project_root"/cypress.config.mjs "$project_root"/cypress.config.cjs \
          || (test -f "$project_root/package.json" && grep -q '"cypress"' "$project_root/package.json" 2>/dev/null); then
         framework="cypress"
     # Detox (React Native)
     elif test -f "$project_root/package.json" && grep -q '"detox"' "$project_root/package.json" 2>/dev/null; then
         framework="detox"
     # Vitest browser mode
-    elif ls "$project_root"/vitest.config.{ts,js,mjs,cjs} 2>/dev/null | head -1 > /dev/null \
-         && grep -qE 'browser:\s*\{' "$project_root"/vitest.config.* 2>/dev/null; then
-        framework="vitest-browser"
+    elif any_exists "$project_root"/vitest.config.ts "$project_root"/vitest.config.js "$project_root"/vitest.config.mjs "$project_root"/vitest.config.cjs; then
+        for vc in "$project_root"/vitest.config.ts "$project_root"/vitest.config.js "$project_root"/vitest.config.mjs "$project_root"/vitest.config.cjs; do
+            [ -f "$vc" ] || continue
+            if grep -qE 'browser:\s*\{' "$vc" 2>/dev/null; then
+                framework="vitest-browser"
+                break
+            fi
+        done
+        # Vitest config without browser mode: fall through to jest-rtl check
+        if [ -z "$framework" ] && test -f "$project_root/package.json" \
+           && grep -q '"@testing-library/react"' "$project_root/package.json" 2>/dev/null \
+           && grep -qE '"jest"|"vitest"' "$project_root/package.json" 2>/dev/null; then
+            framework="jest-rtl"
+        fi
     # Jest + react-testing-library
     elif test -f "$project_root/package.json" \
          && grep -q '"@testing-library/react"' "$project_root/package.json" 2>/dev/null \
          && grep -qE '"jest"|"vitest"' "$project_root/package.json" 2>/dev/null; then
         framework="jest-rtl"
-    # XCUITest (native iOS)
-    elif ls "$project_root"/*.xcodeproj 2>/dev/null | head -1 > /dev/null; then
+    # XCUITest (native iOS) — .xcodeproj is a directory; any_exists uses -e
+    elif any_exists "$project_root"/*.xcodeproj; then
         framework="xcuitest"
     fi
 fi
 
 if [ -z "$framework" ]; then
-    cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing (@layer ui/full-stack or ## UI Design section present) and is being marked @status(verified), but no UI test framework is installed in this project.\n\nInstall one and add a config file:\n  Playwright (web/Electron):  npx create-playwright \n  Cypress (web):              npm i -D cypress && npx cypress open \n  Detox (React Native):       https://wix.github.io/Detox/\n  Vitest browser mode:        https://vitest.dev/guide/browser/\n  Jest + react-testing-library: https://testing-library.com/docs/react-testing-library/intro/\n\nOr override detection by writing one of those keywords to .claude/ui-test-framework.\n\nTo skip this check (rare, document the reason), add to the spec:\n  @ui-test-skip(<reason>)"}
+    cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing (@layer ui/full-stack or ## UI Design section present) and is being marked @status(verified), but no UI test framework is installed in this project.
+
+Install one and add a config file:
+  Playwright (web/Electron):  npx create-playwright 
+  Cypress (web):              npm i -D cypress && npx cypress open 
+  Detox (React Native):       https://wix.github.io/Detox/
+  Vitest browser mode:        https://vitest.dev/guide/browser/
+  Jest + react-testing-library: https://testing-library.com/docs/react-testing-library/intro/
+
+Or override detection by writing one of those keywords to .claude/ui-test-framework.
+
+To skip this check (rare, document the reason), add to the spec:
+  @ui-test-skip(<reason>)
 EOF
-    exit 0
+    exit 2
 fi
 
 # ---------- Test evidence ----------
 # Look for a test file referencing this spec slug. Search common test dirs.
 # Use the slug AND its first significant word (e.g. "user-auth" → also "user")
 # as grep alternatives, to catch tests named more loosely.
+#
+# Blocklist: when the first hyphen-split word is a generic test prefix, do NOT
+# use it as a substitution — it would match every test file in the directory
+# (e.g. slug "test-foo" → first_word "test" → matches every *.test.ts). Caught
+# by the 2026-05-26 hook-enforcement dogfood; tightened here.
 first_word="$(echo "$slug" | cut -d- -f1)"
+case "$first_word" in
+    test|tests|spec|specs|unit|e2e|integration|it)
+        first_word="$slug"   # fall back to full slug; no substitution
+        ;;
+esac
 
 # Build search dirs (only those that exist)
 search_dirs=()
@@ -165,38 +211,59 @@ if [ "$framework" = "xcuitest" ]; then
 fi
 
 if [ ${#search_dirs[@]} -eq 0 ]; then
-    cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no recognized test directory exists in this project.\n\nDetected framework: ${framework}\n\nCreate one of: tests/, e2e/, cypress/e2e/, __tests__/, e2e-tests/, ui-tests/, playwright-tests/, integration-tests/ (or UITests/ for xcuitest), then add a test file that references '${slug}'.\n\nTo skip (rare, document the reason): add @ui-test-skip(<reason>) to the spec."}
+    cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no recognized test directory exists in this project.
+
+Detected framework: ${framework}
+
+Create one of: tests/, e2e/, cypress/e2e/, __tests__/, e2e-tests/, ui-tests/, playwright-tests/, integration-tests/ (or UITests/ for xcuitest), then add a test file that references '${slug}'.
+
+To skip (rare, document the reason): add @ui-test-skip(<reason>) to the spec.
 EOF
-    exit 0
+    exit 2
 fi
 
-# Search: filename contains slug OR file contents contain slug
-# Use ripgrep if available, fall back to grep
+# Search: filename contains slug/first-word OR file contents contain
+# slug/first-word — the documented slug+first-word alternation applies to
+# BOTH checks (the contents grep previously used only the slug and carried a
+# dead search_pattern variable; evaluation H6).
 match=""
-search_pattern="${slug}\\|${first_word}"
 for dir in "${search_dirs[@]}"; do
     # Filename match (any test-shaped file)
     if find "$dir" -type f \( -name "*${slug}*" -o -name "*${first_word}*" \) 2>/dev/null | grep -qE '\.(spec|test|e2e)\.(ts|tsx|js|jsx|mjs|cjs)$|\.swift$|\.kt$|\.java$|\.py$'; then
         match="filename"
         break
     fi
-    # Contents match
+    # Contents match (slug OR first significant word)
     if grep -rIl --include='*.spec.ts' --include='*.spec.tsx' --include='*.spec.js' --include='*.spec.jsx' \
                  --include='*.test.ts' --include='*.test.tsx' --include='*.test.js' --include='*.test.jsx' \
                  --include='*.e2e.ts' --include='*.e2e.js' \
                  --include='*.swift' --include='*.kt' --include='*.java' --include='*.py' \
-                 "$slug" "$dir" 2>/dev/null | head -1 | grep -q .; then
+                 -e "$slug" -e "$first_word" "$dir" 2>/dev/null | head -1 | grep -q .; then
         match="contents"
         break
     fi
 done
 
 if [ -z "$match" ]; then
-    cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no functional UI test references this spec.\n\nDetected framework: ${framework}\nSearched: $(printf '%s ' "${search_dirs[@]#$project_root/}")\n\nAdd at least one test file that:\n  - Has '${slug}' in its filename (e.g. ${slug}.spec.ts), OR\n  - References '${slug}' in its test descriptions/imports\n\nThe test must exercise the actual UI surface (render the component, interact with it, assert behavior), not just unit-test internal helpers.\n\nReference: build/SKILL.md Step 3.3d (visual fidelity) and 4.1 (e2e for UI-bearing epics).\n\nTo skip this check (rare, document the reason): add to the spec:\n  @ui-test-skip(<concise reason>)"}
+    cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but no functional UI test references this spec.
+
+Detected framework: ${framework}
+Searched: $(printf '%s ' "${search_dirs[@]#$project_root/}")
+
+Add at least one test file that:
+  - Has '${slug}' in its filename (e.g. ${slug}.spec.ts), OR
+  - References '${slug}' in its test descriptions/imports
+
+The test must exercise the actual UI surface (render the component, interact with it, assert behavior), not just unit-test internal helpers.
+
+Reference: build SKILL.md 'Step 3.3g: qa-verification' and Step 4.1 (e2e for UI-bearing epics).
+
+To skip this check (rare, document the reason): add to the spec:
+  @ui-test-skip(<concise reason>)
 EOF
-    exit 0
+    exit 2
 fi
 
 # Test exists — allow

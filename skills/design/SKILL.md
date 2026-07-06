@@ -5,11 +5,26 @@ description: Use when starting new work - Socratic questioning via AskUserQuesti
 
 <skill_overview>
 Design skill that shapes work through Socratic questioning, generates Gherkin spec files as the source of truth for design intent, performs a reality check against the original request, and sets up beads for sub-task tracking. Produces `@status(approved)` specs in `specs/` that the `/build` skill consumes.
+
+**Role-agent orchestration (experimental branch).** This skill is the orchestrator. Deep procedural work is delegated to specialized role agents in `agents/`:
+- `product-owner` — Step 2 Socratic + Step 4 reality check
+- `application-architect` — Step 2.5 decomposition (and Step 4.5 architecture docs)
+- `uiux-designer` — Step 2.85 UI/UX (wraps `/design-ui`)
+
+Each role agent produces an HTML handoff at `specs/handoffs/<step>-<slug>-<role>.html` per `docs/role-agent-handoff-schema.md`.
+
+**Parallel-dispatch pattern.** To dispatch multiple role agents concurrently (e.g. `application-architect` + `devops-architect` for Step 4.5 arch docs), include MULTIPLE `Agent` tool calls in a SINGLE message. The harness fans them out in parallel; the tool result confirms concurrent launch. Splitting calls across separate messages serializes them.
+
+**Dispatched agents cannot ask the user questions.** Per `docs/agent-protocol.md` §2, `AskUserQuestion` errors inside subagents. Agents write questions into their handoff's `open-questions` section as `<li data-question data-blocking="true|false">`; the ORCHESTRATOR relays blocking questions to the user via AskUserQuestion and re-dispatches the same role with the answers. Cap: 3 question rounds per step, then escalate with a written summary.
+
+**Inline-synthesis fallback.** If the `Agent` tool is not available in your toolset (i.e. you are yourself a dispatched subagent and cannot dispatch further), fall back to inline synthesis: read each role's `agents/<role>.md` prompt, perform the role's work yourself, produce the same handoff file at the same path, and mark it with `<note data-synthesized="true">This handoff was synthesized inline because the Agent tool was unavailable.</note>` in the `findings` section. In inline mode, ask the user directly via AskUserQuestion when it is available in your toolset; when it is not (you are a dispatched subagent), record questions in the handoff's `open-questions` section and return them to your dispatcher per `docs/agent-protocol.md` §2. The audit trail stays schema-compliant; what's lost is diversity-of-perspective.
+
+**Known limitation: TaskCreate reminders.** The Claude Code harness emits `system-reminder` messages suggesting `TaskCreate` periodically. They come from the harness itself, not our hooks, and cannot be silenced from the workflow side. Beads is the canonical task tracker (per the SessionStart hook); ignore the TaskCreate reminders.
 </skill_overview>
 
 <rigidity_level>
 MIXED:
-- **RIGID**: Socratic questioning via AskUserQuestion is mandatory. No proceeding without user answers.
+- **RIGID**: Socratic questioning via AskUserQuestion is mandatory — asked by the orchestrator, sourced from the product-owner agent's question set. No proceeding without user answers.
 - **RIGID**: Every design produces Gherkin spec files in `specs/`. No exceptions.
 - **RIGID**: Reality check (agent pre-check + user confirmation) must pass before specs are approved.
 - **FLEXIBLE**: Questioning depth and spec complexity scale naturally with the work — simple fixes get fewer questions and simpler specs.
@@ -40,7 +55,7 @@ User request
 
 ## Hard Constraints
 
-1. All questions asked via AskUserQuestion tool (blocks execution)
+1. All questions asked via AskUserQuestion tool, by the ORCHESTRATOR (dispatched agents return question lists per `docs/agent-protocol.md` §2)
 2. No investigation agents during questioning — investigation is /build's job
 3. No proceeding until user answers all critical questions
 4. Every design produces spec files in `specs/`
@@ -65,7 +80,8 @@ Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists
 
 - `@status(draft|approved|implemented|verified)` — lifecycle tracking (required on every spec)
 - `@layer(api|ui|full-stack|cli|infra)` — required on every spec. Deterministic skip signal that hooks and verification steps key on. Set during decomposition.
-- `@trivial` — optional. Typo fix, rename, or config-only change. Permits skipping architecture docs and external feasibility research.
+- `@trivial` — optional. Typo fix, rename, or config-only change. The single verification-scaling knob: set here at decomposition, never during /build. Permits skipping architecture docs, external feasibility research, and the tagged reviewer steps in /build.
+- `@touches-data` — optional. Spec adds, modifies, or migrates persistent data. This tag is THE trigger for the data-architect role agent during /build (Step 3.1 investigation and Step 3.3f data-review). The hook warns — does not block — on `@layer(api|full-stack)` specs missing it; set it explicitly at decomposition for ANY spec that touches persistent data, whatever its layer (e.g., a CLI tool that writes to a shared DB).
 - `@depends-on(feature-slug)` — this feature requires another feature to be implemented first
 - `@blocks(feature-slug)` — another feature depends on this one
 - `@parallel-risk(feature-slug)` — this spec modifies the same files as another independent spec. Both specs remain parallel (no `@depends-on` added). /build warns about potential merge conflicts and builds the smaller spec first.
@@ -73,32 +89,12 @@ Specs use Markdown Gherkin: `#` headings for Gherkin keywords, `- ` bullet lists
 
 See full tag reference and `@layer` value definitions in [resources/gherkin-spec-reference.md](resources/gherkin-spec-reference.md).
 
-### Greenfield Rebuild Principle (summary)
+### Greenfield, tiers, lifecycle, decomposition (summaries)
 
-For greenfield projects, the complete set of specs in `specs/` must be **sufficient to rebuild the entire application from scratch**. Achieved via two spec types:
-
-1. **System spec** (`specs/system.md`) — Required for greenfield. Purpose, tech stack, data model, feature map, API conventions.
-2. **Feature specs** (`specs/<feature-slug>.md`) — One per feature, linked via `@depends-on`/`@blocks`.
-
-### Spec complexity tiers (summary)
-
-- **Simple** — Feature + 1-3 Scenarios. No Rules, no Background. (Typo fix, rename, config.)
-- **Standard** — Feature + As/I want/So that + Critical User Journeys + Technical Context + Rules + Background + Scenarios. (New endpoint, new component.)
-- **Complex** — Multiple spec files with `@depends-on`/`@blocks`. Full Gherkin structure including Scenario Outlines. (New feature, integration, architectural change.)
-
-Full templates and worked examples for each tier are in [resources/gherkin-spec-reference.md](resources/gherkin-spec-reference.md). Load it before writing a spec you haven't written this session.
-
-### Lifecycle (summary)
-
-`@status(draft)` → `@status(approved)` (after reality check) → `@status(implemented)` (during /build) → `@status(verified)` (after /build verification).
-
-### Decomposition (summary)
-
-Independence test: a piece of work is independent if (1) you can write tests for it without the other existing, (2) it has its own inputs/outputs, (3) removing it doesn't break the other's tests. If all three hold → separate specs. Otherwise → scenarios within one spec.
-
-Look for **seams** when splitting: data boundaries, lifecycle boundaries, consumer boundaries, layer boundaries, rule boundaries. Full seam types table is in [resources/gherkin-spec-reference.md](resources/gherkin-spec-reference.md).
-
-Parallel risk: when two independent specs will modify the same file, tag both with `@parallel-risk(other-slug)`. They remain parallel — no `@depends-on` added.
+- **Greenfield rebuild principle:** the complete spec set must be sufficient to rebuild the application from scratch — a **system spec** (`specs/system.md`: purpose, stack, data model, feature map, API conventions) plus one **feature spec** per feature linked via `@depends-on`/`@blocks`.
+- **Complexity tiers:** Simple (Feature + 1-3 Scenarios) / Standard (+ As-I-want-So-that, CUJs, Technical Context, Rules, Background) / Complex (multiple spec files, Scenario Outlines). Full templates in the resource above — load it before writing a spec you haven't written this session.
+- **Lifecycle:** `@status(draft)` → `approved` (reality check) → `implemented` (during /build) → `verified` (after /build verification).
+- **Decomposition:** independence test — separate specs only if (1) testable without the other, (2) own inputs/outputs, (3) removing one doesn't break the other's tests; otherwise scenarios in one spec. Split along seams (data / lifecycle / consumer / layer / rule boundaries — table in the resource). Two independent specs touching the same file: tag both `@parallel-risk(other-slug)`, no `@depends-on`.
 </gherkin_spec_reference>
 
 <when_to_use>
@@ -119,122 +115,117 @@ Parallel risk: when two independent specs will modify the same file, tag both wi
 
 <the_process>
 
-## Step 1: Announce
-
-"I'm using the /design skill to shape this work through Socratic questioning and Gherkin spec generation."
-
 ## Step 2: Socratic Questioning
 
-Ask focused questions using AskUserQuestion until you can fully define the work. The number of questions scales naturally with complexity — a typo fix needs 0-1 questions, a new feature needs 3-5+.
+**Dispatch the product-owner role agent; the ORCHESTRATOR asks the questions.** The PO agent generates and refines the question set each round — the drill-down heuristics, greenfield protocol, and completeness gate categories live in `agents/product-owner.md`. It cannot ask the user anything itself (`docs/agent-protocol.md` §2); you are its mouth. The Socratic character is preserved as an orchestrator-driven loop:
 
-**BLOCKING REQUIREMENT: All questions MUST use AskUserQuestion tool.**
+1. **Dispatch** with the user's request (round 1) or the accumulated Q&A transcript (later rounds):
 
-Enforcement rules:
-1. **Use AskUserQuestion tool** — Do NOT print questions as text. AskUserQuestion blocks execution until the user responds. Text questions do not block and lead to proceeding without answers.
-2. **Do NOT dispatch codebase investigation agents** — Codebase investigation is /build's job. Dispatching codebase-investigator during design leads to the agent rationalizing that it has "enough context" to skip the user's answers.
-3. **Internet research IS allowed** — Dispatch `hyperpowers:internet-researcher` to research the user's domain, tech choices, API capabilities, and library constraints. This makes questions sharper. If research reveals a problem or constraint, surface it as a new question to the user — do NOT silently assume or skip asking.
-4. **Do NOT proceed until answers are received** — If you asked a question, you must receive and incorporate the answer before moving forward. "Making reasonable defaults for ambiguous parts" is not acceptable.
-5. **Multiple rounds are expected for complex work** — If the work involves new features, integrations, or architectural decisions, one round of questions is probably insufficient.
-6. **Research informs and validates — it never replaces asking** — If you learn the project uses passport.js, that informs what to ask, it doesn't eliminate the need to ask. If research shows an API doesn't support webhooks, that becomes a question ("The Stripe API doesn't support X — how should we handle this?"), not a silent design decision.
-7. **Drill down relentlessly** — Every answer the user gives should spawn follow-up questions that dig deeper. "React Native" → "Expo or bare RN? What minimum OS versions? Which navigation library?" Surface-level answers produce surface-level specs. Push until you have enough detail to write code.
-8. **Never accept vague answers** — If the user says "standard auth" or "normal CRUD," that is NOT an answer. Push: "Standard auth meaning email/password only? Social login? MFA? Password reset flow? Session or token-based?" Vagueness is where bugs hide.
+```
+Agent tool (subagent_type: product-owner, run_in_background: false):
+"You are running Step 2 (Socratic questioning) for a new design session. Generate the question set
+that must be answered before decomposition can start. You cannot ask the user questions — write each
+question into your handoff's open-questions section as <li data-question data-blocking="true|false">
+with 2-4 proposed options and your recommendation, per docs/agent-protocol.md §2. Produce your
+handoff at:
+  specs/handoffs/step-2-<spec-slug>-product-owner.html
 
-Questions to stabilize:
-- **What** — What is being built/changed/fixed?
-- **Why** — What problem does this solve?
-- **Where** — Which parts of the system are affected?
-- **User Journeys** — What end-to-end journeys does this feature participate in? What does the user do before arriving here? What do they do after? (e.g., "User logs in → navigates to workouts → starts workout → logs sets → completes → views history") (skip for Simple specs and non-user-facing work)
-- **Constraints** — What must NOT change? What are the boundaries?
-- **Dependencies** — Does this depend on other features? Do other features depend on this?
-- **Edge cases** — What happens with empty/invalid/unexpected input?
+User's request: <paste the user's original message>
+[Rounds 2+:] Answers so far: <paste the Q&A transcript>"
+```
 
-For simple changes (typo, rename, config), 0-1 questions may suffice — the request itself may be fully specified. Don't ask questions for the sake of asking.
+2. **Relay.** Read the handoff's `open-questions`. Ask every `data-blocking="true"` question to the user via AskUserQuestion, presenting the agent's options and recommendation.
+3. **Re-dispatch** the same agent with the answers appended. It refines: drills into vague answers, generates follow-ups, or declares the completeness gate passed.
+4. **Cap: 3 question rounds.** If blocking questions remain after round 3, escalate to the user with a written summary of what is unresolved and why.
 
-### Greenfield Questioning Protocol
+When the agent declares completeness, verify: the handoff exists at the expected path; the `acceptance-criteria` section has at least one machine-checkable item; `open-questions` contains no unanswered `data-blocking="true"` items. If acceptance is incomplete (open questions outstanding, vague answers), do NOT proceed to Step 2.5 — dispatch again with the gaps surfaced.
 
-**For greenfield projects (no existing codebase, building from scratch), questioning intensity increases dramatically.** A greenfield project cannot be fully spec'd from a single round of questions. The user's initial description is a starting point, not a specification.
+## Step 2.3: Game Design (when applicable)
 
-**Minimum 3 rounds of questions are required.** Each round drills deeper based on the previous answers.
+**Dispatch the game-designer role agent.** Run only when `.claude/game-context.md` exists — that's the deterministic signal this is a game project. Skip silently otherwise.
 
-**Round 1 — Scope & Architecture** (broad strokes):
-- Platform, tech stack, deployment target
-- User roles and access model
-- Core feature list (what's MVP vs. later?)
-- Data ownership and privacy model
-- Third-party integrations
+```bash
+# Detect
+[ -f .claude/game-context.md ] && echo "GAME PROJECT — dispatch game-designer"
+```
 
-**Round 2 — Feature Deep-Dive** (for each major feature area from Round 1):
-- Data model: What fields? What types? What's required vs. optional?
-- User interactions: What does the user click/tap/type? What do they see in response?
-- Permissions: Who can see/edit/delete what? What about shared data?
-- Error states: What happens when it fails? What does the user see?
-- Edge cases: Empty states, max limits, concurrent access
+```
+Agent tool (subagent_type: game-designer, run_in_background: false):
+"You are running Step 2.3 (game design) for this session. Read .claude/game-context.md and
+specs/handoffs/step-2-<spec-slug>-product-owner.html. Produce the core loop, player verbs,
+win/loss conditions, ten fun things, and anti-features. You cannot ask the user questions —
+write blocking questions into your handoff's open-questions section per docs/agent-protocol.md §2.
+Handoff at:
+  specs/handoffs/step-2.3-<spec-slug>-game-designer.html"
+```
 
-**Round 3 — Integration & Flows** (connecting the pieces):
-- CUJs: Walk through every major user journey end-to-end, step by step
-- Cross-feature dependencies: How does feature A hand off to feature B?
-- Notification model: When does the app reach out to the user?
-- Onboarding: What does a brand-new user experience?
-- Settings & configuration: What can users control?
+When the agent returns, verify the handoff exists and the core loop / verbs / ten fun things sections have substantive content. Relay any `data-blocking="true"` open-questions to the user via AskUserQuestion and re-dispatch with the answers (cap 3 rounds, then escalate with a written summary — same protocol as Step 2).
 
-**Completeness Gate:** Before proceeding to decomposition, verify you have answers covering ALL of these categories. If any category has gaps, ask another round. Do NOT proceed with assumptions.
-
-| Category | Covered? |
-|----------|----------|
-| Platform & tech stack | |
-| User roles & permissions | |
-| Data model per feature | |
-| API contracts (endpoints, request/response shapes) | |
-| User journeys (end-to-end flows) | |
-| Error handling & edge cases | |
-| Third-party integrations | |
-| Onboarding & first-run experience | |
-| Notification model | |
-| Settings & user preferences | |
-| Monetization / billing (if applicable) | |
-| Offline behavior (if applicable) | |
+**BLOCKING REQUIREMENT.** When `.claude/game-context.md` exists, the game-designer MUST run before Step 2.5. The application-architect's decomposition reads game-designer's verbs to slice the implementation.
 
 ## Step 2.5: Decompose
 
-Before generating specs, apply the decomposition heuristics (see Decomposition Heuristics in gherkin_spec_reference) to identify how the work should be split.
+**Dispatch the application-architect role agent.** This step is run by `agents/application-architect.md` — the independence test, seam scan, and decomposition heuristics live there.
 
-**Inputs:** Answers from Socratic questioning.
-**Outputs:** A decomposition map — list of specs to generate with their `@depends-on` and `@parallel-risk` relationships.
-
-### Process
-
-1. **Apply the independence test** to the work: can each piece be tested without the others existing? Does each have its own inputs/outputs? Would removing one break the other's tests?
-2. **Scan for seams** — look for data boundaries, lifecycle boundaries, consumer boundaries, layer boundaries, and rule boundaries (see Seam Types table).
-3. **Build the decomposition map** — list each spec to generate, with:
-   - Feature name and slug
-   - `@layer(...)` — `api`, `ui`, `full-stack`, `cli`, or `infra`. **Required on every entry.** Determines which verification gates apply downstream — hooks and `/build` steps key on this. Choose based on what the spec produces, not what it touches: a spec that adds an API endpoint *and* its UI consumer is `full-stack`; a spec that only adds the endpoint (UI consumer is a separate spec) is `api`.
-   - `@depends-on` relationships (pieces that fail the independence test)
-   - `@parallel-risk` relationships (independent pieces that modify the same file)
-   - `@trivial` flag for typo fixes, renames, or config-only changes (optional)
-4. **Skip for trivially single-behavior work** — typo fixes, renames, config changes. If the request maps to one cohesive behavior with no seams, the decomposition map is one entry. Tag it `@trivial` along with its `@layer(...)`. No seam analysis needed.
-
-### Example Decomposition Maps
-
-**Single behavior (no decomposition):**
 ```
-Decomposition map:
-1. fix-readme-typo  @layer(infra) @trivial (no dependencies)
+Agent tool (subagent_type: application-architect, run_in_background: false):
+"You are running Step 2.5 (decomposition) for this design session. Read the product-owner handoff at
+specs/handoffs/step-2-<spec-slug>-product-owner.html and produce a decomposition map. Tag every spec
+with @layer(api|ui|full-stack|cli|infra) and @trivial where applicable. Produce your handoff at:
+  specs/handoffs/step-2.5-<spec-slug>-application-architect.html"
 ```
 
-**Two independent behaviors:**
+When the agent returns, read its handoff. Verify:
+- The decomposition table in `findings` lists every spec with `@layer`, `@depends-on`, `@parallel-risk`.
+- The `acceptance-criteria` items are machine-checkable (greps, file counts, dependency-cycle check).
+- The `data-input-references` meta tag points to the PO handoff.
+
+If the decomposition has issues (cycles, missing tags, unclear seams), dispatch again with the specific concern — do NOT proceed.
+
+**On rule 2 (no codebase investigation during design):** decomposing brownfield work means finding seams in an existing codebase, and that tension is real. The resolution: the application-architect MAY read structural context from `.claude/agent-memory/` (built by `/onboard`) — module layout, layer boundaries, existing feature seams — but MUST NOT read implementation details (function bodies, file-level patterns, line-level conventions). Structure informs where to cut; implementation investigation remains /build's job (Step 3.1), where it produces logged, auditable findings.
+
+### Integration spec (BLOCKING for multi-feature user-facing products)
+
+Decomposition optimizes for **independence** — that is the right instinct for seams, and the wrong instinct for the product. Independent features that no spec ever assembles ship as a launchpad of disconnected demo cards: each one builds, tests, and verifies in isolation, and the running app reaches none of them. This is the SquashBuckler dogfood failure (2026-05-31): ~40 UI features all reached `@status(verified)` and the app shell that mounts them was bolted on afterwards under a separate slug — a rescue, not a plan.
+
+**Rule.** When the decomposition contains **≥2 specs tagged `@layer(ui|full-stack)`**, it MUST include exactly one **integration spec**:
+
+- Tagged `@integration` (and `@layer(ui)` or `@layer(full-stack)`).
+- `@depends-on` **every** user-facing feature spec.
+- Carries a `## Mount Map` section — a table with one row per UI feature: `| Feature spec | Mounts as (component) | Where (route / region / nav entry) |`. This is the assembly contract: every feature has a declared home in the running product.
+- Owns the application's single entry point and primary navigation.
+
+And **every** `@layer(ui|full-stack)` feature spec MUST carry `@mounts-in(<integration-spec-slug>)` (or, for a sub-component another feature mounts, `@mount-skip(mounted by <feature>: reason)`).
+
+A UI feature with no row in the Mount Map and no `@mounts-in` is an **orphan** — a decomposition error, not an acceptable outcome. The `require-feature-mounted.sh` hook blocks `@status(verified)` on orphan UI features during /build; catching it here, at decomposition, is far cheaper.
+
+**Exempt (no integration spec, no skip tag needed):** epics with <2 user-facing specs (single-UI-feature, CLI-only, API-only, library, infra-only). For VS Code-extension-style products where independent commands *are* the product, the extension host IS the integration spec — commands `@mounts-in(extension-shell)`.
+
+**Override (rare — document why this epic has no single assembly owner):** `@integration-skip(<reason>)` on the affected specs.
+
+## Step 2.7: Per-spec Game Design (when applicable)
+
+**Dispatch level-designer, narrative-designer, and systems-designer in PARALLEL** for each spec, when `.claude/game-context.md` exists. These three designers all read the game-designer handoff and produce orthogonal deliverables (space, story, math).
+
 ```
-Decomposition map:
-1. cli-export-command  @layer(cli) (no dependencies)
-2. api-export-endpoint  @layer(api) (no dependencies, @parallel-risk: cli-export-command — both modify exports.ts)
+# Parallel: include multiple Agent tool calls in a SINGLE message
+Agent tool (subagent_type: level-designer): "Step 2.7 for spec <slug>: spatial layout, encounter pacing, difficulty curve. Read the game-designer handoff. Handoff at specs/handoffs/step-2.7-<slug>-level-designer.html"
+
+Agent tool (subagent_type: narrative-designer): "Step 2.7 for spec <slug>: story arc, characters, dialogue, branching, tone. Read the game-designer handoff. Handoff at specs/handoffs/step-2.7-<slug>-narrative-designer.html"
+
+Agent tool (subagent_type: systems-designer): "Step 2.7 for spec <slug>: progression math, economy graph, drop tables, balance, anti-degenerate defenses. Read the game-designer handoff. Handoff at specs/handoffs/step-2.7-<slug>-systems-designer.html"
 ```
 
-**Behaviors with shared dependency:**
-```
-Decomposition map:
-1. user-data-model  @layer(api) (no dependencies)
-2. user-registration  @layer(full-stack) (@depends-on: user-data-model)
-3. user-authentication  @layer(full-stack) (@depends-on: user-data-model, @parallel-risk: user-registration — both modify user-routes.ts)
-```
+All three read the game-designer handoff ONLY — they run in parallel, so cross-reading each other's in-flight handoffs would be race-dependent. Tensions between their outputs (e.g. "pacing wants combat, narrative wants dialogue") surface via each handoff's `open-questions` and get a single resolution from the orchestrator.
+
+When all three return, read their handoffs. Verify:
+- Per-axis sections (topology / story-arc / progression-curves / etc.) are substantive — not placeholder text
+- Cross-references resolve (level-designer references game-designer's verbs; narrative-designer references game-designer's core loop)
+- `open-questions` from each are surfaced together — common tensions ("pacing wants combat, narrative wants dialogue") get a single resolution
+
+**BLOCKING REQUIREMENT.** When `.claude/game-context.md` exists AND the spec is not `@trivial`, all three must run before Step 2.75 / Step 2.85. The `require-handoff-artifact.sh` hook will block `@status(verified)` later if any are missing.
+
+**Skip when:** Spec is `@trivial`, OR `.claude/game-context.md` is absent (non-game project).
 
 ## Step 2.75: Validate Feasibility (when applicable)
 
@@ -257,137 +248,76 @@ Report: confirmed capabilities, limitations, and anything that contradicts the c
 
 ## Step 2.85: UI/UX Design (when applicable)
 
-**REQUIRED SUB-SKILL:** Invoke `design-ui` via the Skill tool. It handles the full UI/UX design pipeline and produces:
-- `PRODUCT.md` + `DESIGN.md` (if missing — via `/impeccable teach`)
-- Component mockups in `specs/mockups/` for all UI-facing specs
-- `## UI Design` sections ready to incorporate into specs
-- Quality-checked designs (critique + detect + enhancement)
+**Dispatch the uiux-designer role agent — OR game-ui-designer when the spec carries `@surface(game)`.** This step is run by `agents/uiux-designer.md` (base discipline) or `agents/game-ui-designer.md` (game-UI extension — inherits uiux-designer's discipline + adds HUD / diegesis / input affordances / juice / accessibility-at-speed axes).
 
-### When to trigger
+**Routing decision per spec:**
 
-Any decomposition map entry that involves:
-- New pages, views, or screens
-- New UI components or widgets
-- Significant visual changes to existing interfaces
-- User-facing interactions (forms, dashboards, data visualization)
+```bash
+# For each UI-bearing spec, check @surface(game)
+for spec in $(grep -lE '@layer\((ui|full-stack)\)' specs/*.md); do
+    if grep -q '@surface(game)' "$spec"; then
+        echo "ROUTE: game-ui-designer  $spec"
+    else
+        echo "ROUTE: uiux-designer     $spec"
+    fi
+done
+```
 
-**BLOCKING REQUIREMENT**: If ANY entry in the decomposition map is UI-facing, `/design-ui` MUST be invoked before proceeding to Step 3 (spec generation). A UI-facing spec without a mockup CANNOT be approved.
+For specs routed to **uiux-designer**:
 
-The `/design-ui` skill handles its own gate checks, batching strategy, quality gates, and user confirmation. When it returns, all UI-facing specs have mockups and UI Design content.
+```
+Agent tool (subagent_type: uiux-designer, run_in_background: false):
+"You are running Step 2.85 (UI/UX design) for the UI-facing specs in this decomposition. Read the
+application-architect handoff. For each, ensure PRODUCT.md and DESIGN.md exist, generate mockups
+in specs/mockups/, invoke all 5 /impeccable gates per spec, and add ## UI Design sections. Produce
+your handoff at:
+  specs/handoffs/step-2.85-<spec-slug>-uiux-designer.html"
+```
 
-**Skip when:** No entry in the decomposition map is tagged `@layer(ui)` or `@layer(full-stack)`. Equivalent grep: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results. If any UI/full-stack spec exists in the decomp, `/design-ui` MUST run.
+For specs routed to **game-ui-designer**: same dispatch shape, but the agent additionally reads `.claude/game-context.md` and all four game-design handoffs, inherits uiux-designer discipline, and adds the game axes (HUD inventory, diegesis posture, input affordances, juice/feedback, readability at speed, accessibility commitments). Handoff at `specs/handoffs/step-2.85-<slug>-game-ui-designer.html`.
+
+When agents return, verify each UI-facing spec has a mockup at `specs/mockups/<slug>/` (or `.html`) AND a `## UI Design` section listing the gate Skill invocations. `claim-vs-call-audit.sh` catches false claims at `@status(verified)` time; checking now saves a round-trip.
+
+**BLOCKING REQUIREMENT.** If any decomposition entry is `@layer(ui|full-stack)`, exactly one of uiux-designer OR game-ui-designer MUST run for that spec (chosen by `@surface(game)` tag) before Step 3.
+
+**Skip when:** `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results.
 
 ## Step 3: Generate Gherkin Spec Files
 
-After decomposition, feasibility validation, and UI/UX design (if applicable), generate one spec file per entry in the decomposition map:
-
-```bash
-# 1. Ensure specs/ directory exists
-mkdir -p specs
-
-# 2. For greenfield projects: ALWAYS generate specs/system.md first
-# System spec: purpose, tech stack, data model, feature map, API overview
-
-# 3. Generate feature spec(s) from questioning output
-# Complexity scales naturally:
-#   - Simple change: Feature + 1-3 Scenarios
-#   - Standard feature: Feature + As/I want/So that + Technical Context + Rules + Scenarios
-#   - Complex/multi-feature: Multiple spec files with @depends-on/@blocks/@parallel-risk
-
-# 4. For multi-spec designs, verify dependency integrity
-# Every @depends-on(x) must have a corresponding specs/x.md
-# Every @blocks(x) must have a corresponding specs/x.md
-# Every @parallel-risk(x) must reference another existing spec
-# No circular dependencies
-```
+After decomposition, feasibility validation, and UI/UX design (if applicable): `mkdir -p specs`, generate `specs/system.md` FIRST for greenfield, then one feature spec per decomposition-map entry (complexity scales per the tiers above), then verify dependency integrity — every `@depends-on(x)` / `@blocks(x)` / `@parallel-risk(x)` references an existing `specs/x.md`, no circular dependencies.
 
 **Spec generation rules:**
 - One spec file per feature
 - `@status(draft)` on all new specs
 - `## Critical User Journeys` section required on all user-facing Standard and Complex specs — lists which end-to-end journeys this feature participates in, the steps within this feature, and the full journey path. Exempt: Simple specs (typo fixes, renames) and non-user-facing work (pure API-only with no UI consumer in this epic, CLI tools, cron jobs, infra).
 - `## Interaction Map` section required on all full-stack specs (specs with BOTH API endpoints AND UI elements) — maps every interactive UI element (button, form, toggle, nav) to its API endpoint, HTTP method, and expected result. This table becomes the wiring checklist for /build Steps 3.2.5 and 3.2.6. Exempt: API-only specs, UI-only specs with no backend, Simple specs.
+- **Integration spec required for ≥2 user-facing specs** (see Step 2.5 "Integration spec"). Exactly one spec tagged `@integration`, depending on every UI feature, carrying a `## Mount Map`; every UI feature tagged `@mounts-in(<integration-slug>)`. Without it, features ship as disconnected demo cards. Exempt: <2 user-facing specs.
 - Technical Context section with API contracts, data structures, integration points (for non-trivial features)
 - Scenarios cover happy path, error cases, and edge cases discovered during questioning
 - For greenfield: the complete set of specs must be sufficient to rebuild the entire application
 
 ## Step 4: Reality Check
 
-Two-part verification that specs match the original request:
-
-### Part 1: Agent Pre-Check
-
-Mentally compare the generated specs against the user's original request:
-- Does every requirement from the original ask have at least one spec scenario?
-- Are there specs that address things the user didn't ask for? (scope creep)
-- Are the `@depends-on` relationships correct?
-- Are `@parallel-risk` tags consistent? (mutual references, no phantom slugs)
-- For greenfield: does the system spec + feature specs cover the entire application?
-- **For UI-facing specs**: does a component mockup exist for each one? Run `ls specs/mockups/` to verify. If any UI-facing spec is missing its mockup, STOP — go back to Step 2.85C and generate it before continuing.
-
-### Part 1.5: CUJ Coverage Analysis (MANDATORY for multi-spec designs)
-
-Trace every Critical User Journey across ALL specs to find gaps. This is the systematic tool for catching missing specs that logical reasoning misses.
-
-**Process:**
-
-1. **Collect CUJs** — Read the `## Critical User Journeys` section from every spec. For each CUJ, combine the "Full Journey" column with the spec slug to build a master CUJ table:
+**Dispatch the product-owner role agent for the pre-check; the ORCHESTRATOR presents to the user.** The PO agent compares generated specs against the original request, flags scope creep, and traces CUJ coverage across all specs — it cannot present anything to the user itself (`docs/agent-protocol.md` §2).
 
 ```
-| CUJ | Steps in This Feature | Specs Covering Each Step |
-|-----|----------------------|--------------------------|
-| New user onboarding | Landing → Register → Verify → Login → Role select → Dashboard | auth.md, user-profiles.md, ??? (dashboard has no spec!) |
-| Log a workout | Open app → Navigate → Start workout → Log sets → Complete → History | auth.md, workout-tracking.md (navigation has no spec!) |
+Agent tool (subagent_type: product-owner, run_in_background: false):
+"You are running the Step 4 reality check. Read the user's original ask (your Step 2 handoff has the
+resolved questions), every spec generated in Step 3, and the application-architect handoff. Verify:
+every requirement maps to a scenario; no scope creep; @depends-on/@parallel-risk integrity; UI specs
+have mockups; CUJ coverage if multi-spec. You cannot ask the user questions — record your verdict
+(PASS or BLOCKED + affected specs), a presentation summary (per-spec scenario counts, dependency
+graph, anything the user must weigh in on), and any blocking questions in open-questions, updating
+your phase handoff at:
+  specs/handoffs/step-2-<spec-slug>-product-owner.html
+per docs/agent-protocol.md §2."
 ```
 
-2. **Trace each journey end-to-end** — For every step in every CUJ, verify:
-   - A spec exists that covers this step
-   - The spec has scenarios for the user action at this step
-   - The spec's Technical Context includes the API endpoint or navigation target needed
+When the agent returns: relay any `data-blocking="true"` open-questions via AskUserQuestion and re-dispatch with answers (cap 3 rounds). On the agent's PASS, YOU present the specs to the user via AskUserQuestion — spec list, scenario counts, dependency graph, the PO's summary — and BLOCK until the user confirms. On user confirmation, mark all specs `@status(approved)` and proceed to architecture documentation. On BLOCKED (from agent or user), regenerate affected specs and re-dispatch.
 
-3. **Flag gaps** — Any CUJ step with no covering spec is a MISSING SPEC. Present these gaps to the user:
-   ```
-   "CUJ gap analysis found missing coverage:
-   
-   Journey: 'Log a workout'
-   Missing: No spec covers navigation from dashboard to workout screen
-   Missing: No spec covers the workout selection screen (user picks which workout to start)
-   
-   Journey: 'Trainer reviews client'
-   Missing: No spec covers the client detail view (trainer drills into one client)"
-   ```
-
-4. **Generate missing specs** — For each gap, generate a new spec (with its own `## Critical User Journeys` section per the spec generation rules) and re-run the CUJ trace. Repeat until all journeys are fully covered.
-
-**Skip when:** Decomposition has exactly one entry (single-spec design), OR no entry is tagged `@layer(ui)` or `@layer(full-stack)`. Deterministic check: `grep -lE '@layer\((ui|full-stack)\)' specs/*.md` returns no results, or the decomp map has one row.
-
-### Part 2: User Confirmation
-
-Present the specs to the user via AskUserQuestion:
-
-```
-"Here are the Gherkin specs I generated for your request:
-
-[List each spec file with a 1-line summary]
-- specs/feature-a.md — [summary] (X scenarios)
-- specs/feature-b.md — [summary] (Y scenarios, depends on feature-a)
-
-[Dependency graph showing build order and parallel lanes]
-Build order:
-  feature-a          (no dependencies)
-  feature-b          (depends on: feature-a)
-  feature-c          (no dependencies) ▐ parallel with feature-a
-  ⚠ feature-a and feature-c: @parallel-risk — both modify server.ts
-
-[Note any gaps or assumptions identified in Part 1]
-
-Do these specs capture what you asked for? You can also request re-decomposition
-('these two should be one spec' or 'this should be split further')."
-```
-
-Options:
-- "Yes, approve these specs" → Update all specs to `@status(approved)`, proceed to beads setup
-- "No, needs changes" → Ask clarifying questions about what's wrong, regenerate affected specs, re-check
-- User provides specific feedback → Incorporate, regenerate, re-check
+**Orchestrator-level gates that don't require dispatch:**
+- For UI-facing specs: `ls specs/mockups/` must show a mockup per spec. If missing, STOP — return to Step 2.85.
+- For greenfield: confirm `specs/system.md` exists.
 
 **BLOCK until user confirms.** Do not proceed to architecture documentation with unapproved specs.
 
@@ -449,28 +379,11 @@ bd dep add [tests-id] [epic-id] --type parent-child
 
 ## Step 6: Reconcile with Brainstorming Task Docs
 
-If the brainstorming skill created `plans/active/<slug>/` task docs, update them so they reference the specs:
+If the brainstorming skill created `plans/active/<slug>/` task docs, update them so they reference the specs instead of duplicating them:
 
-1. **plan.md acceptance checks** should reference specs rather than duplicating behavioral criteria:
-   ```markdown
-   ## Acceptance Checks
-   - [ ] All scenarios in specs/<feature-slug>.md implemented and passing
-   - [ ] Spec coverage check passes (every scenario has code + test)
-   - [ ] [Non-behavioral criteria only]
-   ```
-
-2. **context.md** should list spec files as Key Files:
-   ```markdown
-   ## Key Files
-   - `specs/<feature-slug>.md` — Gherkin spec. READ before each task.
-   - `specs/system.md` — (if exists) System conventions, data model, API format.
-   ```
-
-3. **tasks.md** items should reference which spec scenarios they address:
-   ```markdown
-   ## Now
-   - [ ] Implement Rule: Valid coordinates return nearby results (specs/nearby-breweries.md — 2 scenarios)
-   ```
+1. **plan.md acceptance checks** reference specs ("All scenarios in specs/<slug>.md implemented and passing; spec coverage check passes") plus non-behavioral criteria only.
+2. **context.md** lists spec files under Key Files (`specs/<slug>.md` — READ before each task; `specs/system.md` if it exists).
+3. **tasks.md** items name the spec scenarios they address (e.g. "Implement Rule: Valid coordinates return nearby results (specs/nearby-breweries.md — 2 scenarios)").
 
 This ensures the /build skill (which uses executing-plans) naturally reads spec context.
 
@@ -500,27 +413,11 @@ Without /design, the natural path is: open the file, fix the typo, commit. No sp
 </why_it_fails>
 
 <correction>
-**Step 1:** "I'm using the /design skill."
-
 **Step 2:** No questions needed — request is fully specified.
 
 **Step 2.5:** Single behavior, no seams — decomposition map: one entry (fix-readme-typo, no dependencies). Seam analysis skipped.
 
-**Step 3:** Generate `specs/fix-readme-typo.md`:
-```markdown
-@status(draft)
-
-# Feature: Fix typo in README
-
-Correct the misspelling 'recieve' to 'receive' across the project.
-
-## Scenario: All instances are corrected
-
-- Given the project contains the misspelling 'recieve'
-- When the fix is applied
-- Then all instances of 'recieve' are replaced with 'receive'
-- And no other text is modified
-```
+**Step 3:** Generate `specs/fix-readme-typo.md` — `@status(draft)`, `@layer(infra)`, `@trivial`, one Feature line, one Scenario ("all instances of 'recieve' are replaced; no other text modified"). The `@trivial` tag set HERE is what lets /build skip reviewer steps later.
 
 **Step 4:** Reality check — present to user, confirm.
 
@@ -538,9 +435,7 @@ Without /design, the agent reads the existing routes, picks "reasonable defaults
 </why_it_fails>
 
 <correction>
-**Step 1:** "I'm using the /design skill."
-
-**Step 2:** Ask via AskUserQuestion:
+**Step 2:** The PO agent's handoff returns three blocking questions; the orchestrator relays via AskUserQuestion:
 - "What units should radius use? Miles, kilometers, or configurable?"
 - "Should there be a max radius? What's a reasonable upper bound?"
 - "Should the endpoint require authentication or be public?"
@@ -567,8 +462,6 @@ Without /design's greenfield protocol, the agent asks one round of questions ("G
 </why_it_fails>
 
 <correction>
-**Step 1:** "I'm using the /design skill."
-
 **Step 2:** Multiple rounds of AskUserQuestion:
 - Round 1: Provider (Google? GitHub?), token storage, session handling
 - Round 2: User model fields, role-based access, refresh token strategy
@@ -579,21 +472,11 @@ Decomposition map:
 2. user-registration (@depends-on: system)
 3. user-authentication (@depends-on: user-registration)
 
-**Step 3:** Generate multiple specs (one per decomposition map entry):
-- `specs/system.md` — tech stack, data model (User entity), API conventions
-- `specs/user-registration.md` — @blocks(user-authentication)
-- `specs/user-authentication.md` — @depends-on(user-registration), @blocks(payment-processing)
-Each with full Technical Context, Rules, Scenario Outlines with Examples tables.
+**Step 3:** Generate `specs/system.md` (stack, User data model, API conventions) + `specs/user-registration.md` (@blocks user-authentication) + `specs/user-authentication.md` (@depends-on user-registration, @blocks payment-processing), each with full Technical Context, Rules, and Scenario Outlines.
 
-**Step 4:** Reality check:
-- Agent pre-check: system spec covers full rebuild, dependency graph is valid
-- User confirmation: "Here are 3 specs (system + 2 features). The auth spec depends on registration and blocks payment. 12 total scenarios. Does this capture what you asked for?"
+**Step 4:** PO pre-check PASS (system spec covers full rebuild, graph valid); orchestrator presents: "3 specs, auth depends on registration and blocks payment, 12 scenarios — does this capture what you asked for?" User confirms.
 
-**Step 5:** Create beads epic + Tests gate. (/build creates per-spec tasks after codebase investigation.)
-
-**Step 6:** Reconcile brainstorming task docs with spec references.
-
-**Exit:** "Design complete. 3 specs approved. Run `/build` when ready."
+**Steps 5-6:** Beads epic + Tests gate; reconcile brainstorming task docs. **Exit:** "Design complete. 3 specs approved. Run `/build` when ready."
 </correction>
 </example>
 
@@ -620,87 +503,60 @@ Proposed fix: [optional — if the fix is obvious, note it]"
 ```
 
 4. **If dismissed**, continue normally — not every correction is a workflow incident
+
+Categories and the no-active-epic fallback are documented in build SKILL.md's incident-logging section — the same protocol applies here.
 </incident_logging>
 
 <critical_rules>
 ## Rules That Have No Exceptions
 
-1. **All questions via AskUserQuestion** -> Blocks execution until user responds. Text questions do not block.
-2. **No codebase investigation during design** -> Codebase investigation is /build's job. Internet research (hyperpowers:internet-researcher) IS allowed — it informs questions and validates feasibility, but never replaces asking the user.
+1. **All questions via AskUserQuestion** -> Blocks execution until user responds. Text questions do not block. The orchestrator asks; dispatched agents return question lists (`docs/agent-protocol.md` §2).
+2. **No codebase investigation during design** -> Codebase investigation is /build's job. Internet research (hyperpowers:internet-researcher) IS allowed — it informs questions and validates feasibility, but never replaces asking the user. Exception scoped in Step 2.5: the application-architect may read STRUCTURE from `.claude/agent-memory/` to find seams, never implementation details.
 3. **No proceeding without answers** -> "Making reasonable defaults for ambiguous parts" is not acceptable.
-4. **Every design produces spec files** -> All work gets specs in `specs/`. Simple work gets simple specs (Feature + 1-3 Scenarios). Complex work gets multiple specs with dependencies.
+4. **Every design produces spec files** -> All work gets specs in `specs/`. Simple work gets simple specs (Feature + 1-3 Scenarios; 5-10 lines). Complex work gets multiple specs with dependencies. Specs capture intent BEFORE code.
 5. **Reality check before approval** -> Agent pre-checks for gaps, then user confirms. Both parts required.
 6. **Specs are the source of truth** -> Beads epic descriptions reference spec files, not inline requirements.
 7. **Every epic has a Tests gate task** -> Prevents beads auto-close before verification.
 8. **Greenfield requires system spec** -> `specs/system.md` is mandatory for greenfield projects.
 9. **Dependency integrity** -> Every `@depends-on(x)` and `@blocks(x)` must reference an existing spec file. No circular dependencies.
-10. **Invoke /design-ui for UI-facing work** -> If ANY decomposition map entry is UI-facing, invoke `/design-ui` before generating specs. This is a named skill invocation — not optional, not deferrable. `/design-ui` handles PRODUCT.md, DESIGN.md, craft pipeline, mockups, and quality gates. A UI-facing spec without a mockup CANNOT be approved.
+10. **Dispatch uiux-designer (or game-ui-designer) for UI-facing work** -> If ANY decomposition map entry is UI-facing, the Step 2.85 agent dispatch MUST run before spec generation — the uiux-designer agent invokes `/design-ui` (PRODUCT.md, DESIGN.md, craft pipeline, mockups, quality gates). Not optional, not deferrable. A UI-facing spec without a mockup CANNOT be approved.
 11. **Architecture documentation after approval** -> After specs are approved (for non-trivial work), invoke `/design-arch` to generate architecture docs. Do not proceed to Beads Setup until `/design-arch` completes and user confirms.
-14. **CUJs required on user-facing Standard and Complex specs** -> Every user-facing non-trivial spec must have a `## Critical User Journeys` section listing which end-to-end journeys the feature participates in. This is how /design systematically catches missing specs and how /build generates Playwright e2e tests (Step 4.1).
-15. **CUJ coverage analysis for multi-spec user-facing designs** -> After generating specs (when there are multiple user-facing specs), trace every CUJ end-to-end across all specs. Any journey step without a covering spec is a MISSING SPEC. Generate it before proceeding to reality check.
-16. **Greenfield requires minimum 3 questioning rounds** -> A greenfield project description is a starting point, not a specification. Scope & Architecture → Feature Deep-Dive → Integration & Flows. All completeness gate categories must be covered before generating specs.
-17. **Drill down relentlessly** -> Every answer spawns follow-up questions. "Standard auth" is not an answer. "React Native" is not an answer. Push until you have enough detail to write code. Vague answers produce vague specs that produce broken implementations.
+12. **CUJs required on user-facing Standard and Complex specs** -> Every user-facing non-trivial spec must have a `## Critical User Journeys` section listing which end-to-end journeys the feature participates in. This is how /design systematically catches missing specs and how /build generates Playwright e2e tests (Step 4.1).
+13. **CUJ coverage analysis for multi-spec user-facing designs** -> After generating specs (when there are multiple user-facing specs), trace every CUJ end-to-end across all specs, in writing — mental tracing misses navigation, loading states, and error recovery. Any journey step without a covering spec is a MISSING SPEC. Generate it before proceeding to reality check.
+14. **Greenfield requires minimum 3 questioning rounds** -> A greenfield project description is a vision, not a specification. Scope & Architecture → Feature Deep-Dive → Integration & Flows. All completeness gate categories must be covered before generating specs.
+15. **Drill down relentlessly** -> Every answer spawns follow-up questions. "Standard auth" is not an answer. "React Native" is not an answer. Push until you have enough detail to write code. Vague answers produce vague specs that produce broken implementations.
+16. **Integration spec required for multi-feature user-facing products** -> When decomposition has ≥2 `@layer(ui|full-stack)` specs, exactly one spec tagged `@integration` must own assembly: it depends-on every UI feature, carries a `## Mount Map`, and owns the app entry + nav. Every UI feature is tagged `@mounts-in(<integration-slug>)`. CUJ coverage (rule 13) finds missing *journey-step* specs; the integration spec guarantees the found specs are actually *assembled into one reachable product*. Plan it at decomposition, not as a rescue (see `docs/incidents.md#squashbuckler-2026-05-31`).
 
 ## Common Rationalizations (All Mean: STOP, Follow the Process)
 
-- "It's just a typo" -> Simple work gets simple specs. Still gets a spec file.
-- "The user is in a hurry" -> Skipping design creates bugs that cost more time later.
-- "I know this codebase well enough" -> Your knowledge doesn't replace user intent. Ask questions.
-- "I'll investigate the codebase while waiting for answers" -> NO. Codebase investigation is /build's job. This leads to skipping user answers entirely. Internet research is fine — it makes questions better.
-- "I'll make reasonable defaults for the ambiguous parts" -> NO. Ambiguity is exactly what questions resolve.
-- "The user's description is detailed enough" -> Detailed descriptions still have hidden constraints. Ask critical questions.
-- "I have enough context from the codebase" -> Codebase context informs what to ask, it doesn't replace asking.
-- "A spec is overkill for this change" -> Simple specs are 5-10 lines. If that's too much, the change is probably a no-op.
-- "I'll write the spec after I implement it" -> Specs are design documents, not documentation. They capture intent BEFORE code.
-- "The spec scenarios are obvious from the code" -> Specs exist so someone can rebuild the app without reading the code.
-- "I don't need a system spec for this project" -> If it's greenfield, `specs/system.md` is required.
-- "The spec is getting too long" -> Split into multiple specs with `@depends-on` relationships.
-- "The @depends-on tags aren't important" -> The dependency graph IS the build order for /build.
-- "The UI is simple enough to skip /design-ui" -> Simple UIs still get mockups. `/design-ui` handles batching efficiently. No UI-facing spec is approved without a mockup.
-- "I'll do the UI design later / during build" -> Mockups are design artifacts. They capture intent BEFORE code. The trainr project shipped 15 specs with no mockups — every screen had to be redesigned.
-- "I can just describe the UI in the spec" -> Text descriptions do not replace visual mockups. Users cannot review a layout from prose. Invoke the `design-ui` skill.
-- "PRODUCT.md/DESIGN.md aren't needed" -> Every project with UI needs them. 5 minutes of `/impeccable teach` prevents hours of bland redesign.
-- "I'll invoke /design-ui after generating specs" -> No. `/design-ui` runs BEFORE spec generation (Step 2.85). Its output feeds into the specs. Generating specs first means backfilling design into already-written specs.
-- "The architecture is obvious from the specs" -> Specs define behavior. Architecture defines structure. They serve different audiences and purposes.
-- "CUJs are obvious from the feature description" -> CUJs trace the FULL journey across multiple specs. A feature description only covers one spec's scope. CUJ analysis is how you find missing specs.
-- "We have enough specs, the user described 4 features" -> CUJ tracing might reveal 3 missing specs that connect those features. "Enough specs" is determined by CUJ coverage, not by counting features.
-- "CUJ analysis is overkill for this project" -> The FitConnect launch had buttons that did nothing because no one traced the full user journey. 5 minutes of CUJ analysis prevents hours of rework.
-- "I'll trace the journeys mentally" -> Write them down. Mental tracing misses non-obvious steps (navigation, loading states, error recovery). The CUJ table is the tool.
-- "The user's description is detailed enough for greenfield" -> No greenfield description is ever detailed enough. The user describes the VISION, not the SPECIFICATION. 3+ rounds of drilling converts vision into spec-ready detail.
-- "One round of questions is sufficient" -> For a typo fix, yes. For greenfield, one round produces specs with 30% of the needed detail. Round 2 catches data model gaps. Round 3 catches integration gaps. All three are required.
-- "I don't want to annoy the user with too many questions" -> Users are far more annoyed by broken implementations than by thorough questioning. 10 minutes of questions prevents 10 hours of rework.
-- "I can infer the answer from context" -> You probably can't. "Standard auth" could mean email/password, social login, SSO, MFA, magic links, or passkeys. Each produces a radically different spec. Ask.
-- "The user will tell me if I'm missing something" -> Users don't know what they don't know. That's YOUR job. Push on error states, edge cases, permissions, and cross-feature flows — the user won't volunteer these.
-- "I have enough to start generating specs" -> Check the completeness gate. If any category has gaps, you don't have enough. Generating specs with gaps means generating wrong specs.
-- "The overview page is overkill" -> The overview page takes 5 minutes to generate and saves hours of explanation to stakeholders.
-- "I'll do the architecture docs during build" -> Architecture is a design artifact. Documenting it after implementation is documentation, not design.
+- "I'll make reasonable defaults for the ambiguous parts" -> Ambiguity is exactly what questions resolve (rule 3).
+- "I'll investigate the codebase while waiting for answers" -> Codebase investigation is /build's job; it leads to skipping user answers entirely (rule 2). Internet research is fine — it makes questions better.
+- "A spec is overkill for this change" -> Simple specs are 5-10 lines (rule 4). If that's too much, the change is probably a no-op.
+- "I'll write the spec after I implement it" -> Specs capture intent BEFORE code (rule 4); afterwards they're just documentation.
+- "I'll do the UI design later / during build" -> Mockups capture intent BEFORE code (rule 10). The trainr project shipped 15 specs with no mockups — every screen had to be redesigned (see `docs/incidents.md#trainr`).
+- "One round of questions is sufficient" -> For a typo fix, yes. For greenfield, round 2 catches data-model gaps and round 3 catches integration gaps — all three required (rule 14).
+- "I can infer the answer from context" -> "Standard auth" could mean email/password, social login, SSO, MFA, magic links, or passkeys — each is a radically different spec (rule 15). Ask.
+- "CUJ analysis is overkill for this project" -> FitConnect launched with buttons that did nothing because no one traced the full journey (rule 13; see `docs/incidents.md#fitconnect`).
+- "Each feature is independent, so no integration spec is needed" -> Independence is a seam property, not a product property. ≥2 UI features ⇒ one `@integration` spec with a Mount Map, or you ship demo cards (rule 16; see `docs/incidents.md#squashbuckler-2026-05-31`).
+- "We have a system.md feature map, that covers assembly" -> system.md *describes*; the Mount Map is *checked* — by a hook at `@status(verified)` and by e2e at epic close (rule 16). Prose is not a gate.
 </critical_rules>
 
 <verification_checklist>
 Before claiming /design is complete:
 
-- [ ] All critical questions asked via AskUserQuestion (not text)
-- [ ] User answered all critical questions before proceeding
-- [ ] Greenfield: minimum 3 questioning rounds completed (Scope → Deep-Dive → Integration) — or N/A (not greenfield)
-- [ ] Greenfield: completeness gate passed (all categories covered) — or N/A (not greenfield)
-- [ ] Drill-down applied: vague answers received follow-up questions, not assumptions
-- [ ] No codebase investigation agents dispatched during design (internet research is allowed)
-- [ ] Feasibility validated via internet-researcher (when external APIs/libraries involved) — or skipped for internal-only changes
-- [ ] Decomposition heuristics applied (independence test, seam scan) — or skipped for trivially single-behavior work
-- [ ] Decomposition map produced before spec generation
-- [ ] `/design-ui` invoked and completed for all UI-facing specs (mockups exist, quality gates passed, user confirmed) — or skipped (no UI-facing entries in decomposition map)
-- [ ] `## Interaction Map` section present on all full-stack specs (both API endpoints and UI elements) — or skipped (API-only / UI-only / Simple spec)
-- [ ] Gherkin spec file(s) generated in `specs/`
-- [ ] `## Critical User Journeys` section present on all user-facing Standard/Complex specs — or skipped (Simple spec / non-user-facing)
-- [ ] System spec generated for greenfield projects
-- [ ] All specs tagged with `@status(approved)` (after reality check)
-- [ ] Dependency integrity verified (all @depends-on/@blocks/@parallel-risk reference existing specs)
-- [ ] CUJ coverage analysis completed: every journey step has a covering spec — or skipped (single-spec / non-user-facing)
-- [ ] Reality check passed: agent pre-checked for gaps, showed dependency graph, offered re-decomposition, AND user confirmed via AskUserQuestion
-- [ ] `/design-arch` invoked and completed (arch.md + diagrams + overview.html confirmed by user) — or skipped (trivial single-spec change)
-- [ ] Beads epic created referencing spec files
-- [ ] Mandatory Tests gate task exists in epic
-- [ ] Task docs (if brainstorming used) reconciled with spec references
+- [ ] All critical questions asked via AskUserQuestion (orchestrator-relayed from the PO handoff) and answered; vague answers got follow-ups, not assumptions
+- [ ] Greenfield: 3+ questioning rounds (Scope → Deep-Dive → Integration) and completeness gate passed — or N/A
+- [ ] No codebase investigation agents dispatched (internet research allowed; architect structure-reads from agent-memory allowed per rule 2)
+- [ ] Feasibility validated via internet-researcher — or N/A (internal-only change)
+- [ ] Decomposition map produced before spec generation (independence test + seam scan applied)
+- [ ] Step 2.85 agent dispatch completed for all UI-facing specs: mockups exist in `specs/mockups/`, quality gates passed — or N/A (no UI-facing entries)
+- [ ] Spec files generated in `specs/`: `## Critical User Journeys` on user-facing Standard/Complex specs, `## Interaction Map` on full-stack specs, system spec for greenfield — or documented exemptions
+- [ ] Dependency integrity verified (all @depends-on/@blocks/@parallel-risk reference existing specs; no cycles)
+- [ ] CUJ coverage traced in writing: every journey step has a covering spec — or N/A (single-spec / non-user-facing)
+- [ ] Integration spec present for ≥2 user-facing specs (exactly one `@integration` + `## Mount Map`; every UI feature `@mounts-in(...)`) — or N/A / `@integration-skip(reason)`
+- [ ] Reality check passed: PO pre-check verdict PASS AND user confirmed via AskUserQuestion; all specs `@status(approved)`
+- [ ] `/design-arch` completed (arch.md + diagrams + overview.html confirmed by user) — or skipped (trivial single-spec change)
+- [ ] Beads epic (referencing spec files) + mandatory Tests gate task created; brainstorming task docs reconciled (if used)
 
 **Cannot check all boxes? Do not claim design is complete.**
 </verification_checklist>
@@ -712,15 +568,15 @@ Before claiming /design is complete:
 |---|---|
 | AskUserQuestion | Socratic questioning + reality check confirmation |
 | hyperpowers:internet-researcher | During questioning (inform better questions) + feasibility validation (Step 2.75) |
-| /design-ui | UI/UX design — PRODUCT.md, DESIGN.md, craft pipeline, mockups, quality gates (Step 2.85) |
+| uiux-designer / game-ui-designer agent (invokes `/design-ui`) | UI/UX design — PRODUCT.md, DESIGN.md, craft pipeline, mockups, quality gates (Step 2.85) |
 | /design-arch | Architecture documentation — arch.md, draw.io diagrams, overview.html (Step 4.5) |
 | hyperpowers:brainstorming | For complex work requiring approach comparison |
 | hyperpowers:sre-task-refinement | On non-trivial implementation tasks |
 
 **This skill produces (consumed by /build):**
 - `specs/*.md` files with `@status(approved)`
-- `specs/mockups/` — component mockups for UI-facing specs (via `/design-ui`)
-- `PRODUCT.md` + `DESIGN.md` — design system files (via `/design-ui`)
+- `specs/mockups/` — component mockups for UI-facing specs (via the uiux-designer dispatch)
+- `PRODUCT.md` + `DESIGN.md` — design system files (via the uiux-designer dispatch)
 - Architecture docs via `/design-arch`: `specs/arch.md`, `specs/diagrams/*.drawio`, `specs/overview.html`
 - Beads epic with tasks referencing specs
 - Task docs with spec references (if brainstorming used)
@@ -754,23 +610,14 @@ Read existing specs to understand context and dependencies. New specs should int
 
 ## Decomposing an existing spec
 
-When a user asks to decompose/split an existing spec that turns out to be too large (often discovered during /build):
+When a user asks to split a too-large spec (often discovered during /build):
 
-1. **Read the existing spec** — understand its scenarios, rules, and dependencies
-2. **Apply decomposition heuristics** — use the independence test and seam types from the Decomposition Heuristics reference to identify natural split points
-3. **Generate replacement specs** — create one spec per independent piece, with correct `@depends-on` and `@parallel-risk` tags
-4. **Preserve and refine dependencies:**
-   - If the original spec had `@blocks(X)` or was referenced as `@depends-on` by other specs, ask the user via AskUserQuestion which replacement spec is the real dependency
-   - Edit each dependent spec file to update its `@depends-on` tag from the original slug to the correct replacement slug
-5. **Preserve status:**
-   - If original was `@status(approved)` → all replacements get `@status(approved)`
-   - If original was `@status(implemented)` → completed behaviors get `@status(implemented)`, incomplete get `@status(approved)`
-6. **Confirm status assignments via AskUserQuestion** (mandatory for partially-implemented specs) — present the proposed status for each replacement spec and block until the user confirms
-7. **Update beads:**
-   - Close the original beads task that referenced the old spec
-   - Create new beads tasks for each replacement spec
-   - Preserve the Tests gate task (do not duplicate it)
-8. **Remove the original spec file** — the replacements fully supersede it
+1. Read the existing spec; apply the independence test + seam types to find split points.
+2. Generate one replacement spec per independent piece with correct `@depends-on`/`@parallel-risk` tags.
+3. Dependencies: if the original had `@blocks(X)` or was a `@depends-on` target, ask the user via AskUserQuestion which replacement is the real dependency, then update each dependent spec's tag to the correct replacement slug.
+4. Status: `approved` original → all replacements `approved`; `implemented` original → completed behaviors `implemented`, incomplete `approved`. Confirm status assignments via AskUserQuestion (mandatory for partially-implemented specs) and block until confirmed.
+5. Beads: close the original task, create tasks per replacement, preserve the Tests gate (never duplicate it).
+6. Remove the original spec file — the replacements fully supersede it.
 
 **No full Socratic re-questioning needed.** The design was already confirmed — this is a structural refactor of the spec, not a re-design.
 

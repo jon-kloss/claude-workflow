@@ -5,8 +5,9 @@ set -euo pipefail
 # /impeccable quality gates (critique, audit, harden, clarify, adapt) were
 # actually invoked via the Skill tool in this session for this spec slug.
 #
-# Enforces design-ui/SKILL.md:14 ("If you did not type Skill(impeccable,
-# '<gate> <slug>'), the gate did not run") deterministically. Prevents the
+# Enforces the design-ui SKILL.md rigid rule ("If you did not type
+# Skill(impeccable, '<gate> <slug>'), the gate did not run" — see the quality
+# gates section) deterministically. Prevents the
 # documented 2026-05-21 incident pattern where gate claims appeared in the
 # spec but no corresponding Skill calls were logged.
 #
@@ -20,8 +21,7 @@ set -euo pipefail
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
-
-SKILLS_FILE="${HOME}/.claude/hooks/state/session-skills.log"
+require_python_or_block "claim-vs-call-audit.sh"
 
 if ! read -t 2 -r tool_use_json; then
     echo '{}'
@@ -85,11 +85,38 @@ fi
 
 slug="${basename_file%.md}"
 
+# Session+project-keyed state (evaluation H5)
+SKILLS_FILE="$(state_dir "$tool_use_json")/session-skills.log"
+
 # Required gates
 required_gates=(critique audit harden clarify adapt)
 
-# Build a set of skipped gates from @gate-skip(<gate>: ...) tags
-skipped_gates=$(echo "$spec_content" | grep -oE "@gate-skip\([a-z]+:" | sed 's/@gate-skip(//; s/://' || true)
+# Build a set of skipped gates from @gate-skip(<gate>: ...) tags; validate each
+# reason via the shared override-reason validator. A trivial reason like
+# "@gate-skip(critique: n/a)" gets rejected.
+skipped_gates=""
+REASON_VALIDATOR="$HOOK_DIR/_validate_override_reason.py"
+
+while IFS= read -r match; do
+    [ -z "$match" ] && continue
+    gate_match=$(echo "$match" | sed -E "s/@gate-skip\(([a-z]+):.*/\1/")
+    reason_match=$(echo "$match" | sed -E "s/@gate-skip\([a-z]+:[[:space:]]*(.*)\)$/\1/")
+    if [ -f "$REASON_VALIDATOR" ]; then
+        if ! validation_error=$("$PYTHON" "$REASON_VALIDATOR" "claim-vs-call-audit" "@gate-skip" "$gate_match" "$reason_match" 2>&1); then
+            cat >&2 <<EOF
+BLOCKED: @gate-skip(${gate_match}: ...) override reason failed quality validation.
+
+${validation_error}
+
+Provided reason: '${reason_match}'
+
+Override reasons must include a concrete artifact reference (commit SHA, beads ID, file path with extension, URL, or explicit user authorization). The skip persists in the spec as audit trail — make it auditable. Per docs/role-agent-handoff-schema.md, self-referential reasons like 'spec body' or 'spec scenarios' do not qualify.
+EOF
+            exit 2
+        fi
+    fi
+    skipped_gates="${skipped_gates}${gate_match} "
+done < <(echo "$spec_content" | grep -oE "@gate-skip\([a-z]+:[^)]+\)" || true)
 
 missing_gates=""
 for gate in "${required_gates[@]}"; do
@@ -122,6 +149,18 @@ if [ -z "$missing_gates" ]; then
     exit 0
 fi
 
-cat <<EOF
-{"error": "BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but these /impeccable gates were not invoked via the Skill tool in this session for '${slug}': ${missing_gates}\n\ndesign-ui/SKILL.md:14: 'If you did not type Skill(impeccable, \"<gate> <slug>\"), the gate did not run.'\n\nThis hook reads ~/.claude/hooks/state/session-skills.log. Run the missing gates:\n$(for g in $missing_gates; do printf '  Skill(impeccable, \"%s %s\")\\n' "$g" "$slug"; done)\n\nThen retry the edit.\n\nTo skip a specific gate (rare, document the reason), add to the spec:\n  @gate-skip(<gate>: <concise reason>)\n  e.g. @gate-skip(adapt: covered by parent dashboard spec's adapt run)"}
+cat >&2 <<EOF
+BLOCKED: specs/${slug}.md is UI-bearing and being marked @status(verified), but these /impeccable gates were not invoked via the Skill tool in this session for '${slug}': ${missing_gates}
+
+design-ui SKILL.md (quality gates section): 'If you did not type Skill(impeccable, "<gate> <slug>"), the gate did not run.'
+
+This hook reads session-skills.log from the session-keyed state directory. Run the missing gates:
+$(for g in $missing_gates; do printf '  Skill(impeccable, "%s %s")\n' "$g" "$slug"; done)
+
+Then retry the edit.
+
+To skip a specific gate (rare, document the reason), add to the spec:
+  @gate-skip(<gate>: <concise reason>)
+  e.g. @gate-skip(adapt: covered by parent dashboard spec's adapt run)
 EOF
+exit 2

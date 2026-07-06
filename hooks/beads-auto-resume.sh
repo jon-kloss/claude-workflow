@@ -7,6 +7,11 @@ set -euo pipefail
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
 
+# Advisory hook: exit quietly when python is unavailable (fail-open per E6).
+if [ -z "${PYTHON:-}" ]; then
+    exit 0
+fi
+
 # Skip if beads not initialized in this project
 if [ ! -d ".beads" ]; then
   echo '{}'
@@ -102,4 +107,4 @@ fi
 msg+="
 **IMPORTANT:** Before starting new work, ask the user: \"Found existing work. Want to continue one of these, or start something new?\""
 
-json_encode_context "$msg"
+json_encode_context "$msg" "SessionStart"

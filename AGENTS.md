@@ -101,13 +101,12 @@ bd close bd-42 --reason "Completed" --json
    - `bd create "Found bug" --description="Details about what was found" -p 1 --deps discovered-from:<parent-id>`
 5. **Complete**: `bd close <id> --reason "Done"`
 
-### Auto-Sync
+### Syncing
 
-bd automatically syncs with git:
+bd is Dolt-backed (the database lives in `.beads/dolt/`):
 
-- Exports to `.beads/issues.jsonl` after changes (5s debounce)
-- Imports from JSONL when newer (e.g., after `git pull`)
-- No manual export/import needed!
+- Share state with `bd dolt push` / `bd dolt pull` (see Landing the Plane below)
+- `bd export` / `bd import` provide JSONL backup and restore when needed
 
 ### Important Rules
 
@@ -119,7 +118,7 @@ bd automatically syncs with git:
 - ❌ Do NOT use external issue trackers
 - ❌ Do NOT duplicate tracking systems
 
-For more details, see README.md and docs/QUICKSTART.md.
+For more details, see README.md — in particular the "Starting a Project" and "When a Hook Blocks You" sections.
 
 ## Landing the Plane (Session Completion)
 

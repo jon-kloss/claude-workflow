@@ -2,3 +2,10 @@
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Python bytecode from hook helpers
+__pycache__/
+
+# Generated design outputs (dogfood specs are committed; outputs are not — decision D8)
+specs/overview.html
+specs/diagrams/
