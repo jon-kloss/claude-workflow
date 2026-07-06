@@ -129,20 +129,15 @@ TAGEOF
     return 1
 }
 
-# Gate EVERY id in the close command.
-for target_id in $target_ids; do
-    show_out=$(bd show "$target_id" 2>/dev/null || echo "")
-    [ -z "$show_out" ] && continue
-
-    # Look for "[epic]" in the title line ONLY. bd show formats:
-    #   "○ id · TITLE   [PRIORITY · STATUS]"
-    # DEPENDS ON / BLOCKS sections list parent/child titles which can also
-    # contain "[EPIC]" — grepping the full multi-line output false-positives
-    # non-epic tasks that depend on an epic. Restrict to the first line.
-    title_line=$(echo "$show_out" | head -n 1)
-    if ! echo "$title_line" | grep -qiE '\[epic\]'; then
-        continue
-    fi
+# gate_epic <epic-id> [trigger-note]
+# Applies the release gate to one epic. trigger-note, when set, explains that
+# the close command named a child, not the epic (molecule auto-close case).
+# Returns 0 to allow; prints a block message and exits 2 to block.
+gate_epic() {
+    target_id="$1"
+    trigger_note="${2:-}"
+    intro="bd close ${target_id} (epic)"
+    [ -n "$trigger_note" ] && intro="$trigger_note"
 
     # Check for handoff file. Look in any specs/handoffs/ under cwd.
     handoff_path=""
@@ -156,10 +151,10 @@ for target_id in $target_ids; do
 
     if [ -z "$handoff_path" ]; then
         if has_release_override "$target_id"; then
-            continue
+            return 0
         fi
         cat >&2 <<EOF
-BLOCKED: bd close ${target_id} (epic) requires a release-coordinator handoff at specs/handoffs/step-4.2-${target_id}-release-coordinator.html
+BLOCKED: ${intro} requires a release-coordinator handoff at specs/handoffs/step-4.2-${target_id}-release-coordinator.html
 
 Dispatch the release-coordinator role agent before closing the epic:
   Agent(subagent_type: release-coordinator, prompt: 'You are running Step 4.2 (final verification) for epic ${target_id}. Verify all spec @status(verified), all handoff chains, all CUJ tests, rollback plan. Produce handoff at specs/handoffs/step-4.2-${target_id}-release-coordinator.html with <meta data-verdict> READY-TO-CLOSE / READY-WITH-CAVEATS / BLOCKED.')
@@ -189,14 +184,14 @@ else:
 
     case "$verdict" in
         "READY-TO-CLOSE"|"READY-WITH-CAVEATS")
-            continue
+            return 0
             ;;
         "BLOCKED")
             if has_release_override "$target_id"; then
-                continue
+                return 0
             fi
             cat >&2 <<EOF
-BLOCKED: release-coordinator verdict for epic ${target_id} is BLOCKED.
+BLOCKED: ${intro} — release-coordinator verdict for epic ${target_id} is BLOCKED.
 
 Handoff: ${handoff_path}
 
@@ -216,6 +211,54 @@ EOF
             exit 2
             ;;
     esac
+}
+
+# Build the set of epics whose release gate this close must satisfy:
+#   - direct: `bd close <epic>`
+#   - indirect (workflow-fx8r): closing the LAST open child of an epic triggers
+#     beads' molecule auto-close, which promotes the epic to closed WITHOUT a
+#     `bd close <epic>` command — so the PreToolUse gate never sees the epic id.
+#     Detect it here and gate the parent before the child close is allowed.
+# gated_epics accumulates ids already handled so a multi-id command doesn't
+# gate the same epic twice.
+gated_epics=""
+already_gated() { case " $gated_epics " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+
+for target_id in $target_ids; do
+    show_out=$(bd show "$target_id" 2>/dev/null || echo "")
+    [ -z "$show_out" ] && continue
+
+    # Direct epic close. Match "[epic]" in the TITLE line only (the PARENT /
+    # CHILDREN sections list related epics that would false-positive a
+    # whole-output grep).
+    if echo "$show_out" | head -n 1 | grep -qiE '\[epic\]'; then
+        already_gated "$target_id" || { gate_epic "$target_id"; gated_epics="$gated_epics $target_id"; }
+        continue
+    fi
+
+    # Non-epic: find its parent epic (PARENT section) and decide whether
+    # closing this id (together with any sibling ids in the same command)
+    # completes the epic and triggers auto-promotion.
+    parent=$(echo "$show_out" | awk '/^PARENT/{p=1;next} p&&/↑/{print;exit}' \
+             | grep -oE '[a-z]+-[a-z0-9]{3,}' | head -1)
+    [ -z "$parent" ] && continue
+    already_gated "$parent" && continue
+
+    pshow=$(bd show "$parent" 2>/dev/null || echo "")
+    # Open (non-closed, glyph not ✓) child ids under the epic's CHILDREN block.
+    open_children=$(echo "$pshow" | awk '/CHILDREN/{c=1;next} c&&/↳/{if ($0 !~ /✓/) print}' \
+                    | grep -oE '[a-z]+-[a-z0-9]{3,}')
+    # Would any open child remain OPEN after this close command runs?
+    remaining=""
+    for oc in $open_children; do
+        case " $target_ids " in *" $oc "*) : ;; *) remaining="$remaining $oc" ;; esac
+    done
+    # No open child remains => this close completes the epic => it auto-promotes.
+    if [ -z "$(echo $remaining | tr -d '[:space:]')" ]; then
+        note="Closing ${target_id} completes epic ${parent}, which beads will auto-close (molecule promotion). That epic close"
+        gate_epic "$parent" "$note"
+        gated_epics="$gated_epics $parent"
+    fi
 done
 
 echo '{}'

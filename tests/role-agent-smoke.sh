@@ -349,7 +349,10 @@ if [ -z "$EPIC_ID" ] || [ -z "$NONEPIC_ID" ]; then
         "quality RELEASE-SKIP reason overrides BLOCKED verdict (H4)" \
         "quality RELEASE-SKIP also covers missing-handoff branch" \
         "garbage @release-skip in-spec reason blocks" \
-        "quality @release-skip in-spec reason allows"
+        "quality @release-skip in-spec reason allows" \
+        "non-last child close does not trigger epic gate (fx8r + st3)" \
+        "last-child close is gated by parent epic release gate (fx8r)" \
+        "last-child close allowed with parent RELEASE-SKIP override (fx8r)"
     do
         skip "$t" "bd init unavailable in sandbox — the real db is never touched"
     done
@@ -445,6 +448,36 @@ EOF
     else
         skip "garbage @release-skip in-spec reason blocks" "could not create second synthetic epic in sandbox db"
         skip "quality @release-skip in-spec reason allows" "could not create second synthetic epic in sandbox db"
+    fi
+
+    # workflow-fx8r: closing the LAST open child of an epic triggers beads'
+    # molecule auto-close (the epic is promoted to closed WITHOUT a
+    # `bd close <epic>` command), which must still satisfy the epic release
+    # gate. Also subsumes workflow-st3: FX_A carries the epic in its PARENT
+    # section, so a whole-output [epic] grep would wrongly gate it.
+    FX_EPIC=$(bd create --title="SMOKE TEST release hook (molecule)" --description="smoke test, ignore" --type=epic --priority=4 2>&1 | grep -oE "${BD_PREFIX}-[a-z0-9]+" | head -1)
+    FX_A=$(bd create --title="smoke child A" --description="smoke test, ignore" --type=task --priority=4 2>&1 | grep -oE "${BD_PREFIX}-[a-z0-9]+" | head -1)
+    FX_B=$(bd create --title="smoke child B" --description="smoke test, ignore" --type=task --priority=4 2>&1 | grep -oE "${BD_PREFIX}-[a-z0-9]+" | head -1)
+    if [ -n "$FX_EPIC" ] && [ -n "$FX_A" ] && [ -n "$FX_B" ]; then
+        bd dep add "$FX_A" "$FX_EPIC" --type parent-child >/dev/null 2>&1
+        bd dep add "$FX_B" "$FX_EPIC" --type parent-child >/dev/null 2>&1
+        # Both children open: closing A is not the last -> epic won't promote -> allow.
+        result=$(printf '%s\n' "$(mkpayload_bash "bd close $FX_A")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+        assert "non-last child close does not trigger epic gate (fx8r + st3)" allow "$result"
+        bd close "$FX_A" --reason="smoke test" >/dev/null 2>&1
+        # Only B remains open: closing it completes the epic -> auto-promotion ->
+        # gate fires (no handoff / no override) -> block.
+        result=$(printf '%s\n' "$(mkpayload_bash "bd close $FX_B")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+        assert "last-child close is gated by parent epic release gate (fx8r)" block "$result"
+        # Quality RELEASE-SKIP on the parent epic -> last-child close now allowed.
+        bd comments add "$FX_EPIC" "RELEASE-SKIP: smoke molecule-autoclose path; parent epic gate verified in tests/role-agent-smoke.sh, see hooks/require-release-handoff.sh gate_epic" >/dev/null 2>&1
+        result=$(printf '%s\n' "$(mkpayload_bash "bd close $FX_B")" | bash "$HOOK_DIR/require-release-handoff.sh" 2>&1)
+        assert "last-child close allowed with parent RELEASE-SKIP override (fx8r)" allow "$result"
+        bd close "$FX_B" --reason="smoke test" >/dev/null 2>&1
+    else
+        skip "non-last child close does not trigger epic gate (fx8r + st3)" "could not create molecule epic in sandbox db"
+        skip "last-child close is gated by parent epic release gate (fx8r)" "could not create molecule epic in sandbox db"
+        skip "last-child close allowed with parent RELEASE-SKIP override (fx8r)" "could not create molecule epic in sandbox db"
     fi
 
     # Cleanup (scratch db only — the whole thing is deleted on exit anyway)
@@ -889,10 +922,12 @@ else
     FAIL=$((FAIL+1))
 fi
 
-# workflow-st3: require-release-handoff.sh title-line-only check (non-epic with epic parent allows)
+# workflow-st3: require-release-handoff.sh restricts the [epic] detection to the
+# title line (head -n 1), so a non-epic whose PARENT section names an epic is not
+# mis-gated. Static backstop; the behavior is proven by the fx8r checks above
+# (FX_A has an epic parent and must be allowed).
 TOTAL=$((TOTAL+1))
-if grep -q 'title_line=' "$HOOK_DIR/require-release-handoff.sh" && \
-   grep -q 'head -n 1' "$HOOK_DIR/require-release-handoff.sh"; then
+if grep -q 'head -n 1 | grep -qiE' "$HOOK_DIR/require-release-handoff.sh"; then
     echo "  PASS  require-release-handoff.sh restricts [epic] check to title line (workflow-st3 fix)"
     PASS=$((PASS+1))
 else

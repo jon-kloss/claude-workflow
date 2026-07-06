@@ -198,7 +198,7 @@ For `@layer(ui|full-stack)` specs in an epic with ≥2 user-facing specs, `@stat
 **Dispatch codebase-investigator:**
 
 ```
-Agent tool (subagent_type: hyperpowers:codebase-investigator):
+Agent tool (subagent_type: hyperpowers:codebase-investigator, model: <one tier below session — mechanical>):
 "Find existing patterns for specs/<slug>.md. Report file paths, line numbers, conventions. Read the
 PO handoff (step-2-<slug>-product-owner.html) and application-architect handoff (step-2.5-...) for
 context. If the spec has a ## UI Design section, also read PRODUCT.md, DESIGN.md, and the mockup."
@@ -335,18 +335,24 @@ Log a `DEAD UI SCAN: ... Verdict: PASS|FAIL` entry via `bd comments add` with el
 
 The verify pass runs Steps 3.3a–3.3i (registry §2): 3.3a test-suite, 3.3b test-effectiveness, 3.3c code-review, 3.3d security-review, 3.3e devops-review, 3.3f data-review (when `@touches-data`), 3.3g qa-verification, 3.3h sre-intent-audit, 3.3i fix-cycle. Handoff FILES for all of 3.3d–3.3h use the flat id `3.3` (`step-3.3-<slug>-<role>.html`) — the role disambiguates; the letters are prose section numbers only.
 
+**Cost discipline for the verify pass.** This pass is the workflow's largest token sink — up to nine reviewers, each reading the spec, the diff, and prior handoffs. Three levers, none of which weakens a gate:
+
+1. **Read upstream handoffs summary-first** (`agent-protocol.md` §5) — the spec and the diff are the primary inputs; prior handoffs are context, read at their `summary`/`acceptance-criteria` sections unless a specific finding is being re-verified. Say so in every reviewer dispatch.
+2. **Dispatch every independent reviewer for a spec in ONE message** so they fan out in parallel — 3.3a–3.3c together, then 3.3d–3.3h together (each is independent; only 3.3i fix-cycle depends on their output). Serial dispatch multiplies wall-clock for no benefit.
+3. **Tier the model to the work.** Pass `model:` on the `Agent` dispatch. The **mechanical** stages — 3.3a test-runner (runs tests, reports failures), 3.3b test-effectiveness (pattern-matches weak assertions), Step 3.1 codebase-investigator (locates files/patterns), Step 3.2.6 dead-UI scan — do not need frontier reasoning; run them **one tier below the session model** (e.g. `model: haiku`, or `sonnet` if the session is already cheap). Reserve the session model for the **judgment** stages: 3.3c code-review, 3.3d security, 3.3e devops, 3.3f data, 3.3g qa, 3.3h sre-audit, and all of /design's decomposition/questioning. This is deliberate per-dispatch tiering, not the stale frontmatter pins decision D4 removed — the orchestrator chooses the tier from context, and any reviewer that surfaces something ambiguous can be re-dispatched at a higher tier. Mechanical stages are ~4 of ~13 dispatches per spec, so tiering them down is the largest single token saving available without touching a gate.
+
 Dispatch 3.3a–3.3c in parallel:
 
 **Step 3.3a: Test Suite**
 ```
-Agent tool (subagent_type: hyperpowers:test-runner):
+Agent tool (subagent_type: hyperpowers:test-runner, model: <one tier below session — mechanical>):
 "Run the full test suite. Report only failures and summary."
 ```
 If tests fail: log as bd comments add (category: `test-failure`), fix before proceeding.
 
 **Step 3.3b: Test Effectiveness**
 ```
-Agent tool (subagent_type: hyperpowers:test-effectiveness-analyst):
+Agent tool (subagent_type: hyperpowers:test-effectiveness-analyst, model: <one tier below session — mechanical>):
 "Analyze test files changed or created for this spec.
 Check for: tautological tests, coverage gaming, weak assertions,
 missing corner cases. Report CRITICAL / IMPORTANT / MINOR."
