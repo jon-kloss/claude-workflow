@@ -7,13 +7,13 @@ set -euo pipefail
 # require-release-handoff.sh (a PreToolUse Bash matcher) and silently skips
 # the release-coordinator gate.
 #
-# This hook can't PREVENT the auto-close (it fires after), but it can SURFACE
-# what happened so the user/orchestrator notices the bypass and produces
-# a release-coordinator handoff retroactively if needed.
-#
-# To fully prevent the bypass, beads' molecule auto-close behavior would need
-# to be disabled at the beads config level — beyond what a Claude Code hook
-# can enforce.
+# PRIMARY prevention lives in require-release-handoff.sh (PreToolUse): it detects
+# when a `bd close <child>` would close the LAST open child of an epic and applies
+# the epic's release gate before allowing the child close (workflow-fx8r). This
+# PostToolUse hook is the BACKSTOP for cases the pre-check can't see — e.g. bd
+# unavailable to the pre-check, an auto-close triggered by a status change rather
+# than a `bd close`, or a beads-version wording change — surfacing the bypass so a
+# release-coordinator handoff can be produced retroactively if needed.
 
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$HOOK_DIR/_common.sh"
